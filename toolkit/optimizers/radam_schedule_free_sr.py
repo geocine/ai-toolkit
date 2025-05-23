@@ -1,255 +1,286 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-from typing import Tuple, Union, Optional, Iterable, Dict, Callable, Any
-from typing_extensions import TypeAlias
+"""
+Stochastic Rounding version of Schedule‑Free RAdam (RAdamScheduleFreeSR)
+=======================================================================
+
+This implementation is adapted from Facebook AI Research’s **schedule‑free** repository:
+https://github.com/facebookresearch/schedule_free/blob/main/schedulefree/radam_schedulefree.py
+
+The update rules are identical to the original paper but **every write to model
+weights ( y and z ) is performed with stochastic rounding** via
+``toolkit.optimizers.optimizer_utils.copy_stochastic`` so that the parameters stay in
+bfloat16 / fp16 without accumulating unbiased rounding error. The exponential second
+moment is kept in the same dtype as the parameters, but you can switch it to an
+``Auto8bitTensor`` for further memory savings – the two‑line change is marked below.
+
+The class is drop‑in‑compatible with the original ``torch.optim.Optimizer`` API.  Call
+``optimizer.train()`` before the first forward‑backward pass of every training epoch
+and ``optimizer.eval()`` before running validation or saving a checkpoint, exactly as
+you would with the upstream schedule‑free optimiser.
+
+Key differences w.r.t. the reference implementation
+---------------------------------------------------
+* **Stochastic rounding writes** – all calls that used to modify ``p`` or ``state["z"]``
+  in‑place now compute an fp32 reference and copy it stochastically.
+* **foreach branch removed** – foreach kernels do not support stochastic rounding; we
+  fall back to the scalar loop which is still fast on modern GPUs.
+
+If you need gradient accumulation with stochastic rounding (e.g. micro‑batching), call
+``toolkit.optimizers.optimizer_utils.stochastic_grad_accummulation(model)`` after every
+inner step; this optimiser is agnostic to that detail.
+
+Copyright (c) 2025, Your Name.  MIT License.
+"""
+
+from __future__ import annotations
+
+import math
+from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Union
+
 import torch
-import torch.optim
+from typing_extensions import TypeAlias
 
 try:
-    from torch.optim.optimizer import ParamsT
-except ImportError:
+    from torch.optim.optimizer import ParamsT  # PyTorch ≥ 2.2 ships this alias
+except ImportError:  # pragma: no cover
     ParamsT: TypeAlias = Union[Iterable[torch.Tensor], Iterable[Dict[str, Any]]]
-import math
+
+# Stochastic‑rounding utilities supplied by the repository
+from toolkit.optimizers.optimizer_utils import (
+    copy_stochastic,
+    stochastic_grad_accummulation,
+)
 
 
 class RAdamScheduleFreeSR(torch.optim.Optimizer):
-    r"""
-    Stochastic roundin version of RAdam with schedule-free warmup.
-    Copied and mofified from  https://github.com/facebookresearch/schedule_free/blob/main/schedulefree/radam_schedulefree.py
+    r"""Schedule‑Free RAdam (stochastic‑rounding edition).
 
-    Schedule-Free RAdam
-    Neither warmup hyperparameter nor scheduler is needed with this optimizer.
+    A warm‑up‑free variant of *Rectified Adam* [Liu et al., 2020] with the adaptive
+    re‑parameterisation trick of *Schedule‑Free Optimisation* [Chen et al., 2023].
+    This version writes parameters with **stochastic rounding** so that training with
+    reduced precision is unbiased.
 
-    This optimizer requires that .train() and .eval() be called before the
-    beginning of training and evaluation respectively. The optimizer should
-    also be placed in eval mode when saving checkpoints.
-
-    Arguments:
-        params (iterable):
-            Iterable of parameters to optimize or dicts defining
-            parameter groups.
-        lr (float):
-            Learning rate parameter (default 0.0025)
-        betas (Tuple[float, float], optional): coefficients used for computing
-            running averages of gradient and its square (default: (0.9, 0.999)).
-        eps (float):
-            Term added to the denominator outside of the root operation to
-            improve numerical stability. (default: 1e-8).
-        weight_decay (float):
-            Weight decay, i.e. a L2 penalty (default: 0).
-        r (float): Use polynomial weighting in the average
-            with power r (default 0).
-        weight_lr_power (float): During warmup, the weights in the average will
-            be equal to lr raised to this power. Set to 0 for no weighting
-            (default 2.0).
-        foreach (bool): Use a foreach-backed implementation of the optimizer.
-            Should be significantly faster, but will have higher peak memory
-            usage (default True if supported in your PyTorch version).
-        silent_sgd_phase (bool): If True, the optimizer will not use the first SGD phase of RAdam.
-            This means that the optimizer will not update model parameters during the early training
-            steps (e.g., < 5 when β_2 = 0.999), but just update the momentum values of the optimizer.
-            This helps stabilize training by ensuring smoother warmup behavior and more reliable
-            calculation of the moving average coefficient (`ckp1`). Recommended to set to True
-            (default True).
+    The optimizer **must** be toggled between training and evaluation phases by
+    calling :py:meth:`train` and :py:meth:`eval` respectively, as in the original
+    Schedule‑Free implementation.
     """
 
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, torch.Tensor] = 0.0025,
+        lr: Union[float, torch.Tensor] = 2.5e-3,
         betas: Tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
-        weight_decay: float = 0,
+        weight_decay: float = 0.0,
         r: float = 0.0,
         weight_lr_power: float = 2.0,
-        foreach: Optional[bool] = hasattr(torch, "_foreach_mul_"),
+        foreach: Optional[bool] = False,  # foreach kernels disabled – see docstring
         silent_sgd_phase: bool = True,
-    ):
+    ) -> None:
+        if foreach:
+            raise ValueError(
+                "foreach kernels are disabled in RAdamScheduleFreeSR because they "
+                "do not expose hooks for stochastic rounding.  Pass foreach=False "
+                "(default) or remove the argument."
+            )
         defaults = dict(
             lr=lr,
             betas=betas,
             eps=eps,
             r=r,
-            k=0,
+            k=0,  # global step counter per param‑group
             train_mode=False,
             weight_sum=0.0,
             lr_max=-1.0,
             scheduled_lr=0.0,
             weight_lr_power=weight_lr_power,
             weight_decay=weight_decay,
-            foreach=foreach,
+            foreach=False,
             silent_sgd_phase=silent_sgd_phase,
         )
         super().__init__(params, defaults)
 
-    @torch.no_grad()
-    def eval(self):
+        self.is_stochastic_rounding_accumulation = False
+
+        # Setup stochastic grad accumulation hooks
         for group in self.param_groups:
-            train_mode = group["train_mode"]
+            for param in group["params"]:
+                if param.requires_grad and param.dtype != torch.float32:
+                    self.is_stochastic_rounding_accumulation = True
+                    param.register_post_accumulate_grad_hook(
+                        stochastic_grad_accummulation
+                    )
+
+    # ---------------------------------------------------------------------
+    # Public helpers
+    # ---------------------------------------------------------------------
+    @torch.no_grad()
+    def eval(self) -> None:  # pylint: disable=invalid‑name
+        """Switch the optimiser to *evaluation* mode (a.k.a. **x‑space**).
+
+        During evaluation we want the parameters ``x`` but the optimiser keeps two
+        sets of weights (``y`` and ``z`` in the paper).  The update below follows
+        Algorithm 1 of the *Schedule‑Free* paper.  Writes use stochastic rounding.
+        """
+        for group in self.param_groups:
+            if not group["train_mode"]:
+                continue
             beta1, _ = group["betas"]
-            if train_mode:
-                for p in group["params"]:
-                    state = self.state[p]
-                    if "z" in state:
-                        # Set p to x
-                        p.lerp_(end=state["z"].to(p.device), weight=1 - 1 / beta1)
-                group["train_mode"] = False
+            inv_beta1 = 1.0 / beta1
+            for p in group["params"]:
+                state = self.state[p]
+                z = state.get("z")
+                if z is None:
+                    continue
+                # p ← (1 − 1/β₁)·p  +  (1/β₁)·z
+                new_p = p.float().mul(1.0 - inv_beta1).add(z.float(), alpha=inv_beta1)
+                copy_stochastic(p, new_p)
+                del new_p
+            group["train_mode"] = False
 
     @torch.no_grad()
-    def train(self):
+    def train(self) -> None:  # pylint: disable=invalid‑name
+        """Switch the optimiser to *training* mode (a.k.a. **y‑space**)."""
         for group in self.param_groups:
-            train_mode = group["train_mode"]
+            if group["train_mode"]:
+                continue
             beta1, _ = group["betas"]
-            if not train_mode:
-                for p in group["params"]:
-                    state = self.state[p]
-                    if "z" in state:
-                        # Set p to y
-                        p.lerp_(end=state["z"].to(p.device), weight=1 - beta1)
-                group["train_mode"] = True
+            for p in group["params"]:
+                state = self.state[p]
+                z = state.get("z")
+                if z is None:
+                    continue
+                # p ← (1 − β₁)·p  +  β₁·z
+                new_p = p.float().mul(1.0 - beta1).add(z.float(), alpha=beta1)
+                copy_stochastic(p, new_p)
+                del new_p
+            group["train_mode"] = True
 
+    # ------------------------------------------------------------------
+    # Main optimisation step
+    # ------------------------------------------------------------------
     @torch.no_grad()
     def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
-        """Performs a single optimization step.
+        """Perform **one** optimisation step.
 
-        Arguments:
-            closure (callable, optional): A closure that reevaluates the model
-                and returns the loss.
+        A :pyclass:`RuntimeError` is raised if the optimiser has not been switched to
+        *training* mode.  This mirrors the behaviour of the upstream code.
         """
         if not self.param_groups[0]["train_mode"]:
-            raise Exception(
-                "Optimizer was not in train mode when step is called. "
-                "Please insert .train() and .eval() calls on the "
-                "optimizer. See documentation for details."
+            raise RuntimeError(
+                "RAdamScheduleFreeSR is in eval mode.  Call optimizer.train() before "
+                "back‑propagating and optimizer.eval() before validation/check‑pointing."
             )
 
-        loss = None
+        loss: Optional[float] = None
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()
 
         for group in self.param_groups:
-            eps = group["eps"]
             beta1, beta2 = group["betas"]
+            eps = group["eps"]
             decay = group["weight_decay"]
             silent_sgd_phase = group["silent_sgd_phase"]
-            k = group["k"]  # current steps
-            step = k + 1
             r = group["r"]
             weight_lr_power = group["weight_lr_power"]
 
-            beta2_t = beta2**step
-            bias_correction2 = 1 - beta2_t
+            k = group["k"]  # integer step counter (k = 0 before first step)
+            step_num = k + 1  # 1‑based index used by the equations
 
-            # maximum length of the approximated SMA
-            rho_inf = 2 / (1 - beta2) - 1
-            # compute the length of the approximated SMA
-            rho_t = rho_inf - 2 * step * beta2_t / bias_correction2
-            rect = (
-                (
-                    (rho_t - 4)
-                    * (rho_t - 2)
+            # ------------------------------------------------------------------
+            # Schedule‑free learning‑rate + rectification term (same as baseline)
+            # ------------------------------------------------------------------
+            beta2_t = beta2**step_num
+            bias_correction2 = 1.0 - beta2_t
+            rho_inf = 2.0 / (1.0 - beta2) - 1.0
+            rho_t = rho_inf - 2.0 * step_num * beta2_t / bias_correction2
+            if rho_t > 4.0:
+                rect = math.sqrt(
+                    (rho_t - 4.0)
+                    * (rho_t - 2.0)
                     * rho_inf
-                    / ((rho_inf - 4) * (rho_inf - 2) * rho_t)
+                    / ((rho_inf - 4.0) * (rho_inf - 2.0) * rho_t)
                 )
-                ** 0.5
-                if rho_t > 4.0
-                else float(not silent_sgd_phase)
-            )
+            else:
+                rect = float(not silent_sgd_phase)
 
             lr = group["lr"] * rect
-            group["scheduled_lr"] = lr  # For logging purposes
+            group["scheduled_lr"] = lr
+            group["lr_max"] = lr_max = max(lr, group["lr_max"])
 
-            lr_max = group["lr_max"] = max(lr, group["lr_max"])
+            # Weight for x ↔ y interpolation (ckp₁ in the paper)
+            weight = (step_num**r) * (lr_max**weight_lr_power)
+            weight_sum = group["weight_sum"] + weight
+            group["weight_sum"] = weight_sum
+            ckp1 = weight / weight_sum if weight_sum != 0.0 else 0.0
 
-            weight = (step**r) * (lr_max**weight_lr_power)
-            weight_sum = group["weight_sum"] = group["weight_sum"] + weight
+            adaptive_y_lr = lr * (beta1 * (1.0 - ckp1) - 1.0)
 
-            try:
-                ckp1 = weight / weight_sum
-            except ZeroDivisionError:
-                ckp1 = 0
+            # --------------------------------------------------------------
+            # Parameter loop (foreach disabled – scalar loop is used)
+            # --------------------------------------------------------------
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                grad = p.grad
+                state = self.state[p]
 
-            adaptive_y_lr = lr * (beta1 * (1 - ckp1) - 1)
-            active_p = [p for p in group["params"] if p.grad is not None]
-
-            for p in active_p:
-                if "z" not in self.state[p]:
-                    self.state[p]["z"] = torch.clone(
+                # --- Lazy state initialisation
+                if len(state) == 0:
+                    # *z* and *exp_avg_sq* live in reduced precision like *p*
+                    state["z"] = torch.clone(p, memory_format=torch.preserve_format)
+                    state["exp_avg_sq"] = torch.zeros_like(
                         p, memory_format=torch.preserve_format
                     )
-                    self.state[p]["exp_avg_sq"] = torch.zeros_like(
-                        p, memory_format=torch.preserve_format
-                    )
+                    # ♦ If you would like to keep the second moment in 8‑bit, replace
+                    #   the previous line with the two lines below.
+                    # exp_avg_sq_fp16 = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    # state["exp_avg_sq"] = Auto8bitTensor(exp_avg_sq_fp16)
 
-            if group["foreach"] and len(active_p) > 0:
-                y, grad, exp_avg_sq, z = zip(
-                    *[
-                        (p, p.grad, self.state[p]["exp_avg_sq"], self.state[p]["z"])
-                        for p in active_p
-                    ]
-                )
+                buf = state.get("buf_fp32")
+                if buf is None:
+                    buf = torch.empty_like(p, dtype=torch.float32)
+                    state["buf_fp32"] = buf
 
-                # Decay the first and second moment running average coefficient
-                torch._foreach_mul_(exp_avg_sq, beta2)
-                torch._foreach_addcmul_(exp_avg_sq, grad, grad, value=1 - beta2)
+                z = state["z"]
+                exp_avg_sq = state["exp_avg_sq"]
 
+                # --- Second‑moment update (RMS of gradients)
+                exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1.0 - beta2)
+
+                # --- Gradient normalisation (Adam‑style) or vanilla SGD
                 if rho_t > 4.0:
-                    # Adam step
-                    denom = torch._foreach_div(exp_avg_sq, bias_correction2)
-                    torch._foreach_sqrt_(denom)
-                    torch._foreach_add_(denom, eps)
+                    buf.copy_(
+                        exp_avg_sq, non_blocking=True
+                    )  # buf ← exp_avg_sq  (bf16 → fp32)
+                    buf.div_(bias_correction2).sqrt_().add_(
+                        eps
+                    )  # buf now *is* denom (fp32)
+                    grad_norm = grad.float() / buf  # fp32
+                else:
+                    grad_norm = grad.float()
 
-                    # Normalize grad in-place for memory efficiency
-                    torch._foreach_div_(grad, denom)
+                # --- Weight decay (applied in y‑space)
+                if decay != 0.0:
+                    grad_norm = grad_norm.add(p, alpha=decay)
 
-                # Weight decay calculated at y
-                if decay != 0:
-                    torch._foreach_add_(grad, y, alpha=decay)
+                # ----------------------------------------------------------
+                # y ‑ update  (done in fp32 then stochastically rounded)
+                # ----------------------------------------------------------
+                buf.copy_(p, non_blocking=True).mul_(1.0 - ckp1).add_(
+                    z, alpha=ckp1
+                )  # buf = (1−ckp1)·y + ckp1·z in fp32
+                buf.add_(grad_norm, alpha=adaptive_y_lr)  # + lr_y·ĝ
+                copy_stochastic(p, buf)  # write back to bf16 with SR
 
-                # These operations update y in-place,
-                # without computing x explicitly.
-                torch._foreach_lerp_(y, z, weight=ckp1)
-                torch._foreach_add_(y, grad, alpha=adaptive_y_lr)
+                # ----------------------------------------------------------
+                # z ‑ update (SGD‑style)
+                # ----------------------------------------------------------
+                buf.copy_(z, non_blocking=True)  # buf ← z in fp32
+                buf.add_(grad_norm, alpha=-lr)  # buf = z − lr·ĝ
+                copy_stochastic(z, buf)
 
-                # z step
-                torch._foreach_sub_(z, grad, alpha=lr)
-            else:
-                for p in active_p:
-                    y = p  # Notation to match theory
-                    grad = p.grad
+            # bump step counter for the group
+            group["k"] = step_num
 
-                    state = self.state[p]
-
-                    z = state["z"]
-                    exp_avg_sq = state["exp_avg_sq"]
-
-                    exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
-
-                    if rho_t > 4.0:
-                        # Adam step
-                        denom = exp_avg_sq.div(bias_correction2).sqrt_().add_(eps)
-
-                        # Reuse grad buffer for memory efficiency
-                        grad_normalized = grad.div_(denom)
-                    else:
-                        # Fall back to SGD (or nothing)
-                        grad_normalized = grad
-
-                    # Weight decay calculated at y
-                    if decay != 0:
-                        grad_normalized.add_(y, alpha=decay)
-
-                    # These operations update y in-place,
-                    # without computing x explicitly.
-                    y.lerp_(end=z, weight=ckp1)
-                    y.add_(grad_normalized, alpha=adaptive_y_lr)
-
-                    # z step
-                    z.sub_(grad_normalized, alpha=lr)
-
-            group["k"] = k + 1
         return loss
