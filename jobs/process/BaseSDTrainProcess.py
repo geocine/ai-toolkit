@@ -820,6 +820,11 @@ class BaseSDTrainProcess(BaseTrainProcess):
         self.optimizer = self.accelerator.prepare(self.optimizer)
         if self.lr_scheduler is not None:
             self.lr_scheduler = self.accelerator.prepare(self.lr_scheduler)
+
+        # Optimizer needs to be put in the right state
+        # for training
+        if hasattr(self.optimizer, "train"):
+            self.optimizer.train()
         # self.data_loader = self.accelerator.prepare(self.data_loader)
         # if self.data_loader_reg is not None:
         #     self.data_loader_reg = self.accelerator.prepare(self.data_loader_reg)
@@ -2145,7 +2150,14 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 )
                 optimizer.load_state_dict(optimizer_state_dict)
                 del optimizer_state_dict
+
+                # When saving the optimzer is put into eval mode
+                # so we need to set it back to train mode
+                if hasattr(optimizer, "train"):
+                    optimizer.train()
+
                 flush()
+
             except Exception as e:
                 print_acc(
                     f"Failed to load optimizer state from {optimizer_state_file_path}"
