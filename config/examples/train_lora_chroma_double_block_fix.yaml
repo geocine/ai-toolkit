@@ -52,75 +52,11 @@ config:
         # images will automatically be resized and bucketed into the resolution specified
         # on windows, escape back slashes with another backslash so
         # "C:\\path\\to\\images\\folder"
-        - folder_path: "/home/jt/datasets/data_v1/images/am"
+        - folder_path: "/home/someone/A"
           caption_ext: "txt"
           cache_latents_to_disk: true  # leave this true unless you know what you're doing
           resolution: 512
-        - folder_path: "/home/jt/datasets/data_v1/images/dance"
-          caption_ext: "txt"
-          cache_latents_to_disk: true  # leave this true unless you know what you're doing
-          resolution: 512
-        - folder_path: "/home/jt/datasets/data_v1/images/ds"
-          caption_ext: "txt"
-          cache_latents_to_disk: true  # leave this true unless you know what you're doing
-          resolution: 512
-        - folder_path: "/home/jt/datasets/data_v1/images/ero"
-          caption_ext: "txt"
-          cache_latents_to_disk: true  # leave this true unless you know what you're doing
-          resolution: 512
-        - folder_path: "/home/jt/datasets/data_v1/images/facial_expr"
-          caption_ext: "txt"
-          cache_latents_to_disk: true  # leave this true unless you know what you're doing
-          resolution: 512
-        - folder_path: "/home/jt/datasets/data_v1/images/hair"
-          caption_ext: "txt"
-          cache_latents_to_disk: true  # leave this true unless you know what you're doing
-          resolution: 512
-        - folder_path: "/home/jt/datasets/data_v1/images/highq_2"
-          caption_ext: "txt"
-          cache_latents_to_disk: true  # leave this true unless you know what you're doing
-          resolution: 512
-        - folder_path: "/home/jt/datasets/data_v1/images/large_2"
-          caption_ext: "txt"
-          cache_latents_to_disk: true  # leave this true unless you know what you're doing
-          resolution: 512
-        - folder_path: "/home/jt/datasets/data_v1/images/large_p"
-          caption_ext: "txt"
-          cache_latents_to_disk: true  # leave this true unless you know what you're doing
-          resolution: 512
-        - folder_path: "/home/jt/datasets/data_v1/images/own"
-          caption_ext: "txt"
-          cache_latents_to_disk: true  # leave this true unless you know what you're doing
-          resolution: 512
-        - folder_path: "/home/jt/datasets/data_v1/images/small_highq_p"
-          caption_ext: "txt"
-          cache_latents_to_disk: true  # leave this true unless you know what you're doing
-          resolution: 512
-        - folder_path: "/home/jt/datasets/data_v1/images/unsplash_aesth_tiny"
-          caption_ext: "txt"
-          cache_latents_to_disk: true  # leave this true unless you know what you're doing
-          resolution: 512
-        - folder_path: "/home/jt/datasets/data_v1/images/various_concepts"
-          caption_ext: "txt"
-          cache_latents_to_disk: true  # leave this true unless you know what you're doing
-          resolution: 512
-        - folder_path: "/home/jt/datasets/data_v1/images/vix"
-          caption_ext: "txt"
-          cache_latents_to_disk: true  # leave this true unless you know what you're doing
-          resolution: 512
-        - folder_path: "/home/jt/datasets/data_v1/images/vix_an"
-          caption_ext: "txt"
-          cache_latents_to_disk: true  # leave this true unless you know what you're doing
-          resolution: 512
-        - folder_path: "/home/jt/datasets/data_v1/images/vs"
-          caption_ext: "txt"
-          cache_latents_to_disk: true  # leave this true unless you know what you're doing
-          resolution: 512
-        - folder_path: "/home/jt/datasets/data_v1/images/wspot"
-          cache_latents_to_disk: true  # leave this true unless you know what you're doing
-          caption_ext: "txt"
-          resolution: 512
-        - folder_path: "/home/jt/datasets/data_v1/images/yandex_p"
+        - folder_path: "/home/someone/B"
           caption_ext: "txt"
           cache_latents_to_disk: true  # leave this true unless you know what you're doing
           resolution: 512
