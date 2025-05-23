@@ -17,29 +17,29 @@ config:
         linear: 256
         linear_alpha: 256
         network_kwargs:
-                custom_blocks_scaler: 1.0 # Adjust this inversely with the base learning rate
-                lr_if_contains:
-                  # don't touch these unless you know what you're doing
-                  # Removing them will make the model produce lines
-                  double_blocks$$0$$: 0.003
-                  double_blocks$$1$$: 0.006
-                  double_blocks$$2$$: 0.009
-                  double_blocks$$3$$: 0.012
-                  double_blocks$$4$$: 0.015
-                  double_blocks$$5$$: 0.018
-                  double_blocks$$6$$: 0.021
-                  double_blocks$$7$$: 0.024
-                  double_blocks$$8$$: 0.027
-                  double_blocks$$9$$: 0.03
-                  double_blocks$$10$$: 0.027
-                  double_blocks$$11$$: 0.024
-                  double_blocks$$12$$: 0.021
-                  double_blocks$$13$$: 0.018
-                  double_blocks$$14$$: 0.015
-                  double_blocks$$15$$: 0.012
-                  double_blocks$$16$$: 0.009
-                  double_blocks$$17$$: 0.006
-                  double_blocks$$18$$: 0.003
+          custom_blocks_scaler: 10.0 # Adjust this inversely with the base learning rate
+          lr_if_contains:
+            # don't touch these unless you know what you're doing
+            # Removing them will make the model produce lines
+            double_blocks$$0$$: 0.003
+            double_blocks$$1$$: 0.006
+            double_blocks$$2$$: 0.009
+            double_blocks$$3$$: 0.012
+            double_blocks$$4$$: 0.015
+            double_blocks$$5$$: 0.018
+            double_blocks$$6$$: 0.021
+            double_blocks$$7$$: 0.024
+            double_blocks$$8$$: 0.027
+            double_blocks$$9$$: 0.03
+            double_blocks$$10$$: 0.027
+            double_blocks$$11$$: 0.024
+            double_blocks$$12$$: 0.021
+            double_blocks$$13$$: 0.018
+            double_blocks$$14$$: 0.015
+            double_blocks$$15$$: 0.012
+            double_blocks$$16$$: 0.009
+            double_blocks$$17$$: 0.006
+            double_blocks$$18$$: 0.003
       save:
         dtype: float16 # precision to save
         save_every: 100 # save every this many steps
@@ -73,7 +73,7 @@ config:
         noise_scheduler: "flowmatch" # for training only
         # timestep_type: 'sigmoid'  # 'linear', 'sigmoid', 'shift'
         optimizer: "radam_schedulefree_sr"
-        lr: 3e-4
+        lr: 3e-5
         # uncomment this to skip the pre training sample
         skip_first_sample: false
         # uncomment to completely disable sampling
