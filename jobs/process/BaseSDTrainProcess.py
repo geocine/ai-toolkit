@@ -116,7 +116,6 @@ def flush():
 
 
 class BaseSDTrainProcess(BaseTrainProcess):
-
     def __init__(self, process_id: int, job, config: OrderedDict, custom_pipeline=None):
         super().__init__(process_id, job, config)
         self.accelerator: Accelerator = get_accelerator()
@@ -1114,7 +1113,6 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 conditioned_prompts = []
 
                 for prompt, is_reg in zip(prompts, is_reg_list):
-
                     # make sure the embedding is in the prompts
                     if self.embedding is not None:
                         prompt = self.embedding.inject_embedding_to_prompt(
@@ -1918,9 +1916,52 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     config["default_lr"] = self.train_config.lr
                 if "learning_rate" in sig.parameters:
                     config["learning_rate"] = self.train_config.lr
-                params_net = self.network.prepare_optimizer_params(**config)
 
-                params += params_net
+                # Get the default parameter groups produced by LyCORIS / LoRA
+                params_net = self.network.prepare_optimizer_params(**config)
+                params.extend(params_net)  # <-- same as original behaviour
+
+                # -----------  PER-BLOCK LEARNING-RATE MAPPING  ------------
+                if self.network_config and self.network_config.lr_if_contains:
+                    lr_map = self.network_config.lr_if_contains  # dict from YAML
+                    base_lr = self.train_config.lr
+                    base_lr *= self.network_config.custom_block_scaler
+
+                    named = list(self.network.named_parameters())
+
+                    new_groups = []
+                    handled_set = set()
+
+                    for pattern, scale in lr_map.items():
+                        matched = [p for n, p in named if pattern in n]
+                        if matched:
+                            new_groups.append(
+                                {"params": matched, "lr": base_lr * scale}
+                            )
+                            handled_set.update(matched)
+                            # Debug print
+                            print_acc(
+                                f"[LR-MAP] {pattern:<40} → lr = {base_lr * scale:.3e}  "
+                                f"({len(matched)} params)"
+                            )
+
+                    remaining = [p for _, p in named if p not in handled_set]
+                    if remaining:
+                        new_groups.append({"params": remaining, "lr": base_lr})
+                        print_acc(
+                            f"[LR-MAP] <default other-LoRA-params>           → lr = {base_lr:.3e}  "
+                            f"({len(remaining)} params)"
+                        )
+
+                    def _is_lora_param_group(g):
+                        return any(
+                            p in handled_set or p in remaining for p in g["params"]
+                        )
+
+                    params[:] = [
+                        g for g in params if not _is_lora_param_group(g)
+                    ] + new_groups
+                # ----------------------------------------------------------
 
                 if self.train_config.gradient_checkpointing:
                     self.network.enable_gradient_checkpointing()
@@ -1991,7 +2032,6 @@ class BaseSDTrainProcess(BaseTrainProcess):
             if self.adapter_config is not None:
                 self.setup_adapter()
                 if self.adapter_config.train:
-
                     if isinstance(self.adapter, IPAdapter):
                         # we have custom LR groups for IPAdapter
                         adapter_param_groups = self.adapter.get_parameter_groups(
@@ -2598,8 +2638,8 @@ tags:
 base_model: {base_model}
 {"instance_prompt: " + instance_prompt if instance_prompt else ""}
 license: {license}
-{'license_name: ' + license_name if license == "other" else ""}
-{'license_link: ' + license_link if license == "other" else ""}
+{"license_name: " + license_name if license == "other" else ""}
+{"license_link: " + license_link if license == "other" else ""}
 ---
 
 # {self.job.name}

@@ -59,7 +59,6 @@ adapter_transforms = transforms.Compose(
 
 
 class SDTrainer(BaseSDTrainProcess):
-
     def __init__(self, process_id: int, job, config: OrderedDict, **kwargs):
         super().__init__(process_id, job, config, **kwargs)
         self.assistant_adapter: Union["T2IAdapter", "ControlNetModel", None]
@@ -159,6 +158,12 @@ class SDTrainer(BaseSDTrainProcess):
 
     def hook_before_train_loop(self):
         super().hook_before_train_loop()
+
+        if self.train_config.optimizer == "schedulefree":
+            self.optimizer.train()
+
+        if self.train_config.optimizer == "radamschedulefree":
+            self.optimizer.train()
 
         if self.train_config.do_prior_divergence:
             self.do_prior_prediction = True
@@ -615,7 +620,6 @@ class SDTrainer(BaseSDTrainProcess):
             )
             loss = loss_per_element
         else:
-
             if self.train_config.loss_type == "mae":
                 loss = torch.nn.functional.l1_loss(
                     pred.float(), target.float(), reduction="none"
@@ -739,7 +743,6 @@ class SDTrainer(BaseSDTrainProcess):
             and hasattr(self.adapter, "additional_loss")
             and self.adapter.additional_loss is not None
         ):
-
             loss = loss + self.adapter.additional_loss.mean()
             self.adapter.additional_loss = None
 
@@ -1233,7 +1236,6 @@ class SDTrainer(BaseSDTrainProcess):
 
         # flush()
         with self.timer("grad_setup"):
-
             # text encoding
             grad_on_text_encoder = False
             if self.train_config.train_text_encoder:
@@ -1330,7 +1332,6 @@ class SDTrainer(BaseSDTrainProcess):
             mask_multiplier_list,
             prompt_2_list,
         ):
-
             # if self.train_config.negative_prompt is not None:
             #     # add negative prompt
             #     conditioned_prompts = conditioned_prompts + [self.train_config.negative_prompt for x in
@@ -1491,9 +1492,7 @@ class SDTrainer(BaseSDTrainProcess):
                                     dop_prompts_2,
                                     dropout_prob=self.train_config.prompt_dropout_prob,
                                     long_prompts=self.do_long_prompts,
-                                ).to(
-                                    self.device_torch, dtype=dtype
-                                )
+                                ).to(self.device_torch, dtype=dtype)
                         # detach the embeddings
                         conditional_embeds = conditional_embeds.detach()
                         if self.train_config.do_cfg:
@@ -1632,14 +1631,18 @@ class SDTrainer(BaseSDTrainProcess):
                                     )
                                 )
                         elif has_clip_image:
-                            conditional_clip_embeds = self.adapter.get_clip_image_embeds_from_tensors(
-                                clip_images.detach().to(self.device_torch, dtype=dtype),
-                                is_training=True,
-                                has_been_preprocessed=True,
-                                quad_count=quad_count,
-                                # do cfg on clip embeds to normalize the embeddings for when doing cfg
-                                # cfg_embed_strength=3.0 if not self.train_config.do_cfg else None
-                                # cfg_embed_strength=3.0 if not self.train_config.do_cfg else None
+                            conditional_clip_embeds = (
+                                self.adapter.get_clip_image_embeds_from_tensors(
+                                    clip_images.detach().to(
+                                        self.device_torch, dtype=dtype
+                                    ),
+                                    is_training=True,
+                                    has_been_preprocessed=True,
+                                    quad_count=quad_count,
+                                    # do cfg on clip embeds to normalize the embeddings for when doing cfg
+                                    # cfg_embed_strength=3.0 if not self.train_config.do_cfg else None
+                                    # cfg_embed_strength=3.0 if not self.train_config.do_cfg else None
+                                )
                             )
                             if self.train_config.do_cfg:
                                 unconditional_clip_embeds = (

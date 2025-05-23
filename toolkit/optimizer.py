@@ -46,6 +46,7 @@ def get_optimizer(
         # let net be the neural network you want to train
         # you can choose weight decay value based on your problem, 0 by default
         optimizer = Prodigy8bit(params, lr=use_lr, eps=1e-6, **optimizer_params)
+
     elif lower_type.startswith("prodigy"):
         from prodigyopt import Prodigy
 
@@ -59,6 +60,30 @@ def get_optimizer(
         # let net be the neural network you want to train
         # you can choose weight decay value based on your problem, 0 by default
         optimizer = Prodigy(params, lr=use_lr, eps=1e-6, **optimizer_params)
+
+    elif lower_type.startswith("radamschedulefree"):
+        # RAdam, but “schedule-free” (no LR scheduler or warm-up needed)
+        from schedulefree.radam_schedulefree import RAdamScheduleFree
+
+        print("Using RAdamScheduleFree optimizer")
+
+        # Good default taken from the paper / reference code
+        use_lr = learning_rate if learning_rate else 0.0025
+
+        # Typical β-pair for RAdam; tweak if you have reasons
+        betas = (0.9, 0.999)
+
+        # Construct the optimizer
+        optimizer = RAdamScheduleFree(
+            params,
+            lr=use_lr,
+            betas=(0.9, 0.999),
+            eps=1e-8,
+            weight_decay=0.0,
+            foreach=True,  # faster kernels on recent PyTorch
+            **optimizer_params,  # lets you override / add valid kwargs without editing code
+        )
+
     elif lower_type == "adam8":
         from toolkit.optimizers.adam8bit import Adam8bit
 
@@ -106,6 +131,17 @@ def get_optimizer(
         optimizer = torch.optim.AdamW(
             params, lr=float(learning_rate), eps=1e-6, **optimizer_params
         )
+
+    elif lower_type == "schedulefree":
+        print("Using ScheduleFree optimizer")
+        try:
+            from schedulefree import AdamWScheduleFree
+        except ImportError:
+            raise ImportError(
+                "Please install schedulefree to use ScheduleFree optimizer -> pip install schedulefree"
+            )
+        optimizer = AdamWScheduleFree(params, lr=learning_rate, **optimizer_params)
+
     elif lower_type == "lion":
         try:
             from lion_pytorch import Lion

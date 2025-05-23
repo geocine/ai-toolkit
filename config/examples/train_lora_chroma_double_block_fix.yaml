@@ -1,0 +1,178 @@
+job: extension
+config:
+  # this name will be the folder and filename name
+  name: "ero_chroma30"
+  process:
+    - type: 'sd_trainer'
+      # root folder to save training sessions/samples/weights
+      training_folder: "output"
+      # uncomment to see performance stats in the terminal every N steps
+#      performance_log_every: 1000
+      device: cuda:0
+      # if a trigger word is specified, it will be added to captions of training data if it does not already exist
+      # alternatively, in your captions you can add [trigger] and it will be replaced with the trigger word
+#      trigger_word: "sakimod"
+      network:
+        type: "lora"
+        linear: 256
+        linear_alpha: 256
+        network_kwargs:
+          custom_blocks_scaler: 1.0 # Make smaller if increasing the learning rate
+          lr_if_contains:
+            "double_blocks$$0$$": 0.100
+            "double_blocks$$1$$": 0.289
+            "double_blocks$$2$$": 0.456
+            "double_blocks$$3$$": 0.600
+            "double_blocks$$4$$": 0.722
+            "double_blocks$$5$$": 0.822
+            "double_blocks$$6$$": 0.900
+            "double_blocks$$7$$": 0.956
+            "double_blocks$$8$$": 0.989
+            "double_blocks$$9$$": 1.0000
+            "double_blocks$$10$$": 0.989
+            "double_blocks$$11$$": 0.956
+            "double_blocks$$12$$": 0.900
+            "double_blocks$$13$$": 0.822
+            "double_blocks$$14$$": 0.722
+            "double_blocks$$15$$": 0.600
+            "double_blocks$$16$$": 0.456
+            "double_blocks$$17$$": 0.289
+            "double_blocks$$18$$": 0.100
+      save:
+        dtype: float16 # precision to save
+        save_every: 100 # save every this many steps
+        max_step_saves_to_keep: 4 # how many intermittent saves to keep
+        push_to_hub: false #change this to True to push your trained model to Hugging Face.
+        # You can either set up a HF_TOKEN env variable or you'll be prompted to log-in         
+#       hf_repo_id: your-username/your-model-slug
+#       hf_private: true #whether the repo is private or public
+      datasets:
+        # datasets are a folder of images. captions need to be txt files with the same name as the image
+        # for instance image2.jpg and image2.txt. Only jpg, jpeg, and png are supported currently
+        # images will automatically be resized and bucketed into the resolution specified
+        # on windows, escape back slashes with another backslash so
+        # "C:\\path\\to\\images\\folder"
+        - folder_path: "/home/jt/datasets/data_v1/images/am"
+          caption_ext: "txt"
+          cache_latents_to_disk: true  # leave this true unless you know what you're doing
+          resolution: 512
+        - folder_path: "/home/jt/datasets/data_v1/images/dance"
+          caption_ext: "txt"
+          cache_latents_to_disk: true  # leave this true unless you know what you're doing
+          resolution: 512
+        - folder_path: "/home/jt/datasets/data_v1/images/ds"
+          caption_ext: "txt"
+          cache_latents_to_disk: true  # leave this true unless you know what you're doing
+          resolution: 512
+        - folder_path: "/home/jt/datasets/data_v1/images/ero"
+          caption_ext: "txt"
+          cache_latents_to_disk: true  # leave this true unless you know what you're doing
+          resolution: 512
+        - folder_path: "/home/jt/datasets/data_v1/images/facial_expr"
+          caption_ext: "txt"
+          cache_latents_to_disk: true  # leave this true unless you know what you're doing
+          resolution: 512
+        - folder_path: "/home/jt/datasets/data_v1/images/hair"
+          caption_ext: "txt"
+          cache_latents_to_disk: true  # leave this true unless you know what you're doing
+          resolution: 512
+        - folder_path: "/home/jt/datasets/data_v1/images/highq_2"
+          caption_ext: "txt"
+          cache_latents_to_disk: true  # leave this true unless you know what you're doing
+          resolution: 512
+        - folder_path: "/home/jt/datasets/data_v1/images/large_2"
+          caption_ext: "txt"
+          cache_latents_to_disk: true  # leave this true unless you know what you're doing
+          resolution: 512
+        - folder_path: "/home/jt/datasets/data_v1/images/large_p"
+          caption_ext: "txt"
+          cache_latents_to_disk: true  # leave this true unless you know what you're doing
+          resolution: 512
+        - folder_path: "/home/jt/datasets/data_v1/images/own"
+          caption_ext: "txt"
+          cache_latents_to_disk: true  # leave this true unless you know what you're doing
+          resolution: 512
+        - folder_path: "/home/jt/datasets/data_v1/images/small_highq_p"
+          caption_ext: "txt"
+          cache_latents_to_disk: true  # leave this true unless you know what you're doing
+          resolution: 512
+        - folder_path: "/home/jt/datasets/data_v1/images/unsplash_aesth_tiny"
+          caption_ext: "txt"
+          cache_latents_to_disk: true  # leave this true unless you know what you're doing
+          resolution: 512
+        - folder_path: "/home/jt/datasets/data_v1/images/various_concepts"
+          caption_ext: "txt"
+          cache_latents_to_disk: true  # leave this true unless you know what you're doing
+          resolution: 512
+        - folder_path: "/home/jt/datasets/data_v1/images/vix"
+          caption_ext: "txt"
+          cache_latents_to_disk: true  # leave this true unless you know what you're doing
+          resolution: 512
+        - folder_path: "/home/jt/datasets/data_v1/images/vix_an"
+          caption_ext: "txt"
+          cache_latents_to_disk: true  # leave this true unless you know what you're doing
+          resolution: 512
+        - folder_path: "/home/jt/datasets/data_v1/images/vs"
+          caption_ext: "txt"
+          cache_latents_to_disk: true  # leave this true unless you know what you're doing
+          resolution: 512
+        - folder_path: "/home/jt/datasets/data_v1/images/wspot"
+          cache_latents_to_disk: true  # leave this true unless you know what you're doing
+          caption_ext: "txt"
+          resolution: 512
+        - folder_path: "/home/jt/datasets/data_v1/images/yandex_p"
+          caption_ext: "txt"
+          cache_latents_to_disk: true  # leave this true unless you know what you're doing
+          resolution: 512
+          
+      train:
+        batch_size: 12
+        steps: 20000  # total number of steps to train 500 - 4000 is a good range
+        gradient_accumulation: 1
+        train_unet: true
+        train_text_encoder: false  # probably won't work with chroma
+        gradient_checkpointing: true  # need the on unless you have a ton of vram
+        noise_scheduler: "flowmatch" # for training only
+        # timestep_type: 'sigmoid'  # 'linear', 'sigmoid', 'shift'
+        optimizer: "radamschedulefree"
+        lr: 3e-6
+        # uncomment this to skip the pre training sample
+        skip_first_sample: false
+        # uncomment to completely disable sampling
+#       disable_sampling: false
+        # uncomment to use new vell curved weighting. Experimental but may produce better results
+        linear_timesteps: true
+
+        # ema will smooth out learning, but could slow it down. Recommended to leave on.
+        ema_config:
+          use_ema: false
+          ema_decay: 0.995
+
+        # will probably need this if gpu supports it for chroma, other dtypes may not work correctly
+        dtype: bf16
+      model:
+        # Download the whichever model you prefer from the Chroma repo
+        # https://huggingface.co/lodestones/Chroma/tree/main
+        # point to it here.
+        name_or_path: "/home/jt/chroma/chroma-unlocked-v31.safetensors"
+        arch: "chroma"
+        # quantize: true  # run 8bit mixed precision
+        quantize: true  # run 8bit mixed precision
+      sample:
+        sampler: "flowmatch" # must match train.noise_scheduler
+        sample_every: 100 # sample every this many steps
+        width: 832
+        height: 1216
+        prompts:
+          - "Intimate photo of a beautiful couple having hot, passionate sex in an antique public library. The woman has a natural body and a cute short ponytail. Her panties are on the floor. Her vagina is leaking pussy juice down her thighs and the man's penis"
+          - "Photo of a perfect bodied young woman in a flowery dress, hiding behind a wall, inside a gothic castle, masturbating. She is pinching her nipple, pussy juice dripping down her legs, she has pubic hair."
+          - "Close-up photograph of a woman's wet shaved vulva, fingering herself. Soft lighting, white bedsheet."
+        neg: ""  # negative prompt, optional
+        seed: 42
+        walk_seed: true
+        guidance_scale: 4
+        sample_steps: 25
+# you can add any additional meta info here. [name] is replaced with config name at top
+meta:
+  name: "[name]"
+  version: '1.0'

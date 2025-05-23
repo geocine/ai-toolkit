@@ -2,9 +2,7 @@ import os
 import time
 from typing import List, Optional, Literal, Union, TYPE_CHECKING, Dict
 import random
-
 import torch
-
 
 from toolkit.prompt_utils import PromptEmbeds
 
@@ -142,6 +140,14 @@ class NetworkConfig:
         self.conv_alpha: float = kwargs.get("conv_alpha", self.conv)
         self.dropout: Union[float, None] = kwargs.get("dropout", None)
         self.network_kwargs: dict = kwargs.get("network_kwargs", {})
+
+        self.custom_blocks_scaler: float = self.network_kwargs.get(
+            "custom_blocks_scaler", 1.0
+        )
+
+        self.lr_if_contains: dict[str, float] = self.network_kwargs.get(
+            "lr_if_contains", {}
+        )
 
         self.lorm_config: Union[LoRMConfig, None] = None
         lorm = kwargs.get("lorm", None)
