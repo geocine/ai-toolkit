@@ -493,7 +493,7 @@ class TrainConfig:
 
         ema_config: Union[Dict, None] = kwargs.get("ema_config", None)
         # if it is set explicitly to false, leave it false.
-        if ema_config is not None and ema_config.get("use_ema", None) is not None:
+        if ema_config is not None and ema_config.get("use_ema", None):
             ema_config["use_ema"] = True
             print(f"Using EMA")
         else:
@@ -510,13 +510,15 @@ class TrainConfig:
         self.linear_timesteps = kwargs.get("linear_timesteps", False)
         self.linear_timesteps2 = kwargs.get("linear_timesteps2", False)
         self.disable_sampling = kwargs.get("disable_sampling", False)
-        self.target_norm_std = kwargs.get('target_norm_std', None)
-        self.target_norm_std_value = kwargs.get('target_norm_std_value', 1.0)
-        self.timestep_type = kwargs.get('timestep_type', 'sigmoid')  # sigmoid, linear, lognorm_blend, next_sample
-        self.next_sample_timesteps = kwargs.get('next_sample_timesteps', 8)
-        self.linear_timesteps = kwargs.get('linear_timesteps', False)
-        self.linear_timesteps2 = kwargs.get('linear_timesteps2', False)
-        self.disable_sampling = kwargs.get('disable_sampling', False)
+        self.target_norm_std = kwargs.get("target_norm_std", None)
+        self.target_norm_std_value = kwargs.get("target_norm_std_value", 1.0)
+        self.timestep_type = kwargs.get(
+            "timestep_type", "sigmoid"
+        )  # sigmoid, linear, lognorm_blend, next_sample
+        self.next_sample_timesteps = kwargs.get("next_sample_timesteps", 8)
+        self.linear_timesteps = kwargs.get("linear_timesteps", False)
+        self.linear_timesteps2 = kwargs.get("linear_timesteps2", False)
+        self.disable_sampling = kwargs.get("disable_sampling", False)
 
         # will cache a blank prompt or the trigger word, and unload the text encoder to cpu
         # will make training faster and use less vram

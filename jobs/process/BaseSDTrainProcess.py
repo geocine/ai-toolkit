@@ -1941,7 +1941,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 if self.network_config and self.network_config.lr_if_contains:
                     lr_map = self.network_config.lr_if_contains  # dict from YAML
                     base_lr = self.train_config.lr
-                    base_lr *= self.network_config.custom_block_scaler
+                    base_lr *= self.network_config.custom_blocks_scaler
 
                     named = list(self.network.named_parameters())
 
