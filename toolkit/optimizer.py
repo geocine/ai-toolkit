@@ -104,7 +104,7 @@ def get_optimizer(
             betas=betas,
             eps=1e-8,
             weight_decay=0.0,
-            foreach=True,  # faster kernels on recent PyTorch
+            foreach=False,
             **optimizer_params,  # lets you override / add valid kwargs without editing code
         )
 
