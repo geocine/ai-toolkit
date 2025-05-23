@@ -81,8 +81,8 @@ config:
 
         # ema will smooth out learning, but could slow it down. Recommended to leave on.
         ema_config:
-          use_ema: false
-          ema_decay: 0.995
+          use_ema: false # Don't use ema with schedule fee optimizer, it's already built in
+          ema_decay: 0.99
 
         # will probably need this if gpu supports it for chroma, other dtypes may not work correctly
         dtype: bf16
