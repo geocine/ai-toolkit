@@ -1946,7 +1946,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 if self.network_config and self.network_config.lr_if_contains:
                     lr_map = self.network_config.lr_if_contains  # dict from YAML
                     base_lr = self.train_config.lr
-                    base_lr *= self.network_config.custom_blocks_scaler
+                    mult = self.network_config.custom_blocks_scaler
 
                     named = list(self.network.named_parameters())
 
@@ -1957,12 +1957,12 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         matched = [p for n, p in named if pattern in n]
                         if matched:
                             new_groups.append(
-                                {"params": matched, "lr": base_lr * scale}
+                                {"params": matched, "lr": base_lr * mult * scale}
                             )
                             handled_set.update(matched)
                             # Debug print
                             print_acc(
-                                f"[LR-MAP] {pattern:<40} → lr = {base_lr * scale:.3e}  "
+                                f"[LR-MAP] {pattern:<40} → lr = {base_lr * mult * scale:.3e}  "
                                 f"({len(matched)} params)"
                             )
 
