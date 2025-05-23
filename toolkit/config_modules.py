@@ -380,6 +380,8 @@ class TrainConfig:
         )  # t2i, control_net
         self.noise_multiplier = kwargs.get("noise_multiplier", 1.0)
         self.target_noise_multiplier = kwargs.get("target_noise_multiplier", 1.0)
+        self.random_noise_multiplier = kwargs.get("random_noise_multiplier", 0.0)
+        self.random_noise_shift = kwargs.get("random_noise_shift", 0.0)
         self.img_multiplier = kwargs.get("img_multiplier", 1.0)
         self.noisy_latent_multiplier = kwargs.get("noisy_latent_multiplier", 1.0)
         self.latent_multiplier = kwargs.get("latent_multiplier", 1.0)
@@ -388,7 +390,6 @@ class TrainConfig:
         # multiplier applied to loos on regularization images
         self.reg_weight = kwargs.get("reg_weight", 1.0)
         self.num_train_timesteps = kwargs.get("num_train_timesteps", 1000)
-        self.random_noise_shift = kwargs.get("random_noise_shift", 0.0)
         # automatically adapte the vae scaling based on the image norm
         self.adaptive_scaling_factor = kwargs.get("adaptive_scaling_factor", False)
 
