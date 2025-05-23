@@ -90,7 +90,7 @@ config:
         # Download the whichever model you prefer from the Chroma repo
         # https://huggingface.co/lodestones/Chroma/tree/main
         # point to it here.
-        name_or_path: "/home/jt/chroma/chroma-unlocked-v31.safetensors"
+        name_or_path: "/home/someone/chroma/chroma-unlocked-v31.safetensors"
         arch: "chroma"
         # quantize: true  # run 8bit mixed precision
         quantize: true  # run 8bit mixed precision
@@ -100,9 +100,7 @@ config:
         width: 832
         height: 1216
         prompts:
-          - "Intimate photo of a beautiful couple having hot, passionate sex in an antique public library. The woman has a natural body and a cute short ponytail. Her panties are on the floor. Her vagina is leaking pussy juice down her thighs and the man's penis"
-          - "Photo of a perfect bodied young woman in a flowery dress, hiding behind a wall, inside a gothic castle, masturbating. She is pinching her nipple, pussy juice dripping down her legs, she has pubic hair."
-          - "Close-up photograph of a woman's wet shaved vulva, fingering herself. Soft lighting, white bedsheet."
+          - A man drinking a beer in a pub.
         neg: ""  # negative prompt, optional
         seed: 42
         walk_seed: true
