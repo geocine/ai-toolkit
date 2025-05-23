@@ -70,7 +70,7 @@ config:
         gradient_checkpointing: true  # need the on unless you have a ton of vram
         noise_scheduler: "flowmatch" # for training only
         # timestep_type: 'sigmoid'  # 'linear', 'sigmoid', 'shift'
-        optimizer: "radamschedulefree"
+        optimizer: "radam_schedulefree_sr"
         lr: 3e-6
         # uncomment this to skip the pre training sample
         skip_first_sample: false

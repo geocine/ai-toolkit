@@ -393,6 +393,11 @@ class BaseSDTrainProcess(BaseTrainProcess):
         if self.ema is not None:
             self.ema.eval()
 
+        if hasattr(self.optimizer, "eval"):
+            # Necesssary for scheddule free optimitizers that keep two sets of weights
+            # to us the correct ones
+            self.optimizer.eval()
+
         # let adapter know we are sampling
         if self.adapter is not None and isinstance(self.adapter, CustomAdapter):
             self.adapter.is_sampling = True
@@ -405,6 +410,11 @@ class BaseSDTrainProcess(BaseTrainProcess):
 
         if self.ema is not None:
             self.ema.train()
+
+        if hasattr(self.optimizer, "train"):
+            # Necesssary for scheddule free optimitizers that keep two sets of weights
+            # to us the correct ones
+            self.optimizer.train()
 
     def update_training_metadata(self):
         o_dict = OrderedDict({"training_info": self.get_training_info()})
@@ -552,6 +562,10 @@ class BaseSDTrainProcess(BaseTrainProcess):
         if self.ema is not None:
             # always save params as ema
             self.ema.eval()
+        if hasattr(self.optimizer, "eval"):
+            # Necesssary for scheddule free optimitizers that keep two sets of weights
+            # to us the correct ones
+            self.optimizer.eval()
 
         if not os.path.exists(self.save_root):
             os.makedirs(self.save_root, exist_ok=True)
@@ -744,6 +758,10 @@ class BaseSDTrainProcess(BaseTrainProcess):
 
         if self.ema is not None:
             self.ema.train()
+        if hasattr(self.optimizer, "train"):
+            # Necesssary for scheddule free optimitizers that keep two sets of weights
+            # to us the correct ones
+            self.optimizer.train()
         flush()
 
     # Called before the model is loaded
@@ -1081,7 +1099,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
 
         #     # add to noise
         #     noise += noise_shift
-        
+
         if self.train_config.blended_blur_noise:
             noise = get_blended_blur_noise(latents, noise, timestep)
 
@@ -1284,14 +1302,14 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     timestep_type = "linear" if linear_timesteps else None
                     if timestep_type is None:
                         timestep_type = self.train_config.timestep_type
-                    
-                    if self.train_config.timestep_type == 'next_sample':
+
+                    if self.train_config.timestep_type == "next_sample":
                         # simulate a sample
                         num_train_timesteps = self.train_config.next_sample_timesteps
-                        timestep_type = 'shift'
-                    
+                        timestep_type = "shift"
+
                     patch_size = 1
-                    if self.sd.is_flux or 'flex' in self.sd.arch:
+                    if self.sd.is_flux or "flex" in self.sd.arch:
                         # flux is a patch size of 1, but latents are divided by 2, so we need to double it
                         patch_size = 2
                     elif hasattr(self.sd.unet.config, "patch_size"):
@@ -1314,15 +1332,15 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     content_or_style = self.train_config.content_or_style_reg
 
                 # if self.train_config.timestep_sampling == 'style' or self.train_config.timestep_sampling == 'content':
-                if self.train_config.timestep_type == 'next_sample':
+                if self.train_config.timestep_type == "next_sample":
                     timestep_indices = torch.randint(
-                            0,
-                            num_train_timesteps - 2, # -1 for 0 idx, -1 so we can step
-                            (batch_size,),
-                            device=self.device_torch
-                        )
+                        0,
+                        num_train_timesteps - 2,  # -1 for 0 idx, -1 so we can step
+                        (batch_size,),
+                        device=self.device_torch,
+                    )
                     timestep_indices = timestep_indices.long()
-                elif content_or_style in ['style', 'content']:
+                elif content_or_style in ["style", "content"]:
                     # this is from diffusers training code
                     # Cubic sampling for favoring later or earlier timesteps
                     # For more details about why cubic sampling is used for content / structure,
@@ -1352,8 +1370,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     timestep_indices = timestep_indices.long().clamp(
                         min_noise_steps + 1, max_noise_steps - 1
                     )
-                    
-                elif content_or_style == 'balanced':
+
+                elif content_or_style == "balanced":
                     if min_noise_steps == max_noise_steps:
                         timestep_indices = (
                             torch.ones((batch_size,), device=self.device_torch)
@@ -1399,30 +1417,28 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     latents = unaugmented_latents
 
                 noise_multiplier = self.train_config.noise_multiplier
-                
+
                 s = (noise.shape[0], noise.shape[1], 1, 1)
                 if len(noise.shape) == 5:
                     # if we have a 5d tensor, then we need to do it on a per batch item, per channel basis, per frame
                     s = (noise.shape[0], noise.shape[1], noise.shape[2], 1, 1)
-                
+
                 if self.train_config.random_noise_multiplier > 0.0:
-                    
                     # do it on a per batch item, per channel basis
-                    noise_multiplier = 1 + torch.randn(
-                        s,
-                        device=noise.device,
-                        dtype=noise.dtype
-                    ) * self.train_config.random_noise_multiplier
+                    noise_multiplier = (
+                        1
+                        + torch.randn(s, device=noise.device, dtype=noise.dtype)
+                        * self.train_config.random_noise_multiplier
+                    )
 
                 noise = noise * noise_multiplier
-                
+
                 if self.train_config.random_noise_shift > 0.0:
                     # get random noise -1 to 1
-                    noise_shift = torch.randn(
-                        s,  
-                        device=noise.device,
-                        dtype=noise.dtype
-                    ) * self.train_config.random_noise_shift
+                    noise_shift = (
+                        torch.randn(s, device=noise.device, dtype=noise.dtype)
+                        * self.train_config.random_noise_shift
+                    )
                     # add to noise
                     noise += noise_shift
 

@@ -77,7 +77,31 @@ def get_optimizer(
         optimizer = RAdamScheduleFree(
             params,
             lr=use_lr,
-            betas=(0.9, 0.999),
+            betas=betas,
+            eps=1e-8,
+            weight_decay=0.0,
+            foreach=True,  # faster kernels on recent PyTorch
+            **optimizer_params,  # lets you override / add valid kwargs without editing code
+        )
+
+    elif lower_type.startswith("radam_schedulefree_sr"):
+        # RAdam, but “schedule-free” (no LR scheduler or warm-up needed)
+        # AND stochastic rounding
+        from toolkit.optimizers.radam_schedule_free_sr import RAdamScheduleFreeSR
+
+        print("Using RAdamScheduleFree optimizer")
+
+        # Good default taken from the paper / reference code
+        use_lr = learning_rate if learning_rate else 0.0025
+
+        # Typical β-pair for RAdam; tweak if you have reasons
+        betas = (0.9, 0.999)
+
+        # Construct the optimizer
+        optimizer = RAdamScheduleFreeSR(
+            params,
+            lr=use_lr,
+            betas=betas,
             eps=1e-8,
             weight_decay=0.0,
             foreach=True,  # faster kernels on recent PyTorch
