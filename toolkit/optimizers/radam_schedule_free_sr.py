@@ -131,8 +131,8 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
                 z = state.get("z")
                 if z is None:
                     continue
-                # p ← (1 − 1/β₁)·p  +  (1/β₁)·z
-                new_p = p.float().mul(1.0 - inv_beta1).add(z.float(), alpha=inv_beta1)
+                new_p = p.float()
+                new_p = new_p.add(z.float() - new_p, alpha=1 - inv_beta1)
                 copy_stochastic(p, new_p)
                 del new_p
             group["train_mode"] = False
@@ -149,8 +149,8 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
                 z = state.get("z")
                 if z is None:
                     continue
-                # p ← (1 − β₁)·p  +  β₁·z
-                new_p = p.float().mul(1.0 - beta1).add(z.float(), alpha=beta1)
+                new_p = p.float()
+                new_p = new_p.add(z.float() - new_p, alpha=1 - beta1)
                 copy_stochastic(p, new_p)
                 del new_p
             group["train_mode"] = True
