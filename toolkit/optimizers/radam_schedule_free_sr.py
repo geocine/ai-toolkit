@@ -75,6 +75,7 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
         weight_lr_power: float = 2.0,
         foreach: Optional[bool] = False,  # foreach kernels disabled – see docstring
         silent_sgd_phase: bool = True,
+        round_eval_train_switch: bool = False,  # Do not change unless you know what you are doing
     ) -> None:
         if foreach:
             raise ValueError(
@@ -100,6 +101,7 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
         super().__init__(params, defaults)
 
         self.is_stochastic_rounding_accumulation = False
+        self.round_eval_train_switch = round_eval_train_switch
 
         # Setup stochastic grad accumulation hooks
         for group in self.param_groups:
@@ -131,10 +133,13 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
                 z = state.get("z")
                 if z is None:
                     continue
-                new_p = p.float()
-                new_p = new_p.add(z.float() - new_p, alpha=1 - inv_beta1)
-                copy_stochastic(p, new_p)
-                del new_p
+                if self.round_eval_train_switch:
+                    new_p = p.float()
+                    new_p.add_(z.float() - new_p, alpha=1 - inv_beta1)
+                    copy_stochastic(p, new_p)
+                    del new_p
+                else:
+                    p.lerp_(end_state=z, weight=1 - inv_beta1)
             group["train_mode"] = False
 
     @torch.no_grad()
@@ -149,10 +154,13 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
                 z = state.get("z")
                 if z is None:
                     continue
-                new_p = p.float()
-                new_p = new_p.add(z.float() - new_p, alpha=1 - beta1)
-                copy_stochastic(p, new_p)
-                del new_p
+                if self.round_eval_train_switch:
+                    new_p = p.float()
+                    new_p.add_(z.float() - new_p, alpha=1 - beta1)
+                    copy_stochastic(p, new_p)
+                    del new_p
+                else:
+                    p.lerp_(end_state=z, weight=1 - beta1)
             group["train_mode"] = True
 
     # ------------------------------------------------------------------
@@ -262,7 +270,7 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
 
                 # --- Weight decay (applied in y‑space)
                 if decay != 0.0:
-                    grad_norm = grad_norm.add(p, alpha=decay)
+                    grad_norm.add_(p, alpha=decay)
 
                 # ----------------------------------------------------------
                 # y ‑ update  (done in fp32 then stochastically rounded)
