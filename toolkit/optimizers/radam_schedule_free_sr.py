@@ -245,11 +245,6 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
                     # exp_avg_sq_fp16 = torch.zeros_like(p, memory_format=torch.preserve_format)
                     # state["exp_avg_sq"] = Auto8bitTensor(exp_avg_sq_fp16)
 
-                buf = state.get("buf_fp32")
-                if buf is None:
-                    buf = torch.empty_like(p, dtype=torch.float32)
-                    state["buf_fp32"] = buf
-
                 z = state["z"]
                 exp_avg_sq = state["exp_avg_sq"]
 
@@ -258,9 +253,7 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
 
                 # --- Gradient normalisation (Adam‑style) or vanilla SGD
                 if rho_t > 4.0:
-                    buf.copy_(
-                        exp_avg_sq, non_blocking=True
-                    )  # buf ← exp_avg_sq  (bf16 → fp32)
+                    buf = exp_avg_sq.float()  # convert to fp32 for numerical stability
                     buf.div_(bias_correction2).sqrt_().add_(
                         eps
                     )  # buf now *is* denom (fp32)
@@ -275,7 +268,8 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
                 # ----------------------------------------------------------
                 # y ‑ update  (done in fp32 then stochastically rounded)
                 # ----------------------------------------------------------
-                buf.copy_(p, non_blocking=True).mul_(1.0 - ckp1).add_(
+                buf = p.float()
+                buf.mul_(1.0 - ckp1).add_(
                     z, alpha=ckp1
                 )  # buf = (1−ckp1)·y + ckp1·z in fp32
                 buf.add_(grad_norm, alpha=adaptive_y_lr)  # + lr_y·ĝ
@@ -284,9 +278,11 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
                 # ----------------------------------------------------------
                 # z ‑ update (SGD‑style)
                 # ----------------------------------------------------------
-                buf.copy_(z, non_blocking=True)  # buf ← z in fp32
+                buf = z.float()  # convert to fp32 for numerical stability
                 buf.add_(grad_norm, alpha=-lr)  # buf = z − lr·ĝ
                 copy_stochastic(z, buf)
+
+                del buf
 
             # bump step counter for the group
             group["k"] = step_num
