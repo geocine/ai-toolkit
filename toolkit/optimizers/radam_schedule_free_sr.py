@@ -23,9 +23,36 @@ except ImportError:  # pragma: no cover
 
 # Stochastic‑rounding utilities supplied by the repository
 from toolkit.optimizers.optimizer_utils import (
-    copy_stochastic,
     stochastic_grad_accummulation,
 )
+
+
+def copy_stochastic_(target: torch.Tensor, source: torch.Tensor):
+    """
+    copies source into target using stochastic rounding
+
+    Args:
+        target: the target tensor with dtype=bfloat16
+        source: the target tensor with dtype=float32
+    """
+    # create a random 16 bit integer
+    result = torch.randint_like(
+        source,
+        dtype=torch.int32,
+        low=0,
+        high=(1 << 16),
+    )
+
+    # add the random number to the lower 16 bit of the mantissa
+    result.add_(source.view(dtype=torch.int32))
+
+    # mask off the lower 16 bit of the mantissa
+    result.bitwise_and_(-65536)  # -65536 = FFFF0000 as a signed int32
+
+    # copy the higher 16 bit into the target tensor
+    target.copy_(result.view(dtype=torch.float32))
+
+    del result
 
 
 class RAdamScheduleFreeSR(torch.optim.Optimizer):
@@ -81,13 +108,23 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
         self.round_eval_train_switch = round_eval_train_switch
 
         # # Setup stochastic grad accumulation hooks
-        # for group in self.param_groups:
-        #     for param in group["params"]:
-        #         if param.requires_grad and param.dtype != torch.float32:
-        #             self.is_stochastic_rounding_accumulation = True
-        #             param.register_post_accumulate_grad_hook(
-        #                 stochastic_grad_accummulation
-        #             )
+        for group in self.param_groups:
+            for param in group["params"]:
+                if param.requires_grad and param.dtype != torch.float32:
+                    self.is_stochastic_rounding_accumulation = True
+                    param.register_post_accumulate_grad_hook(
+                        stochastic_grad_accummulation
+                    )
+
+    def step_hook(self):
+        if not self.is_stochastic_rounding_accumulation:
+            return
+        # Copy over stochastically rounded grads
+        for group in self.param_groups:
+            for param in group["params"]:
+                if param.requires_grad and hasattr(param, "_accum_grad"):
+                    param.grad = param._accum_grad
+                    del param._accum_grad
 
     # ---------------------------------------------------------------------
     # Public helpers
@@ -113,7 +150,7 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
                 if self.round_eval_train_switch:
                     new_p = p.float()
                     new_p.add_(z.float() - new_p, alpha=1 - inv_beta1)
-                    copy_stochastic(p, new_p)
+                    copy_stochastic_(p, new_p)
                     del new_p
                 else:
                     p.lerp_(z, 1 - inv_beta1)
@@ -134,7 +171,7 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
                 if self.round_eval_train_switch:
                     new_p = p.float()
                     new_p.add_(z.float() - new_p, alpha=1 - beta1)
-                    copy_stochastic(p, new_p)
+                    copy_stochastic_(p, new_p)
                     del new_p
                 else:
                     p.lerp_(z, 1 - beta1)
@@ -150,6 +187,8 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
         A :pyclass:`RuntimeError` is raised if the optimiser has not been switched to
         *training* mode.  This mirrors the behaviour of the upstream code.
         """
+        self.step_hook()
+
         if not self.param_groups[0]["train_mode"]:
             raise RuntimeError(
                 "Optimizer is in eval mode. Call optimizer.train() before "
@@ -245,7 +284,7 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
 
                 # --- Weight decay (applied in y‑space) - In-place bf16 ops
                 if decay != 0.0:
-                    grad_normalized.add_(p, alpha=decay)  # In-place, p is bf16
+                    grad_normalized.add_(p.float(), alpha=decay)  # In-place, p is bf16
 
                 # ----------------------------------------------------------
                 # y - update (parameter p)
@@ -253,7 +292,7 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
                 buf = p.float()
                 buf.mul_(1.0 - ckp1).add_(z.float(), alpha=ckp1)
                 buf.add_(grad_normalized, alpha=adaptive_y_lr)
-                copy_stochastic(p, buf)
+                copy_stochastic_(p, buf)
 
                 # DEBUG: Direct bf16 operations, matching reference scalar path style
                 # p.lerp_(z, ckp1)  # p = (1-ckp1)*p + ckp1*z (in-place)
@@ -266,7 +305,7 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
                 # ----------------------------------------------------------
                 buf = z.float()
                 buf.sub_(grad_normalized, alpha=lr_scheduled)
-                copy_stochastic(z, buf)
+                copy_stochastic_(z, buf)
 
                 # DEBUG: Direct bf16 operation
                 # z.sub_(
