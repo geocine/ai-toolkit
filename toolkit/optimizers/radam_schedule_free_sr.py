@@ -139,7 +139,7 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
                     copy_stochastic(p, new_p)
                     del new_p
                 else:
-                    p.lerp_(end_state=z, weight=1 - inv_beta1)
+                    p.lerp_(z, 1 - inv_beta1)
             group["train_mode"] = False
 
     @torch.no_grad()
@@ -160,7 +160,7 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
                     copy_stochastic(p, new_p)
                     del new_p
                 else:
-                    p.lerp_(end_state=z, weight=1 - beta1)
+                    p.lerp_(z, 1 - beta1)
             group["train_mode"] = True
 
     # ------------------------------------------------------------------
