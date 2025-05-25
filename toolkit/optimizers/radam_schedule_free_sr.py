@@ -1,34 +1,11 @@
 """
-Stochastic Rounding version of Schedule‑Free RAdam (RAdamScheduleFreeSR)
+Stochastic Rounding version of Schedule-Free RAdam (RAdamScheduleFreeSR)
 =======================================================================
 
-This implementation is adapted from Facebook AI Research’s **schedule‑free** repository:
+This implementation is adapted from Facebook AI Research's **schedule-free** repository:
 https://github.com/facebookresearch/schedule_free/blob/main/schedulefree/radam_schedulefree.py
 
-The update rules are identical to the original paper but **every write to model
-weights ( y and z ) is performed with stochastic rounding** via
-``toolkit.optimizers.optimizer_utils.copy_stochastic`` so that the parameters stay in
-bfloat16 / fp16 without accumulating unbiased rounding error. The exponential second
-moment is kept in the same dtype as the parameters, but you can switch it to an
-``Auto8bitTensor`` for further memory savings – the two‑line change is marked below.
 
-The class is drop‑in‑compatible with the original ``torch.optim.Optimizer`` API.  Call
-``optimizer.train()`` before the first forward‑backward pass of every training epoch
-and ``optimizer.eval()`` before running validation or saving a checkpoint, exactly as
-you would with the upstream schedule‑free optimiser.
-
-Key differences w.r.t. the reference implementation
----------------------------------------------------
-* **Stochastic rounding writes** – all calls that used to modify ``p`` or ``state["z"]``
-  in‑place now compute an fp32 reference and copy it stochastically.
-* **foreach branch removed** – foreach kernels do not support stochastic rounding; we
-  fall back to the scalar loop which is still fast on modern GPUs.
-
-If you need gradient accumulation with stochastic rounding (e.g. micro‑batching), call
-``toolkit.optimizers.optimizer_utils.stochastic_grad_accummulation(model)`` after every
-inner step; this optimiser is agnostic to that detail.
-
-Copyright (c) 2025, Your Name.  MIT License.
 """
 
 from __future__ import annotations
@@ -103,14 +80,14 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
         self.is_stochastic_rounding_accumulation = False
         self.round_eval_train_switch = round_eval_train_switch
 
-        # Setup stochastic grad accumulation hooks
-        for group in self.param_groups:
-            for param in group["params"]:
-                if param.requires_grad and param.dtype != torch.float32:
-                    self.is_stochastic_rounding_accumulation = True
-                    param.register_post_accumulate_grad_hook(
-                        stochastic_grad_accummulation
-                    )
+        # # Setup stochastic grad accumulation hooks
+        # for group in self.param_groups:
+        #     for param in group["params"]:
+        #         if param.requires_grad and param.dtype != torch.float32:
+        #             self.is_stochastic_rounding_accumulation = True
+        #             param.register_post_accumulate_grad_hook(
+        #                 stochastic_grad_accummulation
+        #             )
 
     # ---------------------------------------------------------------------
     # Public helpers
@@ -175,7 +152,7 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
         """
         if not self.param_groups[0]["train_mode"]:
             raise RuntimeError(
-                "RAdamScheduleFreeSR is in eval mode.  Call optimizer.train() before "
+                "Optimizer is in eval mode. Call optimizer.train() before "
                 "back‑propagating and optimizer.eval() before validation/check‑pointing."
             )
 
@@ -202,6 +179,8 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
             bias_correction2 = 1.0 - beta2_t
             rho_inf = 2.0 / (1.0 - beta2) - 1.0
             rho_t = rho_inf - 2.0 * step_num * beta2_t / bias_correction2
+
+            rect: float
             if rho_t > 4.0:
                 rect = math.sqrt(
                     (rho_t - 4.0)
@@ -212,79 +191,83 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
             else:
                 rect = float(not silent_sgd_phase)
 
-            lr = group["lr"] * rect
-            group["scheduled_lr"] = lr
-            group["lr_max"] = lr_max = max(lr, group["lr_max"])
+            lr_scheduled = (
+                group["lr"] * rect
+            )  # DEBUG: Renamed to lr_scheduled for clarity in this scope
+            group["scheduled_lr"] = lr_scheduled
+            group["lr_max"] = lr_max = max(lr_scheduled, group["lr_max"])
 
-            # Weight for x ↔ y interpolation (ckp₁ in the paper)
             weight = (step_num**r) * (lr_max**weight_lr_power)
             weight_sum = group["weight_sum"] + weight
             group["weight_sum"] = weight_sum
             ckp1 = weight / weight_sum if weight_sum != 0.0 else 0.0
 
-            adaptive_y_lr = lr * (beta1 * (1.0 - ckp1) - 1.0)
+            adaptive_y_lr = lr_scheduled * (beta1 * (1.0 - ckp1) - 1.0)
 
-            # --------------------------------------------------------------
-            # Parameter loop (foreach disabled – scalar loop is used)
-            # --------------------------------------------------------------
             for p in group["params"]:
                 if p.grad is None:
                     continue
-                grad = p.grad
+                grad = p.grad  # Assuming grad is bf16
                 state = self.state[p]
 
                 # --- Lazy state initialisation
                 if len(state) == 0:
-                    # *z* and *exp_avg_sq* live in reduced precision like *p*
-                    state["z"] = torch.clone(p, memory_format=torch.preserve_format)
-                    state["exp_avg_sq"] = torch.zeros_like(
+                    state["z"] = torch.clone(
                         p, memory_format=torch.preserve_format
+                    )  # p.dtype (bf16)
+                    state["exp_avg_sq"] = torch.zeros_like(
+                        p,
+                        memory_format=torch.preserve_format,  # p.dtype (bf16)
                     )
-                    # ♦ If you would like to keep the second moment in 8‑bit, replace
-                    #   the previous line with the two lines below.
-                    # exp_avg_sq_fp16 = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    # state["exp_avg_sq"] = Auto8bitTensor(exp_avg_sq_fp16)
 
-                z = state["z"]
-                exp_avg_sq = state["exp_avg_sq"]
+                z = state["z"]  # p.dtype (bf16)
+                exp_avg_sq = state["exp_avg_sq"]  # p.dtype (bf16)
 
-                # --- Second‑moment update (RMS of gradients)
+                # --- Second‑moment update (RMS of gradients) - In-place bf16 ops
                 exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1.0 - beta2)
 
-                # --- Gradient normalisation (Adam‑style) or vanilla SGD
+                # --- Gradient normalisation (Adam‑style) or vanilla SGD - All bf16 ops
+                # This will now modify 'grad' in-place if rho_t > 4.0, to match reference scalar
+                grad_normalized = grad  # grad_normalized is a reference to grad
                 if rho_t > 4.0:
-                    buf = exp_avg_sq.float()  # convert to fp32 for numerical stability
-                    buf.div_(bias_correction2).sqrt_().add_(
-                        eps
-                    )  # buf now *is* denom (fp32)
-                    grad_norm = grad.float() / buf  # fp32
-                else:
-                    grad_norm = grad.float()
+                    # Denominator calculation in p.dtype (bf16)
+                    denom = exp_avg_sq.div(bias_correction2).sqrt_().add_(eps)
+                    grad_normalized.div_(denom)  # In-place division
+                # else: grad_normalized is already grad (original)
 
-                # --- Weight decay (applied in y‑space)
+                # --- Weight decay (applied in y‑space) - In-place bf16 ops
                 if decay != 0.0:
-                    grad_norm.add_(p, alpha=decay)
+                    grad_normalized.add_(p, alpha=decay)  # In-place, p is bf16
 
                 # ----------------------------------------------------------
-                # y ‑ update  (done in fp32 then stochastically rounded)
+                # y - update (parameter p) - All bf16 in-place ops
                 # ----------------------------------------------------------
-                buf = p.float()
-                buf.mul_(1.0 - ckp1).add_(
-                    z, alpha=ckp1
-                )  # buf = (1−ckp1)·y + ckp1·z in fp32
-                buf.add_(grad_norm, alpha=adaptive_y_lr)  # + lr_y·ĝ
-                copy_stochastic(p, buf)  # write back to bf16 with SR
+                # Original:
+                # buf = p.float()
+                # buf.mul_(1.0 - ckp1).add_(z, alpha=ckp1)
+                # buf.add_(grad_norm, alpha=adaptive_y_lr)
+                # copy_stochastic(p, buf)
+
+                # DEBUG: Direct bf16 operations, matching reference scalar path style
+                p.lerp_(z, ckp1)  # p = (1-ckp1)*p + ckp1*z (in-place)
+                p.add_(
+                    grad_normalized, alpha=adaptive_y_lr
+                )  # p = p + adaptive_y_lr * grad_normalized (in-place)
 
                 # ----------------------------------------------------------
-                # z ‑ update (SGD‑style)
+                # z - update (SGD‑style) - All bf16 in-place ops
                 # ----------------------------------------------------------
-                buf = z.float()  # convert to fp32 for numerical stability
-                buf.add_(grad_norm, alpha=-lr)  # buf = z − lr·ĝ
-                copy_stochastic(z, buf)
+                # Original:
+                # buf = z.float()
+                # buf.add_(grad_norm, alpha=-lr_scheduled)
+                # copy_stochastic(z, buf)
 
-                del buf
+                # DEBUG: Direct bf16 operation
+                z.sub_(
+                    grad_normalized, alpha=lr_scheduled
+                )  # z = z - lr_scheduled * grad_normalized (in-place)
 
-            # bump step counter for the group
+                # del buf # DEBUG: No buf used in this modified version
+
             group["k"] = step_num
-
         return loss
