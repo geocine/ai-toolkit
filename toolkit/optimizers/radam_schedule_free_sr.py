@@ -228,46 +228,52 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
 
                 # --- Gradient normalisation (Adam‑style) or vanilla SGD - All bf16 ops
                 # This will now modify 'grad' in-place if rho_t > 4.0, to match reference scalar
-                grad_normalized = grad  # grad_normalized is a reference to grad
+                # grad_normalized = grad  # grad_normalized is a reference to grad
+                # if rho_t > 4.0:
+                #     # Denominator calculation in p.dtype (bf16)
+                #     denom = exp_avg_sq.div(bias_correction2).sqrt_().add_(eps)
+                #     grad_normalized.div_(denom)  # In-place division
+                # # else: grad_normalized is already grad (original)
                 if rho_t > 4.0:
-                    # Denominator calculation in p.dtype (bf16)
-                    denom = exp_avg_sq.div(bias_correction2).sqrt_().add_(eps)
-                    grad_normalized.div_(denom)  # In-place division
-                # else: grad_normalized is already grad (original)
+                    buf = exp_avg_sq.float()  # convert to fp32 for numerical stability
+                    buf.div_(bias_correction2).sqrt_().add_(
+                        eps
+                    )  # buf now *is* denom (fp32)
+                    grad_normalized = grad.float() / buf  # fp32
+                else:
+                    grad_normalized = grad.float()
 
                 # --- Weight decay (applied in y‑space) - In-place bf16 ops
                 if decay != 0.0:
                     grad_normalized.add_(p, alpha=decay)  # In-place, p is bf16
 
                 # ----------------------------------------------------------
-                # y - update (parameter p) - All bf16 in-place ops
+                # y - update (parameter p)
                 # ----------------------------------------------------------
-                # Original:
-                # buf = p.float()
-                # buf.mul_(1.0 - ckp1).add_(z, alpha=ckp1)
-                # buf.add_(grad_norm, alpha=adaptive_y_lr)
-                # copy_stochastic(p, buf)
+                buf = p.float()
+                buf.mul_(1.0 - ckp1).add_(z.float(), alpha=ckp1)
+                buf.add_(grad_normalized, alpha=adaptive_y_lr)
+                copy_stochastic(p, buf)
 
                 # DEBUG: Direct bf16 operations, matching reference scalar path style
-                p.lerp_(z, ckp1)  # p = (1-ckp1)*p + ckp1*z (in-place)
-                p.add_(
-                    grad_normalized, alpha=adaptive_y_lr
-                )  # p = p + adaptive_y_lr * grad_normalized (in-place)
+                # p.lerp_(z, ckp1)  # p = (1-ckp1)*p + ckp1*z (in-place)
+                # p.add_(
+                #     grad_normalized, alpha=adaptive_y_lr
+                # )  # p = p + adaptive_y_lr * grad_normalized (in-place)
 
                 # ----------------------------------------------------------
                 # z - update (SGD‑style) - All bf16 in-place ops
                 # ----------------------------------------------------------
-                # Original:
-                # buf = z.float()
-                # buf.add_(grad_norm, alpha=-lr_scheduled)
-                # copy_stochastic(z, buf)
+                buf = z.float()
+                buf.sub_(grad_normalized, alpha=lr_scheduled)
+                copy_stochastic(z, buf)
 
                 # DEBUG: Direct bf16 operation
-                z.sub_(
-                    grad_normalized, alpha=lr_scheduled
-                )  # z = z - lr_scheduled * grad_normalized (in-place)
+                # z.sub_(
+                #     grad_normalized, alpha=lr_scheduled
+                # )  # z = z - lr_scheduled * grad_normalized (in-place)
 
-                # del buf # DEBUG: No buf used in this modified version
+                del buf
 
             group["k"] = step_num
         return loss
