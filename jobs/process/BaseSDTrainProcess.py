@@ -110,6 +110,35 @@ from toolkit.util.blended_blur_noise import get_blended_blur_noise
 from toolkit.util.get_model import get_model_class
 
 
+# ------------------------------------------------------------------
+# Linear / Cosine warm-up helper used for double-block LR ramp
+def _make_ramp_fn(
+    init_lr: float, target_lr: float, warmup: int, ramp_type: str = "linear"
+):
+    """
+    Returns a λ(step) that interpolates from init_lr → target_lr over <warmup> steps.
+    ramp_type = "linear" | "cosine"
+    """
+    if warmup <= 1 or abs(target_lr - init_lr) < 1e-12:
+        return lambda step: target_lr
+
+    if ramp_type == "cosine":
+
+        def fn(step):
+            progress = min(step / float(warmup), 1.0)
+            cos_factor = 0.5 * (1 - np.cos(np.pi * progress))
+            return init_lr + (target_lr - init_lr) * cos_factor
+
+        return fn
+    else:  # linear
+        diff = target_lr - init_lr
+        inv_warmup = 1.0 / float(warmup)
+        return lambda step: init_lr + diff * min(step * inv_warmup, 1.0)
+
+
+# ------------------------------------------------------------------
+
+
 def flush():
     torch.cuda.empty_cache()
     gc.collect()
@@ -145,6 +174,16 @@ class BaseSDTrainProcess(BaseTrainProcess):
             self.network_config = NetworkConfig(**network_config)
         else:
             self.network_config = None
+
+        # ─── DEBUG: confirm ramp keys were parsed ──────────────────────────
+        if self.network_config:
+            print_acc(
+                f"[DEBUG-ramp] parsed   ramp_double_blocks={self.network_config.ramp_double_blocks} | "
+                f"target={self.network_config.ramp_target_lr} | "
+                f"warmup={self.network_config.ramp_warmup_steps} | "
+                f"type={self.network_config.ramp_type}"
+            )
+        # ───────────────────────────────────────────────────────────────────
         self.train_config = TrainConfig(**self.get_conf("train", {}))
         model_config = self.get_conf("model", {})
         self.modules_being_trained: List[torch.nn.Module] = []
@@ -555,6 +594,24 @@ class BaseSDTrainProcess(BaseTrainProcess):
     def end_step_hook(self):
         pass
 
+    # ========= per-group LR warm-up =========
+    def _apply_double_block_lr_ramp(self, global_step: int):
+        for i, group in enumerate(self.optimizer.param_groups):
+            fn = group.get("lr_ramp_fn")
+            if fn is None:
+                continue  # nothing to ramp here
+            old_lr = group["lr"]
+            new_lr = fn(global_step)
+            group["lr"] = new_lr
+            # every 100 steps print the change
+            if global_step % 5 == 0:
+                print_acc(
+                    f"[DEBUG-ramp] step {global_step:7d} | group {i:02d} | "
+                    f"{old_lr:.4e} → {new_lr:.4e}"
+                )
+
+    # =========================================
+
     def save(self, step=None):
         if not self.accelerator.is_main_process:
             return
@@ -818,6 +875,66 @@ class BaseSDTrainProcess(BaseTrainProcess):
 
         # prepare other things
         self.optimizer = self.accelerator.prepare(self.optimizer)
+
+        # ── DEBUG / FIX: re-attach lr_ramp_fn that the optimiser dropped ─────────
+        for i, g in enumerate(self.optimizer.param_groups):
+            print_acc(f"[PROBE] group {i:02d} keys -> {list(g.keys())}")
+
+        # 1) build mapping   param-name  →  lr_ramp_fn   from the groups you created
+        name_to_ramp = {}
+        for pg in self.params:  # ← original param groups
+            fn = pg.get("lr_ramp_fn")
+            if fn is None:
+                continue
+            for p in pg["params"]:
+                for n, tp in self.network.named_parameters():
+                    if tp is p:
+                        name_to_ramp[n] = fn
+                        break
+
+        # 2) walk the real optimiser groups and restore the key
+        for gi, g in enumerate(self.optimizer.param_groups):
+            if "lr_ramp_fn" in g:
+                continue
+            p0 = g["params"][0]  # any tensor in the group
+            try:
+                pname = next(n for n, tp in self.network.named_parameters() if tp is p0)
+            except StopIteration:
+                continue
+            # find the first ramp_fn whose pattern is in the param name
+            ramp_fn = next(
+                (fn for pat, fn in name_to_ramp.items() if pat in pname), None
+            )
+            if ramp_fn is not None:
+                g["lr_ramp_fn"] = ramp_fn
+                print_acc(f"[PATCH] re-attached lr_ramp_fn to group {gi:02d}")
+        # ─────────────────────────────────────────────────────────────────────────
+
+        # ── FINAL CHECK: pattern ↔ optimiser group mapping ────────────────
+        import re, collections
+
+        found = collections.defaultdict(list)
+
+        for gi, g in enumerate(self.optimizer.param_groups):
+            if "lr_ramp_fn" not in g:  # groups w/out ramp_fn are irrelevant
+                continue
+            # pick one param from the group and look up its name
+            p0 = g["params"][0]
+            try:
+                pname = next(n for n, tp in self.network.named_parameters() if tp is p0)
+            except StopIteration:
+                pname = "<unknown>"
+            # extract the double_blocks pattern
+            m = re.search(r"double_blocks\$\$\d+\$\$", pname)
+            pat = m.group(0) if m else "<unknown>"
+            found[pat].append(gi)
+
+        print_acc("── pattern → optimiser group index ──")
+        for pat in sorted(found):
+            print_acc(f"{pat:<24} → {found[pat]}")
+        print_acc(f"total ramp groups = {sum(len(v) for v in found.values())}")
+        # ──────────────────────────────────────────────────────────────────
+
         if self.lr_scheduler is not None:
             self.lr_scheduler = self.accelerator.prepare(self.lr_scheduler)
 
@@ -1942,29 +2059,53 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 params_net = self.network.prepare_optimizer_params(**config)
                 params.extend(params_net)  # <-- same as original behaviour
 
-                # -----------  PER-BLOCK LEARNING-RATE MAPPING  ------------
+                # -----------  PER-BLOCK LEARNING-RATE MAPPING  --------------------
                 if self.network_config and self.network_config.lr_if_contains:
-                    lr_map = self.network_config.lr_if_contains  # dict from YAML
+                    lr_map = self.network_config.lr_if_contains
                     base_lr = self.train_config.lr
                     mult = self.network_config.custom_blocks_scaler
 
                     named = list(self.network.named_parameters())
-
                     new_groups = []
                     handled_set = set()
+
+                    # ---- ramp settings pulled from YAML ----
+                    ramp_enabled = getattr(
+                        self.network_config, "ramp_double_blocks", False
+                    )
+                    ramp_target_lr = getattr(
+                        self.network_config, "ramp_target_lr", None
+                    )
+                    ramp_steps = getattr(
+                        self.network_config, "ramp_warmup_steps", 10_000
+                    )
+                    ramp_type = getattr(
+                        self.network_config, "ramp_type", "linear"
+                    ).lower()
+                    ramp_cfg = {}
+                    # ----------------------------------------
 
                     for pattern, scale in lr_map.items():
                         matched = [p for n, p in named if pattern in n]
                         if matched:
-                            new_groups.append(
-                                {"params": matched, "lr": base_lr * mult * scale}
-                            )
+                            init_lr = base_lr * mult * scale
+                            new_groups.append({"params": matched, "lr": init_lr})
                             handled_set.update(matched)
-                            # Debug print
+
                             print_acc(
-                                f"[LR-MAP] {pattern:<40} → lr = {base_lr * mult * scale:.3e}  "
+                                f"[LR-MAP] {pattern:<40} → lr = {init_lr:.3e}  "
                                 f"({len(matched)} params)"
                             )
+
+                            if (
+                                ramp_enabled
+                                and ramp_target_lr
+                                and ramp_target_lr > init_lr + 1e-12
+                            ):
+                                # attach fn to the group itself
+                                new_groups[-1]["lr_ramp_fn"] = _make_ramp_fn(
+                                    init_lr, ramp_target_lr, ramp_steps, ramp_type
+                                )
 
                     remaining = [p for _, p in named if p not in handled_set]
                     if remaining:
@@ -1982,7 +2123,11 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     params[:] = [
                         g for g in params if not _is_lora_param_group(g)
                     ] + new_groups
-                # ----------------------------------------------------------
+
+                    # keep the ramp schedule for training-time updates
+                    if ramp_cfg:
+                        self._dbl_lr_ramp = ramp_cfg
+                # ------------------------------------------------------------------
 
                 if self.train_config.gradient_checkpointing:
                     self.network.enable_gradient_checkpointing()
@@ -2246,6 +2391,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
         # zero any gradients
         optimizer.zero_grad()
 
+        # custom per-block warm-up
+
         self.lr_scheduler.step(self.step_num)
 
         self.sd.set_device_state(self.train_device_state_preset)
@@ -2379,6 +2526,12 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         for item in batch.file_items:
                             print(f" - {item.path}")
                     raise e
+
+                # Even more Shi
+                if not self.is_grad_accumulation_step:
+                    self.optimizer.step()
+                    self.optimizer.zero_grad(set_to_none=True)
+                    self._apply_double_block_lr_ramp(self.step_num)
 
             self.timer.stop("train_loop")
             if not did_first_flush:

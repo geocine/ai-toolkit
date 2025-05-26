@@ -140,7 +140,10 @@ class NetworkConfig:
         self.conv_alpha: float = kwargs.get("conv_alpha", self.conv)
         self.dropout: Union[float, None] = kwargs.get("dropout", None)
         self.network_kwargs: dict = kwargs.get("network_kwargs", {})
-
+        self.ramp_double_blocks: bool = kwargs.get("ramp_double_blocks", False)
+        self.ramp_target_lr: Optional[float] = kwargs.get("ramp_target_lr", None)
+        self.ramp_warmup_steps: int = kwargs.get("ramp_warmup_steps", 0)
+        self.ramp_type: str = kwargs.get("ramp_type", "linear")
         self.custom_blocks_scaler: float = self.network_kwargs.get(
             "custom_blocks_scaler", 1.0
         )
