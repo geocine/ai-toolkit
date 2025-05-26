@@ -24,35 +24,8 @@ except ImportError:  # pragma: no cover
 # Stochastic‑rounding utilities supplied by the repository
 from toolkit.optimizers.optimizer_utils import (
     stochastic_grad_accummulation,
+    copy_stochastic,
 )
-
-
-def copy_stochastic_(target: torch.Tensor, source: torch.Tensor):
-    """
-    copies source into target using stochastic rounding
-
-    Args:
-        target: the target tensor with dtype=bfloat16
-        source: the target tensor with dtype=float32
-    """
-    # create a random 16 bit integer
-    result = torch.randint_like(
-        source,
-        dtype=torch.int32,
-        low=0,
-        high=(1 << 16),
-    )
-
-    # add the random number to the lower 16 bit of the mantissa
-    result.add_(source.view(dtype=torch.int32))
-
-    # mask off the lower 16 bit of the mantissa
-    result.bitwise_and_(-65536)  # -65536 = FFFF0000 as a signed int32
-
-    # copy the higher 16 bit into the target tensor
-    target.copy_(result.view(dtype=torch.float32))
-
-    del result
 
 
 class RAdamScheduleFreeSR(torch.optim.Optimizer):
@@ -81,6 +54,10 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
         silent_sgd_phase: bool = True,
         round_eval_train_switch: bool = False,  # Do not change unless you know what you are doing
     ) -> None:
+        raise NotImplementedError(
+            "THIS OPTIMIZER IS UNDER DEVELOPMENT AND NOT READY FOR USE"
+        )
+
         if foreach:
             raise ValueError(
                 "foreach kernels are disabled in RAdamScheduleFreeSR because they "
@@ -150,7 +127,7 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
                 if self.round_eval_train_switch:
                     new_p = p.float()
                     new_p.add_(z.float() - new_p, alpha=1 - inv_beta1)
-                    copy_stochastic_(p, new_p)
+                    copy_stochastic(p, new_p)
                     del new_p
                 else:
                     p.lerp_(z, 1 - inv_beta1)
@@ -171,7 +148,7 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
                 if self.round_eval_train_switch:
                     new_p = p.float()
                     new_p.add_(z.float() - new_p, alpha=1 - beta1)
-                    copy_stochastic_(p, new_p)
+                    copy_stochastic(p, new_p)
                     del new_p
                 else:
                     p.lerp_(z, 1 - beta1)
@@ -292,7 +269,7 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
                 buf = p.float()
                 buf.mul_(1.0 - ckp1).add_(z.float(), alpha=ckp1)
                 buf.add_(grad_normalized, alpha=adaptive_y_lr)
-                copy_stochastic_(p, buf)
+                copy_stochastic(p, buf)
 
                 # DEBUG: Direct bf16 operations, matching reference scalar path style
                 # p.lerp_(z, ckp1)  # p = (1-ckp1)*p + ckp1*z (in-place)
@@ -305,7 +282,7 @@ class RAdamScheduleFreeSR(torch.optim.Optimizer):
                 # ----------------------------------------------------------
                 buf = z.float()
                 buf.sub_(grad_normalized, alpha=lr_scheduled)
-                copy_stochastic_(z, buf)
+                copy_stochastic(z, buf)
 
                 # DEBUG: Direct bf16 operation
                 # z.sub_(
