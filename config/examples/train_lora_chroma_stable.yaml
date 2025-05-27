@@ -14,8 +14,8 @@ config:
 #      trigger_word: "sakimod"
       network:
         type: "lora"
-        linear: 256
-        linear_alpha: 256
+        linear: 32
+        linear_alpha: 32
         ramp_double_blocks: true
         ramp_target_lr: 1.5e-6       # final LR you want for the mapped blocks
         ramp_warmup_steps: 1000      # number of optimisation steps for the climb
