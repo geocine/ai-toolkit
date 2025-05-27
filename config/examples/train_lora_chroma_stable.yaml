@@ -14,8 +14,8 @@ config:
 #      trigger_word: "sakimod"
       network:
         type: "lora"
-        linear: 32
-        linear_alpha: 32
+        linear: 32 # same thing as rank in this context
+        linear_alpha: 32 # Not actuallly used in chroma, defaults to rank
         ramp_double_blocks: true
         ramp_target_lr: 1.5e-6       # final LR you want for the mapped blocks
         ramp_warmup_steps: 1000      # number of optimisation steps for the climb
@@ -70,7 +70,7 @@ config:
         gradient_accumulation: 1
         train_unet: true
         train_text_encoder: false  # probably won't work with chroma
-        gradient_checkpointing: false  # need the on unless you have a ton of vram
+        gradient_checkpointing: false # Not implemented for chroma yet
         noise_scheduler: "flowmatch" # for training only
         timestep_type: 'sigmoid'  # 'linear', 'sigmoid', 'shift'
         optimizer: "radamschedulefree"
@@ -97,8 +97,7 @@ config:
         # point to it here.
         name_or_path: "/home/someone/chroma/chroma-unlocked-v31.safetensors"
         arch: "chroma"
-        # quantize: true  # run 8bit mixed precision
-        quantize: true  # run 8bit mixed precision
+        quantize: true  # run base model in8bit mixed precision
       sample:
         sampler: "flowmatch" # must match train.noise_scheduler
         sample_every: 100 # sample every this many steps
