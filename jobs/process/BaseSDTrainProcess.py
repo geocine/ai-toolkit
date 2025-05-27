@@ -798,13 +798,20 @@ class BaseSDTrainProcess(BaseTrainProcess):
         # save optimizer
         if self.optimizer is not None:
             try:
-                filename = f"optimizer.pt"
+                filename = "optimizer.pt"
                 file_path = os.path.join(self.save_root, filename)
+
+                # unwrap if wrapped, else take state directly
                 try:
-                    state_dict = unwrap_model(self.optimizer).state_dict()
-                except Exception as e:
-                    state_dict = self.optimizer.state_dict()
-                torch.save(state_dict, file_path)
+                    optim_state = unwrap_model(self.optimizer).state_dict()
+                except Exception:
+                    optim_state = self.optimizer.state_dict()
+
+                # strip out any non-picklable lr_ramp_fn callbacks
+                for g in optim_state.get("param_groups", []):
+                    g.pop("lr_ramp_fn", None)
+
+                torch.save(optim_state, file_path)
                 print_acc(f"Saved optimizer to {file_path}")
             except Exception as e:
                 print_acc(e)
