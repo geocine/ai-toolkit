@@ -9,14 +9,12 @@ from typing import List, Optional, Dict, Type, Union
 import torch
 from diffusers import UNet2DConditionModel, PixArtTransformer2DModel, AuraFlowTransformer2DModel
 from transformers import CLIPTextModel
-from toolkit.models.lokr import LokrModule
 
 from .config_modules import NetworkConfig
 from .lorm import count_parameters
 from .network_mixins import ToolkitNetworkMixin, ToolkitModuleMixin, ExtractableModuleMixin
 
 from toolkit.kohya_lora import LoRANetwork
-from toolkit.models.DoRA import DoRAModule
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -232,12 +230,6 @@ class LoRASpecialNetwork(ToolkitNetworkMixin, LoRANetwork):
         self.is_lumina2 = is_lumina2
         self.network_type = network_type
         self.is_assistant_adapter = is_assistant_adapter
-        if self.network_type.lower() == "dora":
-            self.module_class = DoRAModule
-            module_class = DoRAModule
-        elif self.network_type.lower() == "lokr":
-            self.module_class = LokrModule
-            module_class = LokrModule
         self.network_config: NetworkConfig = kwargs.get("network_config", None)
 
         self.peft_format = peft_format

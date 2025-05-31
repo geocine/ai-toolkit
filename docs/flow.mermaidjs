@@ -1,0 +1,169 @@
+flowchart TD
+    A["`**train.py**
+    Entry Point`"] --> B["`Load Configuration
+    train_lora_chroma_stable.yaml`"]
+    
+    B --> C["`**toolkit.job.run_job()**
+    Dynamic Job Loading`"]
+    
+    C --> D["`**toolkit.job.get_job()**
+    job: extension`"]
+    
+    D --> E["`**jobs.ExtensionJob**
+    Dynamic Import`"]
+    
+    E --> F["`**toolkit.extension.get_all_extensions_process_dict()**
+    Extension Discovery`"]
+    
+    F --> G["`Scan extensions_built_in/
+    Find sd_trainer`"]
+    
+    G --> H["`**SDTrainerExtension**
+    uid: 'sd_trainer'`"]
+    
+    H --> I["`**extensions_built_in.sd_trainer.SDTrainer**
+    Process Class`"]
+    
+    I --> J["`**jobs.process.BaseSDTrainProcess**
+    Inheritance Chain`"]
+    
+    J --> K["`**Model Loading Phase**
+    get_model_class()`"]
+    
+    K --> L["`**ChromaModel**
+    extensions_built_in/diffusion_models/chroma/`"]
+    
+    L --> M["`**Chroma Model Components**`"]
+    
+    M --> M1["`**Transformer**
+    Chroma(chroma_params)
+    Double/Single Blocks`"]
+    
+    M --> M2["`**T5 Text Encoder**
+    T5EncoderModel
+    T5TokenizerFast`"]
+    
+    M --> M3["`**VAE**
+    AutoencoderKL
+    Image Encoding/Decoding`"]
+    
+    M --> M4["`**Noise Scheduler**
+    ChromaModel.get_train_scheduler()`"]
+    
+    M1 --> N["`**ChromaPipeline**
+    Pipeline Assembly`"]
+    M2 --> N
+    M3 --> N
+    M4 --> N
+    
+    N --> O["`**Network Setup**
+    LoRA Configuration`"]
+    
+    O --> O1["`**LoRA Parameters**
+    linear: 32 (rank)
+    linear_alpha: 32
+    ramp_double_blocks: true`"]
+    
+    O --> O2["`**Learning Rate Mapping**
+    Per-block LR configuration
+    double_blocks[0-18]`"]
+    
+    O1 --> P["`**Data Loading**
+    toolkit.data_loader`"]
+    O2 --> P
+    
+    P --> Q["`**Training Configuration**`"]
+    
+    Q --> Q1["`**Train Config**
+    dtype: float16
+    optimizer settings
+    scheduler settings`"]
+    
+    Q --> Q2["`**Save Config**
+    Output directory
+    Checkpoint frequency`"]
+    
+    Q --> Q3["`**Sample Config**
+    Validation sampling
+    Progress monitoring`"]
+    
+    Q1 --> R["`**Training Loop**
+    BaseSDTrainProcess.run()`"]
+    Q2 --> R
+    Q3 --> R
+    
+    R --> S["`**Training Steps**`"]
+    
+    S --> S1["`**Forward Pass**
+    Noise prediction
+    Loss calculation`"]
+    
+    S --> S2["`**Backward Pass**
+    Gradient computation
+    LoRA weight updates`"]
+    
+    S --> S3["`**Monitoring**
+    Loss logging
+    Sample generation`"]
+    
+    S1 --> T["`**Model Saving**
+    toolkit.saving`"]
+    S2 --> T
+    S3 --> T
+    
+    T --> U["`**Output**
+    LoRA weights (.safetensors)
+    Training metadata
+    Sample images`"]
+    
+    %% Configuration Details
+    V["`**Configuration Details**
+    job: extension
+    type: 'sd_trainer'
+    network.type: 'lora'
+    model: Chroma`"] -.-> B
+    
+    %% Dynamic Import Chain
+    W["`**Dynamic Import Chain**
+    Runtime module loading
+    Extension-based architecture
+    Modular design`"] -.-> D
+    
+    %% Process Inheritance
+    X["`**Process Inheritance**
+    BaseTrainProcess
+    ↓
+    BaseSDTrainProcess
+    ↓
+    SDTrainer`"] -.-> J
+    
+    %% Model Architecture
+    Y["`**Chroma Architecture**
+    Transformer-based
+    Double/Single blocks
+    T5 text encoding
+    VAE latent space`"] -.-> L
+    
+    %% LoRA Details
+    Z["`**LoRA Training**
+    Low-Rank Adaptation
+    Efficient fine-tuning
+    Block-specific LR
+    Gradient ramping`"] -.-> O
+    
+    %% Styling
+    classDef entryPoint color:black,fill:#e1f5fe,stroke:#01579b,stroke-width:3px
+    classDef jobSystem color:black,fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef extension color:black,fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px
+    classDef model color:black,fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef training color:black,fill:#fce4ec,stroke:#880e4f,stroke-width:2px
+    classDef config color:black,fill:#f1f8e9,stroke:#33691e,stroke-width:2px
+    classDef output color:black,fill:#e0f2f1,stroke:#004d40,stroke-width:2px
+    
+    class A entryPoint
+    class C,D,E jobSystem
+    class F,G,H,I extension
+    class K,L,M,M1,M2,M3,M4,N model
+    class J,O,O1,O2,P,Q,Q1,Q2,Q3,R,S,S1,S2,S3 training
+    class B,V config
+    class T,U output

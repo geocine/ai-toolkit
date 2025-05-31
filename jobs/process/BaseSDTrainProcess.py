@@ -44,7 +44,6 @@ from toolkit.lorm import (
     lorm_parameter_threshold,
     LORM_TARGET_REPLACE_MODULE,
 )
-from toolkit.lycoris_special import LycorisSpecialNetwork
 from toolkit.models.decorator import Decorator
 from toolkit.network_mixins import Network
 from toolkit.optimizer import get_optimizer
@@ -62,7 +61,7 @@ from toolkit.saving import (
 
 from toolkit.scheduler import get_lr_scheduler
 from toolkit.sd_device_states_presets import get_train_sd_device_state_preset
-from toolkit.stable_diffusion_model import StableDiffusion
+from toolkit.models.base_model import BaseModel
 
 from jobs.process import BaseTrainProcess
 from toolkit.metadata import (
@@ -155,7 +154,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
             transformers.utils.logging.set_verbosity_error()
             diffusers.utils.logging.set_verbosity_error()
 
-        self.sd: StableDiffusion
+        self.sd: BaseModel
         self.embedding: Union[Embedding, None] = None
 
         self.custom_pipeline = custom_pipeline
@@ -1962,12 +1961,6 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 is_lorm = self.network_config.type.lower() == "lorm"
                 # default to LoCON if there are any conv layers or if it is named
                 NetworkClass = LoRASpecialNetwork
-                if (
-                    self.network_config.type.lower() == "locon"
-                    or self.network_config.type.lower() == "lycoris"
-                ):
-                    NetworkClass = LycorisSpecialNetwork
-                    is_lycoris = True
 
                 if is_lorm:
                     network_kwargs["ignore_if_contains"] = lorm_ignore_if_contains

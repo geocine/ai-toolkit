@@ -12,27 +12,11 @@ def get_job(
         raise ValueError('config file is invalid. Missing "job" key')
 
     job = config['job']
-    if job == 'extract':
-        from jobs import ExtractJob
-        return ExtractJob(config)
-    if job == 'train':
-        from jobs import TrainJob
-        return TrainJob(config)
-    if job == 'mod':
-        from jobs import ModJob
-        return ModJob(config)
-    if job == 'generate':
-        from jobs import GenerateJob
-        return GenerateJob(config)
     if job == 'extension':
         from jobs import ExtensionJob
         return ExtensionJob(config)
-
-    # elif job == 'train':
-    #     from jobs import TrainJob
-    #     return TrainJob(config)
     else:
-        raise ValueError(f'Unknown job type {job}')
+        raise ValueError(f'Unknown job type {job}. Only "extension" job type is supported.')
 
 
 def run_job(

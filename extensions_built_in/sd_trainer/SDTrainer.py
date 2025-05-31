@@ -23,7 +23,7 @@ from toolkit.custom_adapter import CustomAdapter
 from toolkit.print import print_acc
 from toolkit.prompt_utils import PromptEmbeds, concat_prompt_embeds
 from toolkit.reference_adapter import ReferenceAdapter
-from toolkit.stable_diffusion_model import StableDiffusion, BlankNetwork
+from toolkit.models.base_model import BaseModel, BlankNetwork
 from toolkit.train_tools import (
     get_torch_dtype,
     apply_snr_weight,

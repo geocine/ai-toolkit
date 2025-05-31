@@ -11,18 +11,13 @@ from toolkit.data_transfer_object.data_loader import DataLoaderBatchDTO
 from toolkit.models.clip_fusion import CLIPFusionModule
 from toolkit.models.clip_pre_processor import CLIPImagePreProcessor
 from toolkit.models.control_lora_adapter import ControlLoraAdapter
-from toolkit.models.i2v_adapter import I2VAdapter
 from toolkit.models.subpixel_adapter import SubpixelAdapter
 from toolkit.models.ilora import InstantLoRAModule
 from toolkit.models.single_value_adapter import SingleValueAdapter
 from toolkit.models.te_adapter import TEAdapter
 from toolkit.models.te_aug_adapter import TEAugAdapter
-from toolkit.models.vd_adapter import VisionDirectAdapter
-from toolkit.models.redux import ReduxImageEncoder
-from toolkit.photomaker import PhotoMakerIDEncoder, FuseModule, PhotoMakerCLIPEncoder
 from toolkit.saving import load_ip_adapter_model, load_custom_adapter_model
 from toolkit.train_tools import get_torch_dtype
-from toolkit.models.pixtral_vision import PixtralVisionEncoderCompatible, PixtralVisionImagePreprocessorCompatible
 import random
 from toolkit.util.mask import generate_random_mask
 from typing import TYPE_CHECKING, Union, Iterator, Mapping, Any, Tuple, List, Optional, Dict
@@ -71,7 +66,7 @@ class CustomAdapter(torch.nn.Module):
         self.is_unconditional_run = False
         self.is_sampling = False
 
-        self.vision_encoder: Union[PhotoMakerCLIPEncoder, CLIPVisionModelWithProjection] = None
+        self.vision_encoder = None
 
         self.fuse_module: FuseModule = None
 
@@ -108,17 +103,7 @@ class CustomAdapter(torch.nn.Module):
 
         self.setup_adapter()
 
-        if self.adapter_type == 'photo_maker':
-            # try to load from our name_or_path
-            if self.config.name_or_path is not None and self.config.name_or_path.endswith('.bin'):
-                self.load_state_dict(torch.load(self.config.name_or_path, map_location=self.device), strict=False)
-            # add the trigger word to the tokenizer
-            if isinstance(self.sd_ref().tokenizer, list):
-                for tokenizer in self.sd_ref().tokenizer:
-                    tokenizer.add_tokens([self.flag_word], special_tokens=True)
-            else:
-                self.sd_ref().tokenizer.add_tokens([self.flag_word], special_tokens=True)
-        elif self.config.name_or_path is not None:
+        if self.config.name_or_path is not None:
             loaded_state_dict = load_custom_adapter_model(
                 self.config.name_or_path,
                 self.sd_ref().device,
@@ -128,11 +113,7 @@ class CustomAdapter(torch.nn.Module):
 
     def setup_adapter(self):
         torch_dtype = get_torch_dtype(self.sd_ref().dtype)
-        if self.adapter_type == 'photo_maker':
-            sd = self.sd_ref()
-            embed_dim = sd.unet_unwrapped.config['cross_attention_dim']
-            self.fuse_module = FuseModule(embed_dim)
-        elif self.adapter_type == 'clip_fusion':
+        if self.adapter_type == 'clip_fusion':
             sd = self.sd_ref()
             embed_dim = sd.unet_unwrapped.config['cross_attention_dim']
 
@@ -238,28 +219,14 @@ class CustomAdapter(torch.nn.Module):
             self.llm_adapter.to(self.device, torch_dtype)
         elif self.adapter_type == 'te_augmenter':
             self.te_augmenter = TEAugAdapter(self, self.sd_ref())
-        elif self.adapter_type == 'vision_direct':
-            self.vd_adapter = VisionDirectAdapter(self, self.sd_ref(), self.vision_encoder)
         elif self.adapter_type == 'single_value':
             self.single_value_adapter = SingleValueAdapter(self, self.sd_ref(), num_values=self.config.num_tokens)
-        elif self.adapter_type == 'redux':
-            vision_hidden_size = self.vision_encoder.config.hidden_size
-            self.redux_adapter = ReduxImageEncoder(vision_hidden_size, 4096, self.device, torch_dtype)
         elif self.adapter_type == 'control_lora':
             self.control_lora = ControlLoraAdapter(
                 self,
                 sd=self.sd_ref(),
                 config=self.config,
                 train_config=self.train_config
-            )
-        elif self.adapter_type == 'i2v':
-            self.i2v_adapter = I2VAdapter(
-                self,
-                sd=self.sd_ref(),
-                config=self.config,
-                train_config=self.train_config,
-                image_processor=self.image_processor,
-                vision_encoder=self.vision_encoder,
             )
         elif self.adapter_type == 'subpixel':
             self.subpixel_adapter = SubpixelAdapter(
@@ -311,16 +278,7 @@ class CustomAdapter(torch.nn.Module):
         sd = self.sd_ref()
         if self.config.type in ["text_encoder", "llm_adapter", "single_value", "control_lora", "subpixel"]:
             return
-        if self.config.type == 'photo_maker':
-            try:
-                self.image_processor = CLIPImageProcessor.from_pretrained(self.config.image_encoder_path)
-            except EnvironmentError:
-                self.image_processor = CLIPImageProcessor()
-            if self.config.image_encoder_path is None:
-                self.vision_encoder = PhotoMakerCLIPEncoder()
-            else:
-                self.vision_encoder = PhotoMakerCLIPEncoder.from_pretrained(self.config.image_encoder_path)
-        elif self.config.image_encoder_arch == 'clip' or self.config.image_encoder_arch == 'clip+':
+        if self.config.image_encoder_arch == 'clip' or self.config.image_encoder_arch == 'clip+':
             try:
                 self.image_processor = CLIPImageProcessor.from_pretrained(adapter_config.image_encoder_path)
             except EnvironmentError:
@@ -346,13 +304,6 @@ class CustomAdapter(torch.nn.Module):
             self.vision_encoder = SiglipVisionModel.from_pretrained(
                 adapter_config.image_encoder_path,
                 ignore_mismatched_sizes=True).to(self.device, dtype=get_torch_dtype(self.sd_ref().dtype))
-        elif self.config.image_encoder_arch == 'pixtral':
-            self.image_processor = PixtralVisionImagePreprocessorCompatible(
-                max_image_size=self.config.pixtral_max_image_size,
-            )
-            self.vision_encoder = PixtralVisionEncoderCompatible.from_pretrained(
-                adapter_config.image_encoder_path,
-            ).to(self.device, dtype=get_torch_dtype(self.sd_ref().dtype))
         elif self.config.image_encoder_arch == 'vit':
             try:
                 self.image_processor = ViTFeatureExtractor.from_pretrained(adapter_config.image_encoder_path)
@@ -1118,32 +1069,6 @@ class CustomAdapter(torch.nn.Module):
                     ).pixel_values
                 else:
                     clip_image = tensors_0_1
-                    
-                # if is pixtral
-                if self.config.image_encoder_arch == 'pixtral' and self.config.pixtral_random_image_size:
-                    # get the random size
-                    random_size = random.randint(256, self.config.pixtral_max_image_size)
-                    # images are already sized for max size, we have to fit them to the pixtral patch size to reduce / enlarge it farther.
-                    h, w = clip_image.shape[2], clip_image.shape[3]
-                    current_base_size = int(math.sqrt(w * h))
-                    ratio = current_base_size / random_size
-                    if ratio > 1:
-                        w = round(w / ratio)
-                        h = round(h / ratio)
-
-                    width_tokens = (w - 1) // self.image_processor.image_patch_size + 1
-                    height_tokens = (h - 1) // self.image_processor.image_patch_size + 1
-                    assert width_tokens > 0
-                    assert height_tokens > 0
-                    
-                    new_image_size = (
-                        width_tokens * self.image_processor.image_patch_size,
-                        height_tokens * self.image_processor.image_patch_size,
-                    )
-                    
-                    # resize the image
-                    clip_image = F.interpolate(clip_image, size=new_image_size, mode='bicubic', align_corners=False)
-                    
 
                 batch_size = clip_image.shape[0]
                 if self.config.control_image_dropout > 0 and is_training:

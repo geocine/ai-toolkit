@@ -49,9 +49,8 @@ from diffusers import StableDiffusionPipeline, StableDiffusionXLPipeline, T2IAda
     StableDiffusionXLImg2ImgPipeline, LCMScheduler, Transformer2DModel, AutoencoderTiny, ControlNetModel, \
     StableDiffusionXLControlNetPipeline, StableDiffusionControlNetPipeline, StableDiffusion3Pipeline, \
     StableDiffusion3Img2ImgPipeline, PixArtSigmaPipeline, AuraFlowPipeline, AuraFlowTransformer2DModel, FluxPipeline, \
-    FluxTransformer2DModel, FlowMatchEulerDiscreteScheduler, SD3Transformer2DModel, Lumina2Text2ImgPipeline, \
+    FluxTransformer2DModel, FlowMatchEulerDiscreteScheduler, SD3Transformer2DModel, \
     FluxControlPipeline
-from toolkit.models.lumina2 import Lumina2Transformer2DModel
 import diffusers
 from diffusers import \
     AutoencoderKL, \
@@ -812,102 +811,6 @@ class StableDiffusion:
             text_encoder[1].to(self.device_torch)
             text_encoder[1].requires_grad_(False)
             text_encoder[1].eval()
-            pipe.transformer = pipe.transformer.to(self.device_torch)
-            flush()
-        elif self.model_config.is_lumina2:
-            self.print_and_status_update("Loading Lumina2 model")
-            # base_model_path = "black-forest-labs/FLUX.1-schnell"
-            base_model_path = self.model_config.name_or_path_original
-            self.print_and_status_update("Loading transformer")
-            subfolder = 'transformer'
-            transformer_path = model_path
-            if os.path.exists(transformer_path):
-                subfolder = None
-                transformer_path = os.path.join(transformer_path, 'transformer')
-                # check if the path is a full checkpoint.
-                te_folder_path = os.path.join(model_path, 'text_encoder')
-                # if we have the te, this folder is a full checkpoint, use it as the base
-                if os.path.exists(te_folder_path):
-                    base_model_path = model_path
-
-            transformer = Lumina2Transformer2DModel.from_pretrained(
-                transformer_path,
-                subfolder=subfolder,
-                torch_dtype=dtype,
-            )
-            
-            if self.model_config.split_model_over_gpus:
-                raise ValueError("Splitting model over gpus is not supported for Lumina2 models")
-            
-            transformer.to(self.quantize_device, dtype=dtype)
-            flush()
-
-            if self.model_config.assistant_lora_path is not None or self.model_config.inference_lora_path is not None:
-                raise ValueError("Assistant LoRA is not supported for Lumina2 models currently")
-
-            if self.model_config.lora_path is not None:
-                raise ValueError("Loading LoRA is not supported for Lumina2 models currently")
-            
-            flush()
-            
-            if self.model_config.quantize:
-                # patch the state dict method
-                patch_dequantization_on_save(transformer)
-                quantization_type = get_qtype(self.model_config.qtype)
-                self.print_and_status_update("Quantizing transformer")
-                quantize(transformer, weights=quantization_type, **self.model_config.quantize_kwargs)
-                freeze(transformer)
-                transformer.to(self.device_torch)
-            else:
-                transformer.to(self.device_torch, dtype=dtype)
-
-            flush()
-
-            scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(base_model_path, subfolder="scheduler")
-            self.print_and_status_update("Loading vae")
-            vae = AutoencoderKL.from_pretrained(base_model_path, subfolder="vae", torch_dtype=dtype)
-            flush()
-            
-            if self.model_config.te_name_or_path is not None:
-                self.print_and_status_update("Loading TE")
-                tokenizer = AutoTokenizer.from_pretrained(self.model_config.te_name_or_path, torch_dtype=dtype)
-                text_encoder = AutoModel.from_pretrained(self.model_config.te_name_or_path, torch_dtype=dtype)
-            else:
-                self.print_and_status_update("Loading Gemma2")
-                tokenizer = AutoTokenizer.from_pretrained(base_model_path, subfolder="tokenizer", torch_dtype=dtype)
-                text_encoder = AutoModel.from_pretrained(base_model_path, subfolder="text_encoder", torch_dtype=dtype)
-
-            text_encoder.to(self.device_torch, dtype=dtype)
-            flush()
-
-            if self.model_config.quantize_te:
-                self.print_and_status_update("Quantizing Gemma2")
-                quantize(text_encoder, weights=get_qtype(self.model_config.qtype))
-                freeze(text_encoder)
-                flush()
-
-            self.print_and_status_update("Making pipe")
-            pipe: Lumina2Text2ImgPipeline = Lumina2Text2ImgPipeline(
-                scheduler=scheduler,
-                text_encoder=None,
-                tokenizer=tokenizer,
-                vae=vae,
-                transformer=None,
-            )
-            pipe.text_encoder = text_encoder
-            pipe.transformer = transformer
-
-            self.print_and_status_update("Preparing Model")
-
-            text_encoder = pipe.text_encoder
-            tokenizer = pipe.tokenizer
-
-            pipe.transformer = pipe.transformer.to(self.device_torch)
-
-            flush()
-            text_encoder.to(self.device_torch)
-            text_encoder.requires_grad_(False)
-            text_encoder.eval()
             pipe.transformer = pipe.transformer.to(self.device_torch)
             flush()
         else:

@@ -1,20 +1,12 @@
 import os
 from typing import List
 from toolkit.models.base_model import BaseModel
-from toolkit.stable_diffusion_model import StableDiffusion
 from toolkit.config_modules import ModelConfig
 from toolkit.paths import TOOLKIT_ROOT
 import importlib
 import pkgutil
 
-from toolkit.models.wan21 import Wan21, Wan21I2V
-from toolkit.models.cogview4 import CogView4
-
-BUILT_IN_MODELS = [
-    Wan21,
-    Wan21I2V,
-    CogView4,
-]
+BUILT_IN_MODELS = []
 
 
 def get_all_models() -> List[BaseModel]:
@@ -46,5 +38,6 @@ def get_model_class(config: ModelConfig):
     for ModelClass in all_models:
         if ModelClass.arch == config.arch:
             return ModelClass
-    # default to the legacy model
-    return StableDiffusion
+    # For Chroma-only setup, we should not fall back to StableDiffusion
+    # Instead, raise an error if the model architecture is not found
+    raise ValueError(f"Model architecture '{config.arch}' not found. Available architectures: {[m.arch for m in all_models]}")
