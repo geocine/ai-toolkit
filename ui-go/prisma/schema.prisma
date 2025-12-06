@@ -1,7 +1,7 @@
 
 datasource db {
   provider = "sqlite"
-  url      = "file:../../aitk_db.db"
+  url      = "file:../aitk_db.db"
 }
 
 generator db {
