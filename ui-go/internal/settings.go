@@ -2,17 +2,36 @@ package internal
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/geocine/aitoolkit/prisma/db"
 )
 
 var (
-	cache                 = make(map[string]string)
-	cacheLock             sync.RWMutex
-	defaultDatasetsFolder = "./datasets"
-	defaultTrainFolder    = "./training_data"
+	cache     = make(map[string]string)
+	cacheLock sync.RWMutex
 )
+
+// getToolkitRoot returns the parent directory of ui-go (the toolkit root)
+func getToolkitRoot() string {
+	// Get the executable's directory or current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	// Go up one level from ui-go to get the toolkit root
+	return filepath.Dir(cwd)
+}
+
+func getDefaultDatasetsFolder() string {
+	return filepath.Join(getToolkitRoot(), "datasets")
+}
+
+func getDefaultTrainFolder() string {
+	return filepath.Join(getToolkitRoot(), "output")
+}
 
 func GetDatasetsRoot(ctx context.Context, client *db.PrismaClient) (string, error) {
 	const key = "DATASETS_FOLDER"
@@ -26,7 +45,7 @@ func GetDatasetsRoot(ctx context.Context, client *db.PrismaClient) (string, erro
 	setting, err := client.Settings.FindFirst(
 		db.Settings.Key.Equals(key),
 	).Exec(ctx)
-	value := defaultDatasetsFolder
+	value := getDefaultDatasetsFolder()
 	if err == nil && setting != nil && setting.Value != "" {
 		value = setting.Value
 	}
@@ -48,7 +67,7 @@ func GetTrainingFolder(ctx context.Context, client *db.PrismaClient) (string, er
 	setting, err := client.Settings.FindFirst(
 		db.Settings.Key.Equals(key),
 	).Exec(ctx)
-	value := defaultTrainFolder
+	value := getDefaultTrainFolder()
 	if err == nil && setting != nil && setting.Value != "" {
 		value = setting.Value
 	}
