@@ -117,11 +117,22 @@ func PostJobsHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"error": "Job name already exists"})
 		return
 	}
+
+	// Find the highest queue position and add 1000
+	allJobs, err := client.Job.FindMany().OrderBy(db.Job.QueuePosition.Order(db.DESC)).Take(1).Exec(ctx)
+	var newQueuePosition int
+	if err != nil || len(allJobs) == 0 {
+		newQueuePosition = 1000
+	} else {
+		newQueuePosition = allJobs[0].QueuePosition + 1000
+	}
+
 	created, err := client.Job.CreateOne(
 		db.Job.Name.Set(body.Name),
 		db.Job.GpuIds.Set(string(gpuIdsStr)),
 		db.Job.JobConfig.Set(string(jobConfigStr)),
 		db.Job.CreatedAt.Set(time.Now()),
+		db.Job.QueuePosition.Set(newQueuePosition),
 	).Exec(ctx)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)

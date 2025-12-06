@@ -14,7 +14,7 @@ func GetSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	client := db.NewClient()
 	if err := client.Prisma.Connect(); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to connect to database"})
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to connect to database: " + err.Error()})
 		return
 	}
 	defer client.Prisma.Disconnect()
@@ -22,7 +22,7 @@ func GetSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	settings, err := client.Settings.FindMany().Exec(ctx)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to fetch settings"})
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to fetch settings: " + err.Error()})
 		return
 	}
 	settingsObject := make(map[string]string)
