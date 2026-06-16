@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { getDatasetsRoot, getTrainingFolder, getDataRoot } from '@/server/settings';
+import { resolveAllowedCatchAllPath, type CatchAllPathParam } from '@/server/safePath';
 
 /**
  * Serves embedded album art from an MP3 file's ID3v2 tag.
@@ -125,21 +126,16 @@ function extractArtFromTag(buf: Buffer): ArtResult {
   return null;
 }
 
-export async function GET(request: NextRequest, { params }: { params: { audioPath: string } }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ audioPath: CatchAllPathParam }> }) {
   const { audioPath } = await params;
   try {
-    const filepath = decodeURIComponent(audioPath);
-
     // Security check
     const datasetRoot = await getDatasetsRoot();
     const trainingRoot = await getTrainingFolder();
     const dataRoot = await getDataRoot();
     const allowedDirs = [datasetRoot, trainingRoot, dataRoot];
-    // Resolve so `..` segments collapse, then verify still under an allowed root.
-    // Substring `.includes('..')` false-positives on filenames containing `..` as text.
-    const resolved = path.resolve(filepath);
-    const isAllowed = allowedDirs.some(d => resolved === d || resolved.startsWith(d + path.sep));
-    if (!isAllowed) {
+    const resolved = resolveAllowedCatchAllPath(audioPath, allowedDirs);
+    if (!resolved) {
       return new NextResponse('Access denied', { status: 403 });
     }
 

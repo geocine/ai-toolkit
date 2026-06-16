@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { Readable } from 'stream';
 import { getDatasetsRoot, getTrainingFolder, getDataRoot } from '@/server/settings';
+import { resolveAllowedCatchAllPath, type CatchAllPathParam } from '@/server/safePath';
 
 const contentTypeMap: { [key: string]: string } = {
   // Images
@@ -29,29 +30,19 @@ const contentTypeMap: { [key: string]: string } = {
   '.ogg': 'audio/ogg',
 };
 
-export async function GET(request: NextRequest, { params }: { params: { imagePath: string } }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ imagePath: CatchAllPathParam }> }) {
   const { imagePath } = await params;
   try {
-    // Decode the path
-    const filepath = decodeURIComponent(imagePath);
-
     // Get allowed directories
     const datasetRoot = await getDatasetsRoot();
     const trainingRoot = await getTrainingFolder();
     const dataRoot = await getDataRoot();
 
     const allowedDirs = [datasetRoot, trainingRoot, dataRoot];
+    const resolved = resolveAllowedCatchAllPath(imagePath, allowedDirs);
 
-    // Security check: resolve the path so any `..` segments are collapsed,
-    // then ensure it's still under an allowed root. (Plain `.includes('..')`
-    // false-positives on filenames that contain `..` as text, e.g. an ellipsis.)
-    const resolved = path.resolve(filepath);
-    const isAllowed = allowedDirs.some(
-      allowedDir => resolved === allowedDir || resolved.startsWith(allowedDir + path.sep),
-    );
-
-    if (!isAllowed) {
-      console.warn(`Access denied: ${resolved} not in ${allowedDirs.join(', ')}`);
+    if (!resolved) {
+      console.warn(`Access denied: ${imagePath} not in ${allowedDirs.join(', ')}`);
       return new NextResponse('Access denied', { status: 403 });
     }
 
