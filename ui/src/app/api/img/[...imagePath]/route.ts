@@ -5,6 +5,7 @@ import path from 'path';
 import { Readable } from 'stream';
 import { getDatasetsRoot, getTrainingFolder, getDataRoot } from '@/server/settings';
 import { catchAllToFilePath } from '@/server/catchAllPath';
+import { resolveAllowedPath } from '@/server/safePath';
 
 const contentTypeMap: { [key: string]: string } = {
   // Images
@@ -47,13 +48,10 @@ export async function GET(request: NextRequest, { params }: { params: { imagePat
     // Security check: resolve the path so any `..` segments are collapsed,
     // then ensure it's still under an allowed root. (Plain `.includes('..')`
     // false-positives on filenames that contain `..` as text, e.g. an ellipsis.)
-    let resolved = path.resolve(filepath);
-    const isAllowed = allowedDirs.some(
-      allowedDir => resolved === allowedDir || resolved.startsWith(allowedDir + path.sep),
-    );
+    let resolved = resolveAllowedPath(filepath, allowedDirs);
 
-    if (!isAllowed) {
-      console.warn(`Access denied: ${resolved} not in ${allowedDirs.join(', ')}`);
+    if (!resolved) {
+      console.warn(`Access denied: ${filepath} not in ${allowedDirs.join(', ')}`);
       return new NextResponse('Access denied', { status: 403 });
     }
 
