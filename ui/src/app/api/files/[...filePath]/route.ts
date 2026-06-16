@@ -5,6 +5,7 @@ import path from 'path';
 import { Readable } from 'stream';
 import { getDatasetsRoot, getTrainingFolder } from '@/server/settings';
 import { catchAllToFilePath } from '@/server/catchAllPath';
+import { resolveAllowedPath } from '@/server/safePath';
 
 export async function GET(request: NextRequest, { params }: { params: { filePath: string | string[] } }) {
   const { filePath } = await params;
@@ -21,13 +22,10 @@ export async function GET(request: NextRequest, { params }: { params: { filePath
     // Security check: resolve so `..` segments collapse, then verify still under
     // an allowed root. Substring `.includes('..')` false-positives on filenames
     // containing `..` as text (e.g. an ellipsis in a filename).
-    const resolvedFilePath = path.resolve(decodedFilePath);
-    const isAllowed = allowedDirs.some(
-      allowedDir => resolvedFilePath === allowedDir || resolvedFilePath.startsWith(allowedDir + path.sep),
-    );
+    const resolvedFilePath = resolveAllowedPath(decodedFilePath, allowedDirs);
 
-    if (!isAllowed) {
-      console.warn(`Access denied: ${resolvedFilePath} not in ${allowedDirs.join(', ')}`);
+    if (!resolvedFilePath) {
+      console.warn(`Access denied: ${decodedFilePath} not in ${allowedDirs.join(', ')}`);
       return new NextResponse('Access denied', { status: 403 });
     }
 

@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { getDatasetsRoot, getTrainingFolder, getDataRoot } from '@/server/settings';
 import { catchAllToFilePath } from '@/server/catchAllPath';
+import { resolveAllowedPath } from '@/server/safePath';
 
 /**
  * Serves embedded album art from an MP3 file's ID3v2 tag.
@@ -140,9 +141,8 @@ export async function GET(request: NextRequest, { params }: { params: { audioPat
     const allowedDirs = [datasetRoot, trainingRoot, dataRoot];
     // Resolve so `..` segments collapse, then verify still under an allowed root.
     // Substring `.includes('..')` false-positives on filenames containing `..` as text.
-    const resolved = path.resolve(filepath);
-    const isAllowed = allowedDirs.some(d => resolved === d || resolved.startsWith(d + path.sep));
-    if (!isAllowed) {
+    const resolved = resolveAllowedPath(filepath, allowedDirs);
+    if (!resolved) {
       return new NextResponse('Access denied', { status: 403 });
     }
 
