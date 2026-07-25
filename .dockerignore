@@ -1,0 +1,16 @@
+.git
+.github
+.vscode
+
+datasets
+data
+output
+
+**/__pycache__
+**/*.pyc
+
+ui/.next
+ui/dist
+ui/node_modules
+
+.gocache
