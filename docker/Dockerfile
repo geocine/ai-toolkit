@@ -70,23 +70,14 @@ RUN cd /app/ai-toolkit/ui && npm ci
 
 # ---------------------------------------------------------------------------- #
 # Source code comes LAST. Only this layer (plus the UI build below) is rebuilt
-# on a code change, so servers only re-pull the (small) source, not the deps.
-# Clone to a temp dir and rsync the source in, preserving the dependency dirs
-# already populated above (ui/node_modules) and the manifests already used.
+# on a code change, so servers only re-pull the source, not the deps.
+# COPY local context so published images include fork fixes (not upstream clone).
+# ui/node_modules is dockerignored so the npm ci layer above is preserved.
 # ---------------------------------------------------------------------------- #
 ARG CACHEBUST=1234
-ARG GIT_COMMIT=main
-RUN echo "Cache bust: ${CACHEBUST}" && \
-    git clone https://github.com/ostris/ai-toolkit.git /tmp/ai-toolkit-src && \
-    cd /tmp/ai-toolkit-src && \
-    git checkout ${GIT_COMMIT} && \
-    rsync -a --delete \
-        --exclude 'ui/node_modules' \
-        --exclude 'requirements.txt' \
-        --exclude 'ui/package.json' \
-        --exclude 'ui/package-lock.json' \
-        /tmp/ai-toolkit-src/ /app/ai-toolkit/ && \
-    rm -rf /tmp/ai-toolkit-src
+RUN echo "Cache bust: ${CACHEBUST}"
+COPY . /app/ai-toolkit/
+RUN mkdir -p /app/ai-toolkit/datasets /app/ai-toolkit/output /app/ai-toolkit/data
 
 # Build UI (re-runs on code change, but reuses the cached node_modules above).
 # update_db runs first because it does `prisma generate`, which creates the
@@ -103,6 +94,6 @@ EXPOSE 8675
 WORKDIR /
 
 COPY docker/start.sh /start.sh
-RUN chmod +x /start.sh
+RUN sed -i 's/\r$//' /start.sh && chmod +x /start.sh
 
 CMD ["/start.sh"]
