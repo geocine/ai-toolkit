@@ -32,6 +32,7 @@ import path from 'path';
 import { pipeline } from 'stream';
 import prisma from './prisma';
 import { defaultDatasetsFolder, defaultTrainFolder, defaultDataRoot, TOOLKIT_ROOT } from './paths';
+import { resolveAllowedPath } from './safePath';
 
 const isDev = process.argv.includes('dev');
 
@@ -287,28 +288,23 @@ async function serveFile(req: http.IncomingMessage, res: http.ServerResponse, pr
       .map(decodeURIComponent)
       .join('/');
 
-    let resolvedFilePath = path.resolve(decodedFilePath);
     const checkAllowed = (roots: Roots) => {
       const dirs = isImg ? [roots.datasets, roots.training, roots.data] : [roots.datasets, roots.training];
-      return {
-        dirs,
-        allowed: dirs.some(
-          allowedDir => resolvedFilePath === allowedDir || resolvedFilePath.startsWith(allowedDir + path.sep),
-        ),
-      };
+      return { dirs, resolved: resolveAllowedPath(decodedFilePath, dirs) };
     };
-    let { dirs: allowedDirs, allowed: isAllowed } = checkAllowed(await getRoots());
-    if (!isAllowed) {
+    let { dirs: allowedDirs, resolved } = checkAllowed(await getRoots());
+    if (!resolved) {
       // The cached roots may be stale — settings can be changed from the UI at
       // any moment. Re-fetch before denying so a just-updated path never 403s.
-      ({ dirs: allowedDirs, allowed: isAllowed } = checkAllowed(await getRoots(true)));
+      ({ dirs: allowedDirs, resolved } = checkAllowed(await getRoots(true)));
     }
-    if (!isAllowed) {
-      console.warn(`Access denied: ${resolvedFilePath} not in ${allowedDirs.join(', ')}`);
+    if (!resolved) {
+      console.warn(`Access denied: ${decodedFilePath} not in ${allowedDirs.join(', ')}`);
       res.writeHead(403);
       res.end('Access denied');
       return true;
     }
+    let resolvedFilePath = resolved;
 
     // ?thumb=1 serves the 300x300 thumb from the sibling .thumbs folder
     // (<name>.<ext>.png when the source has alpha, else <name>.<ext>.jpg),
