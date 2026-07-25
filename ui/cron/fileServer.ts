@@ -32,6 +32,7 @@ import path from 'path';
 import { pipeline } from 'stream';
 import prisma from './prisma';
 import { defaultDatasetsFolder, defaultTrainFolder, defaultDataRoot } from './paths';
+import { resolveAllowedCatchAllPath } from './safePath';
 
 const isDev = process.argv.includes('dev');
 
@@ -113,19 +114,15 @@ async function serveFile(req: http.IncomingMessage, res: http.ServerResponse, pr
     const isImg = prefix === '/api/img/';
     const urlPath = (req.url || '').split('?')[0];
     const rest = urlPath.slice(prefix.length);
-    const decodedFilePath = rest
-      .split('/')
-      .map(decodeURIComponent)
-      .join('/');
+    // Pass URL segments raw; resolveAllowedCatchAllPath decodes each part once
+    // (same model as Next.js catch-all [...path] params).
+    const pathParts = rest.split('/');
 
-    const resolvedFilePath = path.resolve(decodedFilePath);
     const roots = await getRoots();
     const allowedDirs = isImg ? [roots.datasets, roots.training, roots.data] : [roots.datasets, roots.training];
-    const isAllowed = allowedDirs.some(
-      allowedDir => resolvedFilePath === allowedDir || resolvedFilePath.startsWith(allowedDir + path.sep),
-    );
-    if (!isAllowed) {
-      console.warn(`Access denied: ${resolvedFilePath} not in ${allowedDirs.join(', ')}`);
+    const resolvedFilePath = resolveAllowedCatchAllPath(pathParts, allowedDirs);
+    if (!resolvedFilePath) {
+      console.warn(`Access denied: ${rest} not in ${allowedDirs.join(', ')}`);
       res.writeHead(403);
       res.end('Access denied');
       return;
