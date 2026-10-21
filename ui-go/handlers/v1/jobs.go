@@ -8,105 +8,21 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
 	"unicode"
 
-	"github.com/geocine/aitoolkit/internal/artifacts"
 	"github.com/geocine/aitoolkit/internal/engines"
-	"github.com/geocine/aitoolkit/internal/jobstate"
+	"github.com/geocine/aitoolkit/internal/jobview"
 	"github.com/geocine/aitoolkit/internal/jsonx"
 	"github.com/geocine/aitoolkit/internal/proc"
 	"github.com/geocine/aitoolkit/internal/remote"
-	"github.com/geocine/aitoolkit/internal/settings"
 	"github.com/geocine/aitoolkit/internal/state"
 	"github.com/geocine/aitoolkit/internal/store"
 	"github.com/geocine/aitoolkit/internal/supervisor"
 	"github.com/geocine/aitoolkit/internal/v1api"
 )
-
-type policyView struct {
-	AutoResume       bool    `json:"auto_resume"`
-	MaxAutoResumes   int     `json:"max_auto_resumes"`
-	AutoUploadRemote *string `json:"auto_upload_remote"`
-	SyncRemote       *string `json:"sync_remote"`
-}
-
-type jobView struct {
-	ID               string                `json:"id"`
-	Name             string                `json:"name"`
-	Type             string                `json:"type"`
-	Ref              *string               `json:"ref"`
-	GpuIDs           string                `json:"gpu_ids"`
-	State            string                `json:"state"`
-	Status           string                `json:"status"`
-	Info             string                `json:"info"`
-	Step             int                   `json:"step"`
-	TotalSteps       *int                  `json:"total_steps"`
-	Speed            string                `json:"speed"`
-	QueuePosition    int                   `json:"queue_position"`
-	Pid              *int                  `json:"pid"`
-	CreatedAt        string                `json:"created_at"`
-	UpdatedAt        string                `json:"updated_at"`
-	Config           any                   `json:"config"`
-	Policy           policyView            `json:"policy"`
-	Attempts         int                   `json:"attempts"`
-	LastAttempt      *state.Attempt        `json:"last_attempt"`
-	LatestCheckpoint *artifacts.Checkpoint `json:"latest_checkpoint"`
-}
-
-func jobFolder(ctx context.Context, name string) (string, error) {
-	root, err := settings.TrainingFolder(ctx)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(root, name), nil
-}
-
-// view builds the client-facing job.
-func view(ctx context.Context, j *store.Job) (*jobView, error) {
-	v := &jobView{
-		ID: j.ID, Name: j.Name, Type: j.JobType, Ref: j.JobRef, GpuIDs: j.GpuIDs,
-		State:  jobstate.FromStatus(j.Status, j.Step, j.Info),
-		Status: j.Status, Info: j.Info, Step: j.Step, TotalSteps: j.TotalSteps, Speed: j.SpeedString,
-		QueuePosition: j.QueuePosition, Pid: j.Pid,
-		CreatedAt: v1api.Time(j.CreatedAt.Time), UpdatedAt: v1api.Time(j.UpdatedAt.Time),
-	}
-	if cfg, err := jsonx.Parse([]byte(j.JobConfig)); err == nil {
-		v.Config = cfg
-	} else {
-		v.Config = j.JobConfig // not JSON: hand it back as stored
-	}
-	auto, max, upload, err := state.EffectivePolicy(ctx, j.ID)
-	if err != nil {
-		return nil, err
-	}
-	p, err := state.GetPolicy(ctx, j.ID)
-	if err != nil {
-		return nil, err
-	}
-	v.Policy = policyView{AutoResume: auto, MaxAutoResumes: max, SyncRemote: p.SyncRemote}
-	if upload != "" {
-		v.Policy.AutoUploadRemote = &upload
-	}
-	attempts, err := state.Attempts(ctx, j.ID)
-	if err != nil {
-		return nil, err
-	}
-	v.Attempts = len(attempts)
-	if len(attempts) > 0 {
-		v.LastAttempt = attempts[len(attempts)-1]
-	}
-	if folder, err := jobFolder(ctx, j.Name); err == nil {
-		if cps, err := artifacts.Checkpoints(folder); err == nil && len(cps) > 0 {
-			latest := cps[len(cps)-1]
-			v.LatestCheckpoint = &latest
-		}
-	}
-	return v, nil
-}
 
 // loadJob reads the path's job, answering 404 itself when missing.
 func loadJob(w http.ResponseWriter, r *http.Request) (*store.Job, bool) {
@@ -133,7 +49,7 @@ func respondJob(w http.ResponseWriter, r *http.Request, status int, id string) {
 		v1api.Fail(w, v1api.CodeNotFound, "job not found")
 		return
 	}
-	v, err := view(r.Context(), j)
+	v, err := jobview.View(r.Context(), j)
 	if err != nil {
 		v1api.Internal(w, r, err)
 		return
@@ -157,9 +73,9 @@ func listJobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	want := r.URL.Query().Get("state")
-	items := []*jobView{}
+	items := []*jobview.Job{}
 	for _, j := range jobs {
-		v, err := view(ctx, j)
+		v, err := jobview.View(ctx, j)
 		if err != nil {
 			v1api.Internal(w, r, err)
 			return
@@ -602,3 +518,5 @@ func jobAttempts(w http.ResponseWriter, r *http.Request) {
 	}
 	v1api.Items(w, attempts)
 }
+
+func jobFolder(ctx context.Context, name string) (string, error) { return jobview.Folder(ctx, name) }
