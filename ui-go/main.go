@@ -1,139 +1,124 @@
+// Command server is the Go backend for ai-toolkit: the HTTP API of the
+// upstream Next.js UI (ui/src/app/api) plus its job queue worker (ui/cron),
+// against the same database, job folders and Python entry point (run.py).
 package main
 
 import (
-	"encoding/json"
+	"context"
+	"errors"
+	"flag"
 	"log"
+	"net"
 	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
-	"github.com/geocine/aitoolkit/handlers/auth"
-	"github.com/geocine/aitoolkit/handlers/caption"
-	"github.com/geocine/aitoolkit/handlers/cpu"
 	"github.com/geocine/aitoolkit/handlers/datasets"
-	"github.com/geocine/aitoolkit/handlers/files"
-	"github.com/geocine/aitoolkit/handlers/gpu"
-	"github.com/geocine/aitoolkit/handlers/img"
+	"github.com/geocine/aitoolkit/handlers/inference"
+	"github.com/geocine/aitoolkit/handlers/jobfiles"
 	"github.com/geocine/aitoolkit/handlers/jobs"
+	"github.com/geocine/aitoolkit/handlers/media"
 	"github.com/geocine/aitoolkit/handlers/queue"
 	"github.com/geocine/aitoolkit/handlers/settings"
-	"github.com/geocine/aitoolkit/handlers/zip"
+	"github.com/geocine/aitoolkit/handlers/system"
+	"github.com/geocine/aitoolkit/internal/httpx"
+	"github.com/geocine/aitoolkit/internal/paths"
+	"github.com/geocine/aitoolkit/internal/store"
+	"github.com/geocine/aitoolkit/internal/worker"
 )
 
-// Middleware to allow public routes and apply custom logic to others
-func publicRouteMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		publicRoutes := []string{"/api/img/", "/api/files/"}
-		for _, prefix := range publicRoutes {
-			if strings.HasPrefix(r.URL.Path, prefix) {
-				next.ServeHTTP(w, r)
-				return
-			}
-		}
-		// Custom logic for non-public routes can go here (e.g., auth)
-		// For now, just allow all
-		next.ServeHTTP(w, r)
-	})
+// NewMux registers every API route. Shared with the parity tests.
+func NewMux() *http.ServeMux {
+	mux := http.NewServeMux()
+	jobs.Register(mux)
+	jobfiles.Register(mux)
+	queue.Register(mux)
+	settings.Register(mux)
+	media.Register(mux)
+	datasets.Register(mux)
+	system.Register(mux)
+	inference.Register(mux)
+	return mux
 }
 
 func main() {
-	mux := http.NewServeMux()
+	if len(os.Args) > 1 && os.Args[1] == worker.RelayArg {
+		os.Exit(worker.RunRelay(os.Args[2:]))
+	}
 
-	mux.HandleFunc("/api/jobs", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.Method {
-		case http.MethodGet:
-			jobs.GetJobsHandler(w, r)
-		case http.MethodPost:
-			jobs.PostJobsHandler(w, r)
-		default:
-			w.WriteHeader(http.StatusMethodNotAllowed)
-		}
-	})
-	// Add subroutes
-	mux.HandleFunc("/api/jobs/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		path := r.URL.Path
-		if strings.HasSuffix(path, "/files") {
-			jobs.FilesHandler(w, r)
-			return
-		}
-		if strings.HasSuffix(path, "/log") {
-			jobs.LogHandler(w, r)
-			return
-		}
-		if strings.HasSuffix(path, "/samples") {
-			jobs.SamplesHandler(w, r)
-			return
-		}
-		if strings.HasSuffix(path, "/stop") {
-			jobs.StopHandler(w, r)
-			return
-		}
-		if strings.HasSuffix(path, "/start") {
-			jobs.StartHandler(w, r)
-			return
-		}
-		if strings.HasSuffix(path, "/delete") {
-			jobs.DeleteHandler(w, r)
-			return
-		}
-		if strings.HasSuffix(path, "/mark_stopped") {
-			jobs.MarkStoppedHandler(w, r)
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Not found"})
-	})
+	defaultPort := 8675
+	if v, err := strconv.Atoi(os.Getenv("PORT")); err == nil {
+		defaultPort = v
+	}
+	port := flag.Int("port", defaultPort, "port to listen on (env PORT)")
+	host := flag.String("host", "0.0.0.0", "address to listen on")
+	uiDir := flag.String("ui-dir", os.Getenv("AI_TOOLKIT_UI_DIR"), "static frontend to serve at / (env AI_TOOLKIT_UI_DIR; default ui-go/web/dist when present)")
+	noWorker := flag.Bool("no-worker", false, "do not run the job queue worker (e.g. while the Next worker runs)")
+	flag.Parse()
 
-	// Queue routes
-	mux.HandleFunc("/api/queue", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodGet {
-			queue.GetQueuesHandler(w, r)
-		} else {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-		}
-	})
-	mux.HandleFunc("/api/queue/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		path := r.URL.Path
-		if strings.HasSuffix(path, "/start") {
-			queue.StartHandler(w, r)
-			return
-		}
-		if strings.HasSuffix(path, "/stop") {
-			queue.StopHandler(w, r)
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Not found"})
-	})
-	mux.HandleFunc("/api/settings", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			settings.GetSettingsHandler(w, r)
-		case http.MethodPost:
-			settings.PostSettingsHandler(w, r)
-		default:
-			w.WriteHeader(http.StatusMethodNotAllowed)
-		}
-	})
-	mux.HandleFunc("/api/img/delete", img.DeleteHandler)
-	mux.HandleFunc("/api/img/caption", img.CaptionHandler)
-	mux.HandleFunc("/api/img/upload", img.UploadHandler)
-	mux.HandleFunc("/api/img/", img.ServeHandler)
-	mux.HandleFunc("/api/gpu", gpu.RouteHandler)
-	mux.HandleFunc("/api/cpu", cpu.RouteHandler)
-	mux.HandleFunc("/api/auth", auth.RouteHandler)
-	mux.HandleFunc("/api/datasets/listImages", datasets.ListImagesHandler)
-	mux.HandleFunc("/api/datasets/upload", datasets.UploadHandler)
-	mux.HandleFunc("/api/datasets/create", datasets.CreateHandler)
-	mux.HandleFunc("/api/datasets/delete", datasets.DeleteHandler)
-	mux.HandleFunc("/api/datasets/list", datasets.ListHandler)
-	mux.HandleFunc("/api/files/", files.ServeHandler)
-	mux.HandleFunc("/api/caption/", caption.ServeHandler)
-	mux.HandleFunc("/api/zip", zip.RouteHandler)
+	log.Printf("TOOLKIT_ROOT: %s", paths.ToolkitRoot)
+	if err := store.Open(paths.DBPath); err != nil {
+		log.Fatal(err)
+	}
 
-	log.Println("Listening on :8080...")
-	log.Fatal(http.ListenAndServe(":8080", publicRouteMiddleware(mux)))
+	mux := NewMux()
+	if dir := resolveUIDir(*uiDir); dir != "" {
+		log.Printf("Serving frontend from %s", dir)
+		mux.Handle("/", spa(dir))
+	}
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	if !*noWorker {
+		go worker.Run(ctx)
+	}
+
+	srv := &http.Server{
+		Addr:              net.JoinHostPort(*host, strconv.Itoa(*port)),
+		Handler:           httpx.Auth(mux),
+		ReadHeaderTimeout: 30 * time.Second,
+	}
+	go func() {
+		<-ctx.Done()
+		shutdown, done := context.WithTimeout(context.Background(), 5*time.Second)
+		defer done()
+		srv.Shutdown(shutdown)
+	}()
+	log.Printf("Listening on http://%s", srv.Addr)
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatal(err)
+	}
+}
+
+func resolveUIDir(flagValue string) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	def := filepath.Join(paths.ToolkitRoot, "ui-go", "web", "dist")
+	if st, err := os.Stat(filepath.Join(def, "index.html")); err == nil && !st.IsDir() {
+		return def
+	}
+	return ""
+}
+
+// spa serves dir, falling back to index.html for client-side routes.
+func spa(dir string) http.Handler {
+	files := http.FileServer(http.Dir(dir))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			http.NotFound(w, r)
+			return
+		}
+		p := filepath.Join(dir, filepath.FromSlash(filepath.Clean("/"+r.URL.Path)))
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			files.ServeHTTP(w, r)
+			return
+		}
+		http.ServeFile(w, r, filepath.Join(dir, "index.html"))
+	})
 }
