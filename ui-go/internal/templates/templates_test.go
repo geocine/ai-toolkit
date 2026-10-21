@@ -204,6 +204,19 @@ func TestRenderSD15Warns(t *testing.T) {
 	if got := get(t, res.Config, "config", "process", 0, "model", "arch"); got != "sd15" {
 		t.Errorf("arch = %v", got)
 	}
+
+	// the fix the warning suggests must render: sd15's defaults, then arch sd1
+	res, err = Render(context.Background(), RenderRequest{Arch: "sd15", Datasets: []string{"x"},
+		Overrides: map[string]any{"config.process[0].model.arch": "sd1"}}, Options{DatasetsRoot: t.TempDir()})
+	if err != nil {
+		t.Fatalf("sd15 with the sd1 override: %v", err)
+	}
+	if got := get(t, res.Config, "config", "process", 0, "model", "arch"); got != "sd1" {
+		t.Errorf("arch after override = %v", got)
+	}
+	if got := get(t, res.Config, "config", "process", 0, "model", "name_or_path"); got != "stable-diffusion-v1-5/stable-diffusion-v1-5" {
+		t.Errorf("sd15 defaults not applied: name_or_path = %v", got)
+	}
 }
 
 func TestRenderRejects(t *testing.T) {
