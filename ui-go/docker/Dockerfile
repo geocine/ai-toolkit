@@ -19,9 +19,18 @@ COPY ui-go/ ./
 RUN CGO_ENABLED=0 go test ./internal/... && \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/aitk-server .
 
+# The frontend: whatever ui-go/web builds to dist/ is served at / by the Go server.
+FROM node:22-alpine AS web-build
+WORKDIR /web
+COPY ui-go/web/package.json ui-go/web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY ui-go/web/ ./
+RUN npm run build
+
 FROM ${BASE_IMAGE}
 
 COPY --from=go-build /out/aitk-server /app/ai-toolkit/ui-go/aitk-server
+COPY --from=web-build /web/dist /app/ai-toolkit/ui-go/web/dist
 COPY ui-go/docker/start-go.sh /tmp/start-go.sh
 
 # Keep upstream's pod setup (ssh, env export) and replace only its final

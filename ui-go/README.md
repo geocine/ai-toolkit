@@ -2,8 +2,11 @@
 
 A Go port of the ai-toolkit UI backend: the HTTP API of upstream's Next.js UI
 (`ui/src/app/api`) and its job queue worker (`ui/cron`), working against the
-same database, job folders and Python entry point (`run.py`). There is no
-frontend here; point your own UI at the API.
+same database, job folders and Python entry point (`run.py`).
+
+The frontend lives in `web/` and is served by the Go server at `/`. What is
+there now is a placeholder (API status, GPUs, jobs); replace the folder with
+the real UI and keep `npm run build` emitting `web/dist/`.
 
 ## How this fork stays rebase-friendly
 
@@ -52,6 +55,7 @@ internal/settings       cached settings (DATASETS_FOLDER, TRAINING_FOLDER, ...)
 internal/httpx          JSON helpers, route registry, auth middleware
 internal/{paths,safepath,proc,apicache,engines,jsonx}
 handlers/<group>        one package per upstream route group
+web/                    frontend (Vite + React placeholder), built to web/dist
 parity/                 drift tests against upstream's files
 docker/                 image layer over upstream's image, compose override
 scripts/                build_and_push.sh, parity.sh
@@ -62,8 +66,12 @@ scripts/                build_and_push.sh, parity.sh
 ```bash
 cd ui && npx prisma db push && cd ..   # once: create/migrate aitk_db.db with upstream's schema
 cd ui-go
-go run . --port 8675                   # API on :8675, queue worker included
+(cd web && npm ci && npm run build)    # frontend -> web/dist, served at /
+go run . --port 8675                   # API + frontend on :8675, queue worker included
 ```
+
+For frontend work, run `npm run dev` in `web/` (Vite on :5173, `/api` proxied
+to the Go server on :8675, or `AITK_API`).
 
 Flags: `--port` (env `PORT`, default 8675), `--host`, `--ui-dir` (env
 `AI_TOOLKIT_UI_DIR`, a built frontend to serve at `/`, default `ui-go/web/dist`
