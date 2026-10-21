@@ -10,11 +10,13 @@ import (
 	"strings"
 
 	"github.com/geocine/aitoolkit/internal/jsonx"
+	"github.com/geocine/aitoolkit/internal/paths"
 )
 
 const (
 	datasetsScheme = "aitk://datasets"
 	trainingScheme = "aitk://training"
+	rootScheme     = "aitk://root"
 )
 
 // slashed is a path with forward slashes, cleaned.
@@ -103,6 +105,13 @@ func ToPortable(config string, datasetsRoot, trainingRoot string) (json.RawMessa
 			}
 			return trainingScheme + "/" + rel, true
 		}
+		// anything else of this checkout (e.g. sqlite_db_path)
+		if rel, ok := under(paths.ToolkitRoot, s); ok {
+			if rel == "" {
+				return rootScheme, true
+			}
+			return rootScheme + "/" + rel, true
+		}
 		return "", false
 	})
 	out, err := compact(v)
@@ -142,7 +151,9 @@ func FromPortable(config json.RawMessage, datasetsRoot, trainingRoot string) (st
 
 // localPath resolves one aitk:// path on this server.
 func localPath(s, datasetsRoot, trainingRoot string) (string, bool) {
-	for _, m := range []struct{ scheme, root string }{{datasetsScheme, datasetsRoot}, {trainingScheme, trainingRoot}} {
+	for _, m := range []struct{ scheme, root string }{
+		{datasetsScheme, datasetsRoot}, {trainingScheme, trainingRoot}, {rootScheme, paths.ToolkitRoot},
+	} {
 		if s == m.scheme {
 			return m.root, true
 		}

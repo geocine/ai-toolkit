@@ -218,7 +218,10 @@ func TestExportImportResume(t *testing.T) {
 	if m.Lease == nil || m.Lease.NodeID != aNode {
 		t.Fatalf("lease %+v, want node %s", m.Lease, aNode)
 	}
-	if strings.Contains(string(m.Config), a.root) || strings.Contains(string(m.Config), filepath.ToSlash(a.root)) {
+	// the root as it would appear inside JSON too (Windows backslashes escaped)
+	escaped, _ := json.Marshal(a.root)
+	if strings.Contains(string(m.Config), a.root) || strings.Contains(string(m.Config), filepath.ToSlash(a.root)) ||
+		strings.Contains(string(m.Config), strings.Trim(string(escaped), `"`)) {
 		t.Fatalf("config still has machine paths: %s", m.Config)
 	}
 	if !strings.Contains(string(m.Config), `"aitk://datasets/set1"`) || !strings.Contains(string(m.Config), `"aitk://datasets/set1/sub"`) ||

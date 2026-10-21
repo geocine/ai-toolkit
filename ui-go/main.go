@@ -28,6 +28,7 @@ import (
 	"github.com/geocine/aitoolkit/internal/state"
 	"github.com/geocine/aitoolkit/internal/store"
 	"github.com/geocine/aitoolkit/internal/supervisor"
+	"github.com/geocine/aitoolkit/internal/v1api"
 	"github.com/geocine/aitoolkit/internal/worker"
 )
 
@@ -107,8 +108,12 @@ func resolveUIDir(flagValue string) string {
 func spa(dir string) http.Handler {
 	files := http.FileServer(http.Dir(dir))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/") {
+		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/mcp" {
 			http.NotFound(w, r)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/v1/") || r.URL.Path == "/v1" {
+			v1api.Fail(w, v1api.CodeNotFound, "no such endpoint: "+r.Method+" "+r.URL.Path)
 			return
 		}
 		p := filepath.Join(dir, filepath.FromSlash(filepath.Clean("/"+r.URL.Path)))
