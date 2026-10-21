@@ -79,7 +79,10 @@ func View(ctx context.Context, j *store.Job) (*Job, error) {
 	if err != nil {
 		return nil, err
 	}
-	v.Policy = Policy{AutoResume: auto, MaxAutoResumes: max, SyncRemote: p.SyncRemote}
+	v.Policy = Policy{AutoResume: auto, MaxAutoResumes: max}
+	if p.SyncRemote != nil && *p.SyncRemote != "" {
+		v.Policy.SyncRemote = p.SyncRemote
+	}
 	if upload != "" {
 		v.Policy.AutoUploadRemote = &upload
 	}

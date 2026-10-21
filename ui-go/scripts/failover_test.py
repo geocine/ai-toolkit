@@ -151,7 +151,7 @@ return job.id;""")
             last = cur
         if j["state"] in ("failed", "completed"):
             raise SystemExit(f"job ended on node-a before the failover: {j['state']} {j['info']}")
-        if j["step"] >= 45 and (sync or {}).get("step", 0) >= 40:
+        if j["step"] >= 45 and ((sync or {}).get("step") or 0) >= 40:
             return jid, sync
         time.sleep(2)
 
