@@ -24,6 +24,7 @@ controlnet_aux==0.0.10
 python-dotenv
 bitsandbytes
 hf_transfer
+hf_xet
 lpips
 pytorch_fid
 optimum-quanto==0.2.4

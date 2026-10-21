@@ -8,6 +8,8 @@ services:
       - "8675:8675"
     volumes:
       - ~/.cache/huggingface/hub:/root/.cache/huggingface/hub
+      # Persist Xet chunk cache across restarts (used with Hub large-file downloads)
+      - ~/.cache/huggingface/xet:/root/.cache/huggingface/xet
       - ./aitk_db.db:/app/ai-toolkit/aitk_db.db
       - ./datasets:/app/ai-toolkit/datasets
       - ./output:/app/ai-toolkit/output
@@ -16,6 +18,10 @@ services:
       - AI_TOOLKIT_AUTH=${AI_TOOLKIT_AUTH:-password}
       - NODE_ENV=production
       - TZ=UTC
+      # Xet-backed Hub downloads (large safetensors). Override HF_HUB_DISABLE_XET=1 for HTTP fallback.
+      - HF_XET_HIGH_PERFORMANCE=${HF_XET_HIGH_PERFORMANCE:-1}
+      - HF_HUB_DISABLE_XET=${HF_HUB_DISABLE_XET:-0}
+      - HF_HUB_DOWNLOAD_TIMEOUT=${HF_HUB_DOWNLOAD_TIMEOUT:-120}
     deploy:
       resources:
         reservations:
