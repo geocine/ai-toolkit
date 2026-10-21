@@ -4,6 +4,7 @@
 package httpx
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -11,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/geocine/aitoolkit/internal/state"
 )
 
 // JSON writes v like NextResponse.json(v, {status}).
@@ -69,31 +72,52 @@ func Routes() []string {
 
 // Public routes are fetched by plain <img>/<audio> tags, which cannot send
 // the bearer token.
-var publicRoutes = []string{"/api/img/", "/api/files/", "/api/audio/art/"}
+var publicRoutes = []string{"/api/img/", "/api/files/", "/api/audio/art/", "/v1/health"}
 
-// Auth mirrors ui/src/middleware.ts: when AI_TOOLKIT_AUTH is set, every
-// /api/ route except the public media routes needs `Authorization: Bearer <token>`.
+// guarded are the path prefixes that need a token when auth is on.
+var guarded = []string{"/api/", "/v1/", "/mcp"}
+
+// Auth mirrors ui/src/middleware.ts and extends it to /v1 and /mcp: when
+// AI_TOOLKIT_AUTH is set or any API key exists, those routes (except the
+// public ones) need `Authorization: Bearer <token>`, where the token is
+// AI_TOOLKIT_AUTH or an active API key. With neither, the server is open,
+// like upstream.
 func Auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		want := os.Getenv("AI_TOOLKIT_AUTH")
-		if want == "" || !strings.HasPrefix(r.URL.Path, "/api/") {
+		if !needsToken(r.URL.Path) || (want == "" && !state.HasKeys()) {
 			next.ServeHTTP(w, r)
 			return
-		}
-		for _, p := range publicRoutes {
-			if strings.HasPrefix(r.URL.Path, p) {
-				next.ServeHTTP(w, r)
-				return
-			}
 		}
 		token := ""
 		if parts := strings.Split(r.Header.Get("Authorization"), " "); len(parts) > 1 {
 			token = parts[1]
 		}
-		if token == "" || token != want {
-			JSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		ok := token != "" && ((want != "" && subtle.ConstantTimeCompare([]byte(token), []byte(want)) == 1) ||
+			state.VerifyKey(r.Context(), token))
+		if !ok {
+			if strings.HasPrefix(r.URL.Path, "/api/") {
+				JSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+			} else {
+				JSON(w, http.StatusUnauthorized, map[string]any{"error": map[string]string{
+					"code": "unauthorized", "message": "missing or invalid bearer token"}})
+			}
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func needsToken(path string) bool {
+	for _, p := range publicRoutes {
+		if strings.HasPrefix(path, p) {
+			return false
+		}
+	}
+	for _, p := range guarded {
+		if strings.HasPrefix(path, p) {
+			return true
+		}
+	}
+	return false
 }

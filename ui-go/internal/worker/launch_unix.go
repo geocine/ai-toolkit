@@ -35,7 +35,9 @@ func launch(s launchSpec) (int, error) {
 		return 0, err
 	}
 	pid := cmd.Process.Pid
+	setWatched(pid, true)
 	go func() {
+		defer setWatched(pid, false)
 		err := cmd.Wait()
 		if err == nil {
 			return
