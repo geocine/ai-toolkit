@@ -10,6 +10,8 @@ import (
 	"mime/multipart"
 	"os"
 	"path/filepath"
+	"sort"
+	"time"
 
 	"github.com/geocine/aitoolkit/internal/store"
 	_ "modernc.org/sqlite"
@@ -34,12 +36,24 @@ func writeFixtures(root string) error {
 		"output/fixture_job/samples/1700000000001__000000100_1.png": pngImage(12, 12, false),
 		"outside-secret.png":                                        pngImage(2, 2, false),
 	}
-	for rel, data := range files {
+	// sorted, with fixed distinct mtimes: listings ordered by mtime (loras,
+	// samples) must come out the same on both sides
+	names := make([]string, 0, len(files))
+	for rel := range files {
+		names = append(names, rel)
+	}
+	sort.Strings(names)
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i, rel := range names {
 		p := filepath.Join(root, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(p, data, 0o644); err != nil {
+		if err := os.WriteFile(p, files[rel], 0o644); err != nil {
+			return err
+		}
+		mt := base.Add(time.Duration(i) * time.Minute)
+		if err := os.Chtimes(p, mt, mt); err != nil {
 			return err
 		}
 	}
