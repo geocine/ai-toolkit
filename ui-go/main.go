@@ -80,7 +80,7 @@ func main() {
 
 	// media.Intercept serves the media GETs before the mux, which would
 	// otherwise redirect a proxy-decoded `/api/img//abs/path` (see media).
-	handler := httpx.Auth(media.Intercept(mux))
+	handler := httpx.CORS(httpx.Auth(media.Intercept(mux)))
 	mcpserver.SetAPI(handler)
 	srv := &http.Server{
 		Addr:              net.JoinHostPort(*host, strconv.Itoa(*port)),
