@@ -195,7 +195,9 @@ def main():
     job, first_step = node_b(t_gone)
 
     jid_b = job["id"]
+    time.sleep(3)  # the supervisor records the attempt's ending on its next tick
     _, atts = http(B, "GET", f"/v1/jobs/{jid_b}/attempts")
+    _, sync = http(B, "GET", f"/v1/jobs/{jid_b}/sync")
     _, cps = http(B, "GET", f"/v1/jobs/{jid_b}/checkpoints")
     _, loss = http(B, "GET", f"/v1/jobs/{jid_b}/loss?limit=1000")
     pts = (loss or {}).get("points", [])
@@ -204,7 +206,9 @@ def main():
     log("  attempts: " + ", ".join(f"#{a['n']} {a['start_step']}->{a['end_step']} {a['end_state']}" for a in atts["items"]))
     log("  checkpoints: " + ", ".join(c["name"] for c in cps["items"]))
     log(f"  loss points {len(pts)} covering steps {pts[0]['step'] if pts else '-'}..{pts[-1]['step'] if pts else '-'}")
-    ok = job["state"] == "completed" and job["step"] >= STEPS and first_step is not None and first_step >= 20
+    log(f"  remote: synced step {sync.get('step')}, lease {'released' if not sync.get('lease') else sync['lease']}")
+    ok = (job["state"] == "completed" and job["step"] >= STEPS and first_step is not None and first_step >= 20
+          and atts["items"][-1]["end_state"] == "completed" and not sync.get("lease"))
     log("PASS: continued on the new node from the synced checkpoint" if ok else "FAIL")
     if not keep:
         compose("down", "-v")
