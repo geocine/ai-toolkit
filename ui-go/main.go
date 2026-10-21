@@ -20,6 +20,7 @@ import (
 
 	"github.com/geocine/aitoolkit/handlers/media"
 	"github.com/geocine/aitoolkit/internal/bg"
+	"github.com/geocine/aitoolkit/internal/bootstrap"
 	"github.com/geocine/aitoolkit/internal/events"
 	"github.com/geocine/aitoolkit/internal/httpx"
 	"github.com/geocine/aitoolkit/internal/mcpserver"
@@ -54,6 +55,10 @@ func main() {
 	if err := state.Open(state.Path()); err != nil {
 		log.Fatal(err)
 	}
+	// env configuration (remotes, defaults) before anything uses it
+	if err := bootstrap.Apply(context.Background()); err != nil {
+		log.Fatalf("bootstrap: %v", err)
+	}
 
 	mux := server.NewMux()
 	if dir := resolveUIDir(*uiDir); dir != "" {
@@ -71,6 +76,7 @@ func main() {
 	if !*noWorker {
 		go worker.Run(ctx)
 	}
+	go bootstrap.ImportOnBoot(ctx)
 
 	// media.Intercept serves the media GETs before the mux, which would
 	// otherwise redirect a proxy-decoded `/api/img//abs/path` (see media).

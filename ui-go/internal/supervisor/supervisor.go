@@ -141,6 +141,9 @@ func (s *Supervisor) observe(ctx context.Context, j *store.Job, first bool) {
 		return
 	}
 	if !known {
+		// a job created without a policy gets the configured defaults
+		// (AITK_SYNC_REMOTE / AITK_AUTO_UPLOAD_REMOTE), whichever API made it
+		state.ApplyDefaultPolicy(ctx, j.ID)
 		events.Emit(ctx, events.JobCreated, j.ID, map[string]any{"name": j.Name})
 		return
 	}

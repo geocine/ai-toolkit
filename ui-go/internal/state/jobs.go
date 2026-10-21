@@ -3,6 +3,7 @@ package state
 import (
 	"context"
 	"database/sql"
+	"log"
 	"strconv"
 	"time"
 )
@@ -198,8 +199,10 @@ func SetPolicy(ctx context.Context, jobID string, p Policy) error {
 
 // Defaults for job policies, stored as fork settings.
 const (
-	SettingAutoResumeDefault     = "auto_resume_default"
-	SettingMaxAutoResumesDefault = "max_auto_resumes_default"
+	SettingAutoResumeDefault       = "auto_resume_default"
+	SettingMaxAutoResumesDefault   = "max_auto_resumes_default"
+	SettingSyncRemoteDefault       = "sync_remote_default"
+	SettingAutoUploadRemoteDefault = "auto_upload_remote_default"
 )
 
 // EffectivePolicy resolves a job's policy against the defaults (auto_resume
@@ -228,4 +231,27 @@ func EffectivePolicy(ctx context.Context, jobID string) (autoResume bool, maxRes
 		uploadRemote = *p.AutoUploadRemote
 	}
 	return autoResume, maxResumes, uploadRemote, nil
+}
+
+// ApplyDefaultPolicy gives a job that was created without any policy the
+// configured default sync / auto-upload remotes. Called for new jobs (from
+// the supervisor), so jobs created through the upstream /api get them too.
+func ApplyDefaultPolicy(ctx context.Context, jobID string) {
+	var exists int
+	if err := DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM job_policies WHERE job_id = ?`, jobID).Scan(&exists); err != nil || exists > 0 {
+		return
+	}
+	var p Policy
+	if v, ok, _ := Setting(ctx, SettingSyncRemoteDefault); ok && v != "" {
+		p.SyncRemote = &v
+	}
+	if v, ok, _ := Setting(ctx, SettingAutoUploadRemoteDefault); ok && v != "" {
+		p.AutoUploadRemote = &v
+	}
+	if p.SyncRemote == nil && p.AutoUploadRemote == nil {
+		return
+	}
+	if err := SetPolicy(ctx, jobID, p); err != nil {
+		log.Printf("state: default policy for %s: %v", jobID, err)
+	}
 }
