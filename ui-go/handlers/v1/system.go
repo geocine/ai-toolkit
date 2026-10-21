@@ -17,8 +17,15 @@ import (
 
 var startedAt = time.Now()
 
-// version is the server build: the VCS revision Go embedded, else "dev".
+// buildVersion is set at link time (-X) where there is no .git, as in the image.
+var buildVersion string
+
+// version is the server build: buildVersion, else the VCS revision Go
+// embedded, else "dev".
 func version() string {
+	if buildVersion != "" {
+		return buildVersion
+	}
 	if bi, ok := debug.ReadBuildInfo(); ok {
 		rev, dirty := "", false
 		for _, s := range bi.Settings {
