@@ -3,4 +3,5 @@
 *
 !ui-go/
 ui-go/web/node_modules
+ui-go/web/dist
 ui-go/aitk-server*
