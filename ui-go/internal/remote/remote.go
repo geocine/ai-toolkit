@@ -157,6 +157,25 @@ func List(ctx context.Context) ([]*Remote, error) {
 	return out, rows.Err()
 }
 
+// Upsert creates the remote named name, or replaces its kind, config and
+// secret when it exists (bootstrap from env re-applies on every start).
+func Upsert(ctx context.Context, name, kind string, config, secret json.RawMessage) (*Remote, error) {
+	existing, err := Get(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil || existing.Name != name {
+		return Create(ctx, name, kind, config, secret)
+	}
+	r := &Remote{ID: existing.ID, Name: name, Kind: kind, Config: config, Secret: secret, CreatedAt: existing.CreatedAt}
+	if _, err := NewClient(r); err != nil {
+		return nil, err
+	}
+	_, err = state.DB.ExecContext(ctx, `UPDATE remotes SET kind = ?, config = ?, secret = ? WHERE id = ?`,
+		kind, string(config), string(secret), r.ID)
+	return r, err
+}
+
 // Delete removes a remote; false when there was none.
 func Delete(ctx context.Context, id string) (bool, error) {
 	res, err := state.DB.ExecContext(ctx, `DELETE FROM remotes WHERE id = ?`, id)

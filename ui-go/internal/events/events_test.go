@@ -12,11 +12,12 @@ import (
 	"time"
 
 	"github.com/geocine/aitoolkit/internal/state"
+	"github.com/geocine/aitoolkit/internal/testutil"
 )
 
 func setup(t *testing.T) *httptest.Server {
 	t.Helper()
-	if err := state.Open(filepath.Join(t.TempDir(), "aitk_go.db")); err != nil {
+	if err := state.Open(filepath.Join(testutil.TempDir(t), "aitk_go.db")); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { state.DB.Close() })

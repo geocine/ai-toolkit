@@ -16,6 +16,7 @@ import (
 	"github.com/geocine/aitoolkit/internal/settings"
 	"github.com/geocine/aitoolkit/internal/state"
 	"github.com/geocine/aitoolkit/internal/store"
+	"github.com/geocine/aitoolkit/internal/testutil"
 )
 
 const upstreamDDL = `
@@ -34,7 +35,7 @@ CREATE UNIQUE INDEX "Job_name_key" ON "Job"("name");
 
 func setup(t *testing.T) string {
 	t.Helper()
-	root := t.TempDir()
+	root := testutil.TempDir(t)
 	dbPath := filepath.Join(root, "aitk_db.db")
 	db, err := sql.Open("sqlite", store.FileURI(dbPath))
 	if err != nil {
