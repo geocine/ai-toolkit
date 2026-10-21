@@ -247,8 +247,15 @@ func syncJob(ctx context.Context, j *store.Job, r *remote.Remote, c remote.Clien
 	if m.Attempts, err = state.Attempts(ctx, j.ID); err != nil {
 		return nil, nil, err
 	}
+	// a job that is not running here holds no lease, whatever triggered the
+	// sync (a late checkpoint event after the final sync used to re-take it)
+	settled := false
+	switch jobstate.FromStatus(j.Status, j.Step, j.Info) {
+	case jobstate.Completed, jobstate.Stopped, jobstate.Failed, jobstate.Draft:
+		settled = true
+	}
 	switch {
-	case reason == ReasonFinal:
+	case reason == ReasonFinal || settled:
 		m.Lease = nil
 	case reason == ReasonInterrupted && prev != nil:
 		m.Lease = prev.Lease // left to expire unless the job resumes here

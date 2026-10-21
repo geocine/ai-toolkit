@@ -391,6 +391,30 @@ func TestLeaseRenewAndExpiry(t *testing.T) {
 	}
 }
 
+// A checkpoint event that arrives after the job finished (the final file is
+// reported once its size settles) must not take the lease back.
+func TestLateCheckpointAfterFinishKeepsLeaseReleased(t *testing.T) {
+	ctx := context.Background()
+	shared := t.TempDir()
+	a := newNode(t, shared)
+	j := setupJob(t, a, "shared")
+	if _, err := SyncJob(ctx, j.ID, ReasonStart); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpdateJob(ctx, j.ID, store.Fields{"status": "completed", "info": "Training completed"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SyncJob(ctx, j.ID, ReasonFinal); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SyncJob(ctx, j.ID, ReasonCheckpoint); err != nil {
+		t.Fatal(err)
+	}
+	if l := manifestOn(t, shared).Lease; l != nil {
+		t.Fatalf("finished job still leased: %+v", l)
+	}
+}
+
 func TestPruneOldCheckpoints(t *testing.T) {
 	ctx := context.Background()
 	shared, keepDir := t.TempDir(), t.TempDir()
