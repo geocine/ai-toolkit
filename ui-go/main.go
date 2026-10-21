@@ -124,9 +124,17 @@ func spa(dir string) http.Handler {
 		}
 		p := filepath.Join(dir, filepath.FromSlash(filepath.Clean("/"+r.URL.Path)))
 		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			if strings.HasPrefix(r.URL.Path, "/assets/") {
+				// Vite puts a content hash in these names
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			} else {
+				w.Header().Set("Cache-Control", "no-cache")
+			}
 			files.ServeHTTP(w, r)
 			return
 		}
+		// revalidate the shell so a new image's UI shows up on the next load
+		w.Header().Set("Cache-Control", "no-cache")
 		http.ServeFile(w, r, filepath.Join(dir, "index.html"))
 	})
 }
