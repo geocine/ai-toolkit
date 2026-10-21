@@ -1,0 +1,73 @@
+# Local test stack only. Production is the single image (docs/deploy.md).
+#
+# Stands in for "one image on two GPU providers": MinIO plays Cloudflare R2,
+# node-a and node-b are two independent servers that share nothing but the
+# bucket (and, to skip re-downloading base models, the Hugging Face cache).
+#
+#   docker compose -f ui-go/docker/compose.local.yml up -d            # minio + node-a (http://localhost:18731)
+#   docker compose -f ui-go/docker/compose.local.yml rm -sf node-a    # "the provider went away"
+#   docker compose -f ui-go/docker/compose.local.yml --profile failover up -d node-b   # http://localhost:18732
+#
+# ui-go/scripts/failover_test.py runs that whole sequence with a real job.
+name: aitk-local
+
+x-node: &node
+  image: ${AITK_IMAGE:-ghcr.io/geocine/aitoolkit-go:latest}
+  depends_on:
+    bucket:
+      condition: service_completed_successfully
+  environment:
+    AI_TOOLKIT_AUTH: ${AI_TOOLKIT_AUTH:-secret}
+    AITK_R2_ENDPOINT: http://minio:9000
+    AITK_R2_BUCKET: aitk
+    AITK_R2_REGION: us-east-1
+    AITK_R2_PATH_STYLE: "1"
+    AITK_R2_ACCESS_KEY_ID: aitkadmin
+    AITK_R2_SECRET_ACCESS_KEY: aitksecret123
+    AITK_SYNC_REMOTE: r2
+    AITK_AUTO_RESUME: "1"
+    AITK_IMPORT_ON_BOOT: all
+  volumes:
+    - hf-cache:/root/.cache/huggingface
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+services:
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: aitkadmin
+      MINIO_ROOT_PASSWORD: aitksecret123
+    ports:
+      - "19000:9000"
+
+  bucket:
+    image: curlimages/curl:8.11.1
+    depends_on: [minio]
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        until curl -sf http://minio:9000/minio/health/ready; do sleep 1; done;
+        curl -s -o /dev/null --aws-sigv4 aws:amz:us-east-1:s3 --user aitkadmin:aitksecret123 -X PUT http://minio:9000/aitk;
+        echo bucket ready
+
+  node-a:
+    <<: *node
+    ports:
+      - "18731:8675"
+
+  node-b:
+    <<: *node
+    profiles: [failover]
+    ports:
+      - "18732:8675"
+
+volumes:
+  hf-cache: {}

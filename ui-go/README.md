@@ -57,8 +57,8 @@ internal/{paths,safepath,proc,apicache,engines,jsonx}
 handlers/<group>        one package per upstream route group
 web/                    frontend (Vite + React placeholder), built to web/dist
 parity/                 drift tests against upstream's files
-docker/                 image layer over upstream's image, compose override
-scripts/                build_and_push.sh, parity.sh
+docker/                 image layer over upstream's image; compose.local.yml for local tests
+scripts/                build_and_push.sh, parity.sh, failover_test.py
 ```
 
 ## Running locally
@@ -84,11 +84,21 @@ media routes), `MODELS_PATH`, `AI_TOOLKIT_DB_JOURNAL_MODE`, plus
 
 ## Docker
 
+Production is one image configured by env vars (no compose): see
+[docs/deploy.md](docs/deploy.md) for the variables, provider setup and how a
+job continues on another provider.
+
 ```bash
 ui-go/scripts/build_and_push.sh          # base: upstream's docker/Dockerfile at the merge-base; then the Go layer
 ui-go/scripts/build_and_push.sh --push   # push <sha>, <timestamp>, <version>, latest
-docker compose -f docker-compose.yml -f ui-go/docker/compose.override.yml up -d
+python ui-go/scripts/failover_test.py    # local failover test (docker/compose.local.yml, GPU)
 ```
 
-`IMAGE` (default `ghcr.io/geocine/aitoolkit-go`) and `UPSTREAM_REF` (default
-`main`) override the image name and the branch that mirrors upstream.
+`IMAGE` (default `ghcr.io/geocine/aitoolkit-go`), `UPSTREAM_REF` (default
+`main`) and `REBUILD_BASE=1` adjust the build.
+
+## Headless API
+
+[docs/headless.md](docs/headless.md) is the contract for apps and agents:
+the `/v1` API, events, recovery and resume, portable jobs, remotes and MCP
+code mode.

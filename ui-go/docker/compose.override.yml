@@ -1,6 +1,0 @@
-# Layered over upstream's docker-compose.yml so ports, volumes and GPU
-# settings keep following upstream. From the repo root:
-#   docker compose -f docker-compose.yml -f ui-go/docker/compose.override.yml up -d
-services:
-  ai-toolkit:
-    image: ${AITK_GO_IMAGE:-ghcr.io/geocine/aitoolkit-go:latest}
