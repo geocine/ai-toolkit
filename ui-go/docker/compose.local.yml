@@ -27,6 +27,7 @@ x-node: &node
     AITK_SYNC_REMOTE: r2
     AITK_AUTO_RESUME: "1"
     AITK_IMPORT_ON_BOOT: all
+    AITK_CORS_ORIGINS: ${AITK_CORS_ORIGINS:-}
   volumes:
     - hf-cache:/root/.cache/huggingface
   deploy:
