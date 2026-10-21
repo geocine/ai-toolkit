@@ -119,7 +119,8 @@ func invalidateKeyCount() {
 	countMu.Unlock()
 }
 
-// HasKeys reports whether any active key exists (then auth is required).
+// HasKeys reports whether a key was ever created; then auth is required.
+// Revoked keys count: revoking a leaked last key must not reopen the server.
 func HasKeys() bool {
 	if DB == nil {
 		return false
@@ -127,7 +128,7 @@ func HasKeys() bool {
 	countMu.Lock()
 	defer countMu.Unlock()
 	if !countValid {
-		if err := DB.QueryRow(`SELECT COUNT(*) FROM api_keys WHERE revoked_at IS NULL`).Scan(&countCache); err != nil {
+		if err := DB.QueryRow(`SELECT COUNT(*) FROM api_keys`).Scan(&countCache); err != nil {
 			return false
 		}
 		countValid = true

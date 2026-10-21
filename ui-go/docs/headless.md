@@ -46,8 +46,9 @@ never extended. Tables (owned by `internal/state`, embedded migrations):
 `Authorization: Bearer <token>` on `/v1/*`, `/mcp` and the upstream `/api/*`
 routes. A token is either `AI_TOOLKIT_AUTH` (admin, like upstream) or a named
 API key (`aitk_<32 base62>`, created via `POST /v1/keys`). If neither
-`AI_TOOLKIT_AUTH` is set nor any key exists, the server is open (upstream's
-behavior). Media GETs under `/api/img|files|audio/art` stay public like
+`AI_TOOLKIT_AUTH` is set nor any key was ever created, the server is open
+(upstream's behavior). Once a key exists auth stays on, even after every key
+is revoked. Media GETs under `/api/img|files|audio/art` stay public like
 upstream. `GET /v1/health` is always public.
 
 ## Resources
