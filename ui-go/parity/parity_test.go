@@ -108,9 +108,12 @@ func normalizeGo(pattern string) string {
 // the Go server still serves one upstream removed.
 func TestRouteCoverage(t *testing.T) {
 	server.NewMux()
+	// only the upstream-compatible surface; /v1 and /mcp are the fork's own
 	have := map[string]bool{}
 	for _, p := range httpx.Routes() {
-		have[normalizeGo(p)] = true
+		if n := normalizeGo(p); strings.Contains(n, " /api/") {
+			have[n] = true
+		}
 	}
 	want := map[string]bool{}
 	for _, r := range upstreamRoutes(t) {

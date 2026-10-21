@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/geocine/aitoolkit/internal/jsonx"
@@ -213,11 +214,37 @@ const (
 	logTailMaxChars = 300
 )
 
+var (
+	watchedMu sync.Mutex
+	watched   = map[int]bool{}
+)
+
+func setWatched(pid int, on bool) {
+	watchedMu.Lock()
+	defer watchedMu.Unlock()
+	if on {
+		watched[pid] = true
+	} else {
+		delete(watched, pid)
+	}
+}
+
+// Watched reports whether this process is watching pid (it launched the job
+// and will record its exit). The supervisor only polls jobs nobody watches,
+// such as ones still running from before a server restart.
+func Watched(pid int) bool {
+	watchedMu.Lock()
+	defer watchedMu.Unlock()
+	return watched[pid]
+}
+
 // watchDetached polls a job that is not our child: there is no exit event, so
 // a job that dies without updating its own row (OOM kill, hard crash) would
 // otherwise sit on 'running' forever.
 func watchDetached(pid int, jobID, logPath string) {
+	setWatched(pid, true)
 	go func() {
+		defer setWatched(pid, false)
 		t := time.NewTicker(jobPollInterval)
 		defer t.Stop()
 		for range t.C {

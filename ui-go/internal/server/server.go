@@ -12,9 +12,16 @@ import (
 	"github.com/geocine/aitoolkit/handlers/queue"
 	"github.com/geocine/aitoolkit/handlers/settings"
 	"github.com/geocine/aitoolkit/handlers/system"
+	"github.com/geocine/aitoolkit/handlers/v1"
+	"github.com/geocine/aitoolkit/handlers/v1portable"
+	"github.com/geocine/aitoolkit/handlers/v1remotes"
+	"github.com/geocine/aitoolkit/handlers/v1templates"
+	"github.com/geocine/aitoolkit/internal/events"
+	"github.com/geocine/aitoolkit/internal/mcpserver"
 )
 
-// NewMux registers every API route.
+// NewMux registers every route: the upstream-compatible /api (parity-checked
+// against upstream), then the headless /v1 and /mcp (docs/headless.md).
 func NewMux() *http.ServeMux {
 	mux := http.NewServeMux()
 	jobs.Register(mux)
@@ -25,5 +32,12 @@ func NewMux() *http.ServeMux {
 	datasets.Register(mux)
 	system.Register(mux)
 	inference.Register(mux)
+
+	v1.Register(mux)
+	v1remotes.Register(mux)
+	v1portable.Register(mux)
+	v1templates.Register(mux)
+	events.Register(mux)
+	mcpserver.Register(mux)
 	return mux
 }

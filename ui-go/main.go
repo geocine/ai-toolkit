@@ -19,10 +19,15 @@ import (
 	"time"
 
 	"github.com/geocine/aitoolkit/handlers/media"
+	"github.com/geocine/aitoolkit/internal/bg"
+	"github.com/geocine/aitoolkit/internal/events"
 	"github.com/geocine/aitoolkit/internal/httpx"
+	"github.com/geocine/aitoolkit/internal/mcpserver"
 	"github.com/geocine/aitoolkit/internal/paths"
 	"github.com/geocine/aitoolkit/internal/server"
+	"github.com/geocine/aitoolkit/internal/state"
 	"github.com/geocine/aitoolkit/internal/store"
+	"github.com/geocine/aitoolkit/internal/supervisor"
 	"github.com/geocine/aitoolkit/internal/worker"
 )
 
@@ -45,6 +50,9 @@ func main() {
 	if err := store.Open(paths.DBPath); err != nil {
 		log.Fatal(err)
 	}
+	if err := state.Open(state.Path()); err != nil {
+		log.Fatal(err)
+	}
 
 	mux := server.NewMux()
 	if dir := resolveUIDir(*uiDir); dir != "" {
@@ -54,15 +62,22 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	// the supervisor runs even with --no-worker: recovery and events matter
+	// whichever process launched the job
+	go supervisor.Run(ctx)
+	go events.Prune(ctx)
+	bg.Start(ctx)
 	if !*noWorker {
 		go worker.Run(ctx)
 	}
 
+	// media.Intercept serves the media GETs before the mux, which would
+	// otherwise redirect a proxy-decoded `/api/img//abs/path` (see media).
+	handler := httpx.Auth(media.Intercept(mux))
+	mcpserver.SetAPI(handler)
 	srv := &http.Server{
-		Addr: net.JoinHostPort(*host, strconv.Itoa(*port)),
-		// media.Intercept serves the media GETs before the mux, which would
-		// otherwise redirect a proxy-decoded `/api/img//abs/path` (see media).
-		Handler:           httpx.Auth(media.Intercept(mux)),
+		Addr:              net.JoinHostPort(*host, strconv.Itoa(*port)),
+		Handler:           handler,
 		ReadHeaderTimeout: 30 * time.Second,
 	}
 	go func() {
