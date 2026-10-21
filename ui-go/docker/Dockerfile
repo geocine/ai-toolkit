@@ -1,103 +1,42 @@
-FROM nvidia/cuda:12.8.1-devel-ubuntu22.04
+# Fork image: upstream's own image plus the Go server.
+#
+# The base is upstream's docker/Dockerfile built unchanged (see
+# ui-go/scripts/build_and_push.sh), so Python, CUDA, torch, Node and the
+# Prisma CLI all follow upstream after a rebase with no edits here. This layer
+# only adds the Go binary and swaps the UI launch at the end of upstream's
+# /start.sh for it.
+#
+# Build from the repo root:
+#   docker build -f ui-go/docker/Dockerfile --build-arg BASE_IMAGE=<upstream image> .
 
-LABEL authors="geocine"
+ARG BASE_IMAGE=aitoolkit-upstream:local
 
-# Set noninteractive to avoid timezone prompts
-ENV DEBIAN_FRONTEND=noninteractive
+FROM golang:1.26 AS go-build
+WORKDIR /src
+COPY ui-go/go.mod ui-go/go.sum ./
+RUN go mod download
+COPY ui-go/ ./
+RUN CGO_ENABLED=0 go test ./internal/... && \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/aitk-server .
 
-# ref https://en.wikipedia.org/wiki/CUDA
-ENV TORCH_CUDA_ARCH_LIST="8.0 8.6 8.9 9.0 10.0 12.0"
+FROM ${BASE_IMAGE}
 
-# Install dependencies
-RUN apt-get update && apt-get install --no-install-recommends -y \
-    git \
-    curl \
-    build-essential \
-    cmake \
-    wget \
-    python3.10 \
-    python3-pip \
-    python3-dev \
-    python3-setuptools \
-    python3-wheel \
-    python3-venv \
-    ffmpeg \
-    tmux \
-    htop \
-    nvtop \
-    python3-opencv \
-    openssh-client \
-    openssh-server \
-    openssl \
-    rsync \
-    unzip \
-    nginx \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+COPY --from=go-build /out/aitk-server /app/ai-toolkit/ui-go/aitk-server
+COPY ui-go/docker/start-go.sh /tmp/start-go.sh
 
-# Install Go
-WORKDIR /tmp
-RUN curl -LO https://go.dev/dl/go1.21.13.linux-amd64.tar.gz && \
-    tar -C /usr/local -xzf go1.21.13.linux-amd64.tar.gz && \
-    rm go1.21.13.linux-amd64.tar.gz
+# Keep upstream's pod setup (ssh, env export) and replace only its final
+# "Starting AI Toolkit UI" step. Fail the build if upstream changed that step
+# rather than silently starting the Next UI.
+RUN sed -i 's/\r$//' /start.sh /tmp/start-go.sh && \
+    if ! grep -q '^echo "Starting AI Toolkit UI' /start.sh; then \
+        echo 'upstream docker/start.sh no longer has the "Starting AI Toolkit UI" step; update ui-go/docker/Dockerfile' >&2; \
+        exit 1; \
+    fi && \
+    sed -i '/^echo "Starting AI Toolkit UI/,$d' /start.sh && \
+    cat /tmp/start-go.sh >> /start.sh && \
+    rm /tmp/start-go.sh && \
+    chmod +x /start.sh
 
-ENV PATH="/usr/local/go/bin:${PATH}"
-ENV GOPATH="/root/go"
-ENV PATH="${GOPATH}/bin:${PATH}"
-
-# Install nodejs
-WORKDIR /tmp
-RUN curl -sL https://deb.nodesource.com/setup_23.x -o nodesource_setup.sh && \
-    bash nodesource_setup.sh && \
-    apt-get update && \
-    apt-get install -y nodejs && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
-
-# Set aliases for python and pip
-RUN ln -s /usr/bin/python3 /usr/bin/python
-
-# install pytorch before cache bust to avoid redownloading pytorch
-RUN pip install --pre --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
-
-# Fix cache busting by moving CACHEBUST to right before git clone
-ARG CACHEBUST=1234
-ARG GIT_COMMIT=main
-RUN echo "Cache bust: ${CACHEBUST}" && \
-    git clone https://github.com/geocine/ai-toolkit.git && \
-    cd ai-toolkit && \
-    git checkout ${GIT_COMMIT}
-
-WORKDIR /app/ai-toolkit
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install --pre --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128 --force && \
-    pip install setuptools==69.5.1 --no-cache-dir
-
-# Build UI-Go (React frontend with Vite)
-WORKDIR /app/ai-toolkit/ui-go
-RUN npm install && \
-    npm run build
-
-# Go setup, Prisma generation, and build
-RUN go mod tidy && \
-    go run github.com/steebchen/prisma-client-go generate && \
-    go run github.com/steebchen/prisma-client-go db push && \
-    go build -o /app/ai-toolkit/ui-go/server .
-
-# Configure nginx
-COPY nginx.conf /etc/nginx/sites-available/default
-
-# Expose port
 EXPOSE 8675
-
 WORKDIR /
-
-COPY start.sh /start.sh
-RUN chmod +x /start.sh
-
 CMD ["/start.sh"]
-

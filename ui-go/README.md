@@ -1,79 +1,86 @@
-# AI Toolkit UI (Go + React)
+# ai-toolkit Go server
 
-This project is a port of the original AI Toolkit UI to a Golang backend with a React (Vite) frontend. It maintains feature parity with the original Next.js implementation while providing a lightweight, single-binary capable architecture.
+A Go port of the ai-toolkit UI backend: the HTTP API of upstream's Next.js UI
+(`ui/src/app/api`) and its job queue worker (`ui/cron`), working against the
+same database, job folders and Python entry point (`run.py`). There is no
+frontend here; point your own UI at the API.
 
-## Architecture
+## How this fork stays rebase-friendly
 
-- **Frontend**: React + TypeScript built with Vite
-- **Backend**: Go (Golang) standard library + Prisma Client Go
-- **Database**: SQLite (managed via Prisma)
+Everything the fork adds lives under `ui-go/`. No upstream file is modified,
+so rebasing onto upstream never conflicts and every Python-side change
+(models, trainers, extensions) arrives untouched.
 
-## Prerequisites
+The Go side depends on upstream only through these contracts, and each one is
+checked automatically:
 
-- Go 1.21+
-- Node.js 18+
-- SQLite
+| Upstream contract | Where it lives | How drift is caught |
+|---|---|---|
+| HTTP API (paths, methods) | `ui/src/app/api/**/route.ts` | `go test ./parity/` (`TestRouteCoverage`) |
+| Database schema | `ui/prisma/schema.prisma` | `go test ./parity/` (`TestSchemaDrift`), plus a schema check at startup |
+| Response bodies and behavior | the Next routes | `ui-go/scripts/parity.sh` (both servers, same requests, JSON diff) |
+| Job launch | `ui/cron/actions/startJob.ts`, `run.py`, `.job_config.json` | parity run + a real job |
+| Docker image | `docker/Dockerfile`, `docker/start.sh` | the fork image is built *on top of* upstream's; the build fails if `start.sh` changes shape |
 
-## Getting Started
+The schema is owned by upstream: the Go server never creates or alters tables.
+Create or migrate the database with upstream's Prisma CLI (`npx prisma db push`
+in `ui/`); the Docker image does this on start.
 
-### 1. Setup Database
-
-Initialize the Prisma client and generate the Go client code:
-
-```bash
-# Install Go dependencies
-go mod tidy
-
-# Generate Prisma Go client
-go run github.com/steebchen/prisma-client-go generate
-
-# Push database schema to SQLite file (creates aitk_db.db)
-go run github.com/steebchen/prisma-client-go db push
-```
-
-### 2. Run Backend (Go)
-
-Start the Go server which handles API requests and serves the frontend:
+## Rebasing onto upstream
 
 ```bash
-go run main.go
+git fetch upstream            # or update the local main that mirrors it
+git rebase main               # from the go-react branch; no conflicts expected
+cd ui-go
+go build ./... && go vet ./...
+go test ./...                 # route coverage + schema drift fail on anything new upstream
+../ui-go/scripts/parity.sh    # optional: diff live responses against upstream's server
 ```
-The server will start on `http://localhost:8080`.
 
-### 3. Run Frontend (React/Vite)
+When `go test ./parity/` fails, it names the route or column to port. Mirror
+the upstream file next to the matching Go package (`handlers/<group>`), then
+rerun the tests.
 
-For development with hot-reload, run the frontend separately:
+## Layout
+
+```
+main.go                 flags, startup, static frontend (optional)
+internal/server         route table (every handler package)
+internal/store          SQLite access in Prisma's storage format (DateTime = ms, Boolean = 0/1)
+internal/worker         queue loop and job launch (detached; Windows uses a relay like upstream)
+internal/settings       cached settings (DATASETS_FOLDER, TRAINING_FOLDER, ...)
+internal/httpx          JSON helpers, route registry, auth middleware
+internal/{paths,safepath,proc,apicache,engines,jsonx}
+handlers/<group>        one package per upstream route group
+parity/                 drift tests against upstream's files
+docker/                 image layer over upstream's image, compose override
+scripts/                build_and_push.sh, parity.sh
+```
+
+## Running locally
 
 ```bash
-npm install
-npm run dev
+cd ui && npx prisma db push && cd ..   # once: create/migrate aitk_db.db with upstream's schema
+cd ui-go
+go run . --port 8675                   # API on :8675, queue worker included
 ```
-The frontend dev server will start on `http://localhost:5173` (proxies API requests to localhost:8080).
 
-### 4. Production Build
+Flags: `--port` (env `PORT`, default 8675), `--host`, `--ui-dir` (env
+`AI_TOOLKIT_UI_DIR`, a built frontend to serve at `/`, default `ui-go/web/dist`
+when present), `--no-worker` (when the Next worker is running instead; run
+only one worker per database).
 
-To build the frontend for production serving via the Go binary:
+Env, same as upstream: `AI_TOOLKIT_AUTH` (bearer token for `/api/*` except
+media routes), `MODELS_PATH`, `AI_TOOLKIT_DB_JOURNAL_MODE`, plus
+`AI_TOOLKIT_ROOT` to point at a checkout other than `..`.
+
+## Docker
 
 ```bash
-npm run build
+ui-go/scripts/build_and_push.sh          # base: upstream's docker/Dockerfile at the merge-base; then the Go layer
+ui-go/scripts/build_and_push.sh --push   # push <sha>, <timestamp>, <version>, latest
+docker compose -f docker-compose.yml -f ui-go/docker/compose.override.yml up -d
 ```
-This generates static files in `dist/`. The Go server is configured to serve these files when running in production mode (ensure you have file serving logic in your handlers if serving directly, or use Nginx/Reverse Proxy in front).
 
-## Features
-
-- **Jobs Management**: Create, edit, stop, and monitor training jobs.
-- **Queue System**: Manage job queues with start/stop controls.
-- **Dataset Management**: Upload images (drag & drop), captioning, and organization.
-- **Monitoring**: Real-time CPU & GPU widgets.
-- **Sample Viewer**: Advanced image viewer with keyboard navigation and controls.
-- **Config Editor**: YAML-based job configuration with validation.
-
-## Project Structure
-
-- `/handlers`: Go API route handlers (Jobs, Queue, GPU, etc.)
-- `/prisma`: Database schema and client generation
-- `/src`: React frontend source code
-  - `/components`: Reusable UI components
-  - `/features`: Page-specific logic (Dashboard, Jobs, Datasets)
-  - `/hooks`: Custom React hooks
-- `main.go`: Entry point for the Go server
+`IMAGE` (default `ghcr.io/geocine/aitoolkit-go`) and `UPSTREAM_REF` (default
+`main`) override the image name and the branch that mirrors upstream.

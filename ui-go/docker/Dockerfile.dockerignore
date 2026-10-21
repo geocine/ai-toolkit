@@ -1,0 +1,6 @@
+# Used by BuildKit for ui-go/docker/Dockerfile only (the upstream Dockerfile
+# keeps its own context rules). Only ui-go/ is copied into this layer.
+*
+!ui-go/
+ui-go/web/node_modules
+ui-go/aitk-server*
