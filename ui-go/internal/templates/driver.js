@@ -138,10 +138,13 @@
 
     if (req.name) set(req.name, 'config.name');
 
+    // what selecting the arch produced, before overrides (which may change
+    // model.arch on purpose, e.g. sd15 -> sd1)
+    var applied = cfg.config.process[0].model.arch;
     var overrides = req.overrides || {};
     Object.keys(overrides).forEach(function (k) {
       set(overrides[k], k);
     });
-    return JSON.stringify({ config: cfg, arch_applied: cfg.config.process[0].model.arch });
+    return JSON.stringify({ config: cfg, arch_applied: applied });
   };
 })();
