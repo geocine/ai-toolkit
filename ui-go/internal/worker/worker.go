@@ -16,6 +16,10 @@ const interval = time.Second
 // RelayArg is the hidden subcommand main dispatches to RunRelay (Windows job launch).
 const RelayArg = "__aitk_launch_relay"
 
+// StartGuard, when set, may hold a queued job back (portable jobs whose lease
+// another server holds). Returning ok=false leaves the job queued with info.
+var StartGuard func(ctx context.Context, job *store.Job) (ok bool, info string)
+
 // Run loops until ctx is done. Ticks never overlap: a slow pass delays the next.
 func Run(ctx context.Context) {
 	log.Printf("Cron worker started with interval: %d ms", interval.Milliseconds())
@@ -77,6 +81,14 @@ func processQueue(ctx context.Context) error {
 			return err
 		}
 		if next != nil {
+			if StartGuard != nil {
+				if ok, info := StartGuard(ctx, next); !ok {
+					if next.Info != info {
+						store.UpdateJob(ctx, next.ID, store.Fields{"info": info})
+					}
+					continue
+				}
+			}
 			log.Printf("Starting job %s on GPU(s) %s", next.ID, next.GpuIDs)
 			if err := StartJob(ctx, next.ID); err != nil {
 				return err
