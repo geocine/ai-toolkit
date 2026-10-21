@@ -172,7 +172,9 @@ func policyPatch(ctx context.Context, raw json.RawMessage, p *state.Policy) erro
 				if err := json.Unmarshal(v, &s); err != nil {
 					return v1api.Errorf(v1api.CodeInvalidRequest, "policy."+k+" must be a string")
 				}
-				if s != "" {
+				if s == "" {
+					*target = &s // explicit "none": defaults do not apply
+				} else {
 					rem, err := remote.Get(ctx, s)
 					if err != nil {
 						return err
@@ -258,6 +260,8 @@ func createJob(w http.ResponseWriter, r *http.Request) {
 		v1api.Internal(w, r, err)
 		return
 	}
+	// env defaults (AITK_SYNC_REMOTE, ...) for remotes the body left unset
+	state.ApplyDefaultPolicy(ctx, j.ID)
 	respondJob(w, r, http.StatusCreated, j.ID)
 }
 

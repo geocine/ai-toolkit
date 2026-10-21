@@ -72,11 +72,19 @@ func TestApplyFromEnv(t *testing.T) {
 	if p, _ := state.GetPolicy(ctx, "job-a"); p.SyncRemote == nil || *p.SyncRemote != sharedRemote.ID {
 		t.Fatalf("job-a policy %+v", p)
 	}
+	// other explicit fields do not block the default for an unset remote
 	off := false
 	state.SetPolicy(ctx, "job-b", state.Policy{AutoResume: &off})
 	state.ApplyDefaultPolicy(ctx, "job-b")
-	if p, _ := state.GetPolicy(ctx, "job-b"); p.SyncRemote != nil {
-		t.Fatalf("explicit policy was overridden: %+v", p)
+	if p, _ := state.GetPolicy(ctx, "job-b"); p.SyncRemote == nil || *p.SyncRemote != sharedRemote.ID || *p.AutoResume {
+		t.Fatalf("job-b policy %+v", p)
+	}
+	// an explicit "" opts out
+	none := ""
+	state.SetPolicy(ctx, "job-c", state.Policy{SyncRemote: &none})
+	state.ApplyDefaultPolicy(ctx, "job-c")
+	if p, _ := state.GetPolicy(ctx, "job-c"); p.SyncRemote == nil || *p.SyncRemote != "" {
+		t.Fatalf("explicit opt-out was overridden: %+v", p)
 	}
 
 	if n := importPass(ctx, "shared", nil, false); n != 0 {

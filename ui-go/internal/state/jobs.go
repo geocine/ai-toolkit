@@ -233,22 +233,28 @@ func EffectivePolicy(ctx context.Context, jobID string) (autoResume bool, maxRes
 	return autoResume, maxResumes, uploadRemote, nil
 }
 
-// ApplyDefaultPolicy gives a job that was created without any policy the
-// configured default sync / auto-upload remotes. Called for new jobs (from
-// the supervisor), so jobs created through the upstream /api get them too.
+// ApplyDefaultPolicy fills the job's unset sync / auto-upload remotes with
+// the configured defaults (AITK_SYNC_REMOTE / AITK_AUTO_UPLOAD_REMOTE). An
+// explicit "" means "none" and is kept. Called when a job is created, from
+// any API.
 func ApplyDefaultPolicy(ctx context.Context, jobID string) {
-	var exists int
-	if err := DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM job_policies WHERE job_id = ?`, jobID).Scan(&exists); err != nil || exists > 0 {
+	p, err := GetPolicy(ctx, jobID)
+	if err != nil {
+		log.Printf("state: default policy for %s: %v", jobID, err)
 		return
 	}
-	var p Policy
-	if v, ok, _ := Setting(ctx, SettingSyncRemoteDefault); ok && v != "" {
-		p.SyncRemote = &v
+	changed := false
+	if p.SyncRemote == nil {
+		if v, ok, _ := Setting(ctx, SettingSyncRemoteDefault); ok && v != "" {
+			p.SyncRemote, changed = &v, true
+		}
 	}
-	if v, ok, _ := Setting(ctx, SettingAutoUploadRemoteDefault); ok && v != "" {
-		p.AutoUploadRemote = &v
+	if p.AutoUploadRemote == nil {
+		if v, ok, _ := Setting(ctx, SettingAutoUploadRemoteDefault); ok && v != "" {
+			p.AutoUploadRemote, changed = &v, true
+		}
 	}
-	if p.SyncRemote == nil && p.AutoUploadRemote == nil {
+	if !changed {
 		return
 	}
 	if err := SetPolicy(ctx, jobID, p); err != nil {
