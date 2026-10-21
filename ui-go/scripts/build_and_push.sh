@@ -46,7 +46,7 @@ TAGS=("$SHA" "$TS" "$VERSION" latest)
 echo "== go layer -> $IMAGE:{$(IFS=,; echo "${TAGS[*]}")}"
 TAG_ARGS=()
 for t in "${TAGS[@]}"; do TAG_ARGS+=(-t "$IMAGE:$t"); done
-docker build -f ui-go/docker/Dockerfile --build-arg BASE_IMAGE="$BASE_IMAGE" "${TAG_ARGS[@]}" .
+docker build -f ui-go/docker/Dockerfile --build-arg BASE_IMAGE="$BASE_IMAGE" --build-arg GIT_SHA="$SHA" "${TAG_ARGS[@]}" .
 
 if $PUSH; then
   for t in "${TAGS[@]}"; do docker push "$IMAGE:$t"; done

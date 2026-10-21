@@ -16,8 +16,9 @@ WORKDIR /src
 COPY ui-go/go.mod ui-go/go.sum ./
 RUN go mod download
 COPY ui-go/ ./
+ARG GIT_SHA=
 RUN CGO_ENABLED=0 go test ./internal/... && \
-    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/aitk-server .
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X github.com/geocine/aitoolkit/handlers/v1.buildVersion=${GIT_SHA}" -o /out/aitk-server .
 
 # The frontend: whatever ui-go/web builds to dist/ is served at / by the Go server.
 FROM node:22-alpine AS web-build
