@@ -19,15 +19,15 @@ import (
 // Endpoint is what an engine job writes to <job folder>/engine.json once its
 // server is up.
 type Endpoint struct {
-	Host         string   `json:"host"`
-	Port         int      `json:"port"`
-	Token        string   `json:"token"`
-	Pid          int      `json:"pid"`
-	JobID        *string  `json:"job_id,omitempty"`
-	Device       string   `json:"device,omitempty"`
-	JobFolder    string   `json:"job_folder"`
-	OutputFolder string   `json:"output_folder"`
-	StartedAt    float64  `json:"started_at"`
+	Host         string  `json:"host"`
+	Port         int     `json:"port"`
+	Token        string  `json:"token"`
+	Pid          int     `json:"pid"`
+	JobID        *string `json:"job_id,omitempty"`
+	Device       string  `json:"device,omitempty"`
+	JobFolder    string  `json:"job_folder"`
+	OutputFolder string  `json:"output_folder"`
+	StartedAt    float64 `json:"started_at"`
 
 	raw json.RawMessage
 }

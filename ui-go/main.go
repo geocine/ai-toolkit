@@ -18,33 +18,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/geocine/aitoolkit/handlers/datasets"
-	"github.com/geocine/aitoolkit/handlers/inference"
-	"github.com/geocine/aitoolkit/handlers/jobfiles"
-	"github.com/geocine/aitoolkit/handlers/jobs"
 	"github.com/geocine/aitoolkit/handlers/media"
-	"github.com/geocine/aitoolkit/handlers/queue"
-	"github.com/geocine/aitoolkit/handlers/settings"
-	"github.com/geocine/aitoolkit/handlers/system"
 	"github.com/geocine/aitoolkit/internal/httpx"
 	"github.com/geocine/aitoolkit/internal/paths"
+	"github.com/geocine/aitoolkit/internal/server"
 	"github.com/geocine/aitoolkit/internal/store"
 	"github.com/geocine/aitoolkit/internal/worker"
 )
-
-// NewMux registers every API route. Shared with the parity tests.
-func NewMux() *http.ServeMux {
-	mux := http.NewServeMux()
-	jobs.Register(mux)
-	jobfiles.Register(mux)
-	queue.Register(mux)
-	settings.Register(mux)
-	media.Register(mux)
-	datasets.Register(mux)
-	system.Register(mux)
-	inference.Register(mux)
-	return mux
-}
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == worker.RelayArg {
@@ -66,7 +46,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	mux := NewMux()
+	mux := server.NewMux()
 	if dir := resolveUIDir(*uiDir); dir != "" {
 		log.Printf("Serving frontend from %s", dir)
 		mux.Handle("/", spa(dir))
@@ -79,8 +59,10 @@ func main() {
 	}
 
 	srv := &http.Server{
-		Addr:              net.JoinHostPort(*host, strconv.Itoa(*port)),
-		Handler:           httpx.Auth(mux),
+		Addr: net.JoinHostPort(*host, strconv.Itoa(*port)),
+		// media.Intercept serves the media GETs before the mux, which would
+		// otherwise redirect a proxy-decoded `/api/img//abs/path` (see media).
+		Handler:           httpx.Auth(media.Intercept(mux)),
 		ReadHeaderTimeout: 30 * time.Second,
 	}
 	go func() {
