@@ -195,9 +195,17 @@ def main():
     job, first_step = node_b(t_gone)
 
     jid_b = job["id"]
-    time.sleep(3)  # the supervisor records the attempt's ending on its next tick
+    # the final sync (last files, manifest, lease released) runs once the
+    # final checkpoint's size has settled: give it up to two minutes
+    t0 = time.time()
+    while True:
+        _, sync = http(B, "GET", f"/v1/jobs/{jid_b}/sync")
+        if (sync or {}).get("step") == job["step"] and not (sync or {}).get("lease"):
+            break
+        if time.time() - t0 > 120:
+            break
+        time.sleep(3)
     _, atts = http(B, "GET", f"/v1/jobs/{jid_b}/attempts")
-    _, sync = http(B, "GET", f"/v1/jobs/{jid_b}/sync")
     _, cps = http(B, "GET", f"/v1/jobs/{jid_b}/checkpoints")
     _, loss = http(B, "GET", f"/v1/jobs/{jid_b}/loss?limit=1000")
     pts = (loss or {}).get("points", [])
