@@ -39,7 +39,7 @@ func Open(path string) error {
 	if _, err := os.Stat(path); err != nil {
 		return fmt.Errorf("database %s not found: %w (create it with `npx prisma db push` in ui/)", path, err)
 	}
-	dsn := "file:" + filepath.ToSlash(path) + "?_pragma=busy_timeout(30000)"
+	dsn := FileURI(path) + "?_pragma=busy_timeout(30000)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return err
@@ -51,6 +51,12 @@ func Open(path string) error {
 	DB = db
 	ensureJournalMode(context.Background())
 	return CheckSchema(context.Background())
+}
+
+// FileURI is path as a sqlite "file:" URI, with the characters a URI would
+// read as syntax (%, ?, #) percent-escaped.
+func FileURI(path string) string {
+	return "file:" + strings.NewReplacer("%", "%25", "?", "%3f", "#", "%23").Replace(filepath.ToSlash(path))
 }
 
 func ensureJournalMode(ctx context.Context) {
