@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { LossChart } from '../components/LossChart';
 import { ErrorNote, NeedServer, Progress, Section, StatePill, useLoad } from '../components/ui';
@@ -61,10 +61,12 @@ export function RunView({ id }: { id: string }) {
             break;
           case 'job.loss':
             loss.setData(l => {
-              if (!l) return l;
-              const key = l.key;
-              const add = (e.data.points as { step: number; key: string; value: number }[]).filter(p => p.key === key);
-              return add.length ? { ...l, points: [...l.points, ...add] } : l;
+              const pts = e.data.points as { step: number; key: string; value: number }[];
+              // a run with no loss yet has no key: take it from the first points
+              const keys = l?.keys?.length ? l.keys : [...new Set(pts.map(p => p.key))];
+              const key = l?.key || (keys.includes('loss/loss') ? 'loss/loss' : (keys.find(k => k.startsWith('loss')) ?? keys[0]));
+              const add = pts.filter(p => p.key === key);
+              return add.length ? { keys, key, points: [...(l?.points ?? []), ...add] } : l;
             });
             break;
           case 'job.sync':
@@ -236,7 +238,7 @@ export function RunView({ id }: { id: string }) {
       </Section>
 
       <Section kicker="Trainer" title="Log">
-        <pre className="log">{log || 'no output yet'}</pre>
+        <LogTail text={log} />
       </Section>
 
       {/* portalled: the page's rise animation makes it a containing block for fixed children */}
@@ -340,4 +342,40 @@ function Checkpoints({ job, items, remotes, uploads, onUpload }: { job: Job; ite
       </table>
     </>
   );
+}
+
+// LogTail follows the end of the log unless the reader has scrolled up.
+function LogTail({ text }: { text: string }) {
+  const ref = useRef<HTMLPreElement>(null);
+  const stick = useRef(true);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el && stick.current) el.scrollTop = el.scrollHeight;
+  }, [text]);
+  return (
+    <pre
+      ref={ref}
+      className="log"
+      onScroll={e => {
+        const el = e.currentTarget;
+        stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+      }}
+    >
+      {text ? collapseCR(text) : 'no output yet'}
+    </pre>
+  );
+}
+
+// collapseCR keeps what a terminal would show: a progress bar rewrites its
+// line with \r (and ANSI cursor moves), so only the text after the last \r of
+// each line remains.
+function collapseCR(text: string): string {
+  return text
+    .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
+    .split('\n')
+    .map(line => {
+      const parts = line.split('\r').filter(Boolean);
+      return parts.length ? parts[parts.length - 1] : '';
+    })
+    .join('\n');
 }
