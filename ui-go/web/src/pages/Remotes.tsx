@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle2, Cloud, DownloadCloud, Plus, RefreshCw, Trash2, XCircle } from 'lucide-react';
 import { api, fmtAgo, fmtBytes, fmtTime } from '../api';
-import { go } from '../router';
+import { go, href } from '../router';
 import type { Items, Job, PortableJob, Remote, RemoteKind, Upload } from '../types';
 import { Bar, Empty, Field, Loading, Modal, Mono, Section, Spinner, StateBadge, usePoll, useConfirm, useToast } from '../ui';
 
@@ -191,7 +191,7 @@ export function Remotes() {
                             }, toast.error)
                           }
                         >
-                          <RefreshCw size={12} /> Retry
+                          <RefreshCw size={12} /> {u.state === 'failed' ? 'Retry' : 'Upload again'}
                         </button>
                       )}
                     </td>
@@ -229,12 +229,19 @@ function PortableJobs({ remote }: { remote: string }) {
   const [items, setItems] = useState<PortableJob[] | null>(null);
   const [error, setError] = useState('');
   const [importing, setImporting] = useState('');
+  // jobs already on this server, by name: those are not imported again
+  const [local, setLocal] = useState<Map<string, string>>(new Map());
 
   useEffect(() => setItems(null), [remote]);
   const refresh = usePoll(
     async signal => {
       try {
-        setItems((await api.get<Items<PortableJob>>(`/v1/portable/jobs?remote=${encodeURIComponent(remote)}`, signal)).items);
+        const [pjs, jobs] = await Promise.all([
+          api.get<Items<PortableJob>>(`/v1/portable/jobs?remote=${encodeURIComponent(remote)}`, signal),
+          api.get<Items<Job>>('/v1/jobs', signal),
+        ]);
+        setLocal(new Map(jobs.items.map(j => [j.name, j.id])));
+        setItems(pjs.items);
         setError('');
       } catch (e: any) {
         if (e?.name !== 'AbortError') setError(e?.message ?? String(e));
@@ -315,9 +322,15 @@ function PortableJobs({ remote }: { remote: string }) {
                 </td>
                 <td className="small muted nowrap">{fmtAgo(pj.updated_at)}</td>
                 <td className="actions">
-                  <button className="btn btn-sm" onClick={() => doImport(pj)} disabled={!!importing}>
-                    {importing === pj.name ? <Spinner size={12} /> : <DownloadCloud size={12} />} Import & start
-                  </button>
+                  {local.has(pj.name) ? (
+                    <a className="btn btn-sm" href={href('jobs', local.get(pj.name)!)}>
+                      On this server
+                    </a>
+                  ) : (
+                    <button className="btn btn-sm" onClick={() => doImport(pj)} disabled={!!importing}>
+                      {importing === pj.name ? <Spinner size={12} /> : <DownloadCloud size={12} />} Import & start
+                    </button>
+                  )}
                 </td>
               </tr>
             );
