@@ -66,7 +66,17 @@ WORKDIR /app/ai-toolkit
 # Install Python dependencies (only re-runs when the requirements files change)
 COPY requirements.txt requirements_base.txt /app/ai-toolkit/
 RUN pip install --no-cache-dir --break-system-packages -r requirements.txt && \
-    pip install setuptools==69.5.1 --no-cache-dir --break-system-packages
+    pip install setuptools==69.5.1 --no-cache-dir --break-system-packages && \
+    # Keep hf-xet current without un-pinning huggingface_hub from requirements.
+    # Large Hub checkpoints (e.g. Krea raw.safetensors) use Xet storage; older
+    # clients can fail mid-reconstruct with CAS decode errors.
+    pip install --no-cache-dir --break-system-packages -U hf_xet
+
+# Hugging Face Hub / Xet download defaults (override at runtime if needed).
+# Xet stays enabled for speed; set HF_HUB_DISABLE_XET=1 to fall back to HTTP.
+ENV HF_XET_HIGH_PERFORMANCE=1 \
+    HF_HUB_DISABLE_XET=0 \
+    HF_HUB_DOWNLOAD_TIMEOUT=120
 
 # Accelerators, matching the manager's linux cu130 spec (manager/spec.py):
 # flash-attn 2.8.3 (prebuilt for torch 2.13 / cu130 / cp312), NATTEN 0.21.7,
