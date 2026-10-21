@@ -99,7 +99,7 @@ export function NewRun() {
         />
       )}
       {step === 2 && dataset && <StepCaptions preset={preset} k={k} dataset={dataset} next={() => setStep(3)} back={() => setStep(1)} />}
-      {step === 3 && <StepSettings k={k} set={set} next={() => setStep(4)} back={() => setStep(2)} />}
+      {step === 3 && <StepSettings preset={preset} k={k} set={set} next={() => setStep(4)} back={() => setStep(2)} />}
       {step === 4 && dataset && <StepLaunch preset={preset} k={k} dataset={dataset} back={() => setStep(3)} />}
     </div>
   );
@@ -423,23 +423,30 @@ function Num({ label, value, onChange, hint, step = 1 }: { label: string; value:
   );
 }
 
-function StepSettings({ k, set, next, back }: { k: Knobs; set: (p: Partial<Knobs>) => void; next: () => void; back: () => void }) {
+function StepSettings({ preset, k, set, next, back }: { preset: Preset; k: Knobs; set: (p: Partial<Knobs>) => void; next: () => void; back: () => void }) {
   const saves = Math.floor(k.steps / Math.max(1, k.saveEvery));
+  // the Krea notes only apply to the built-in preset; imported ones keep their own resolution
+  const krea = preset.builtIn;
+  const own = preset.defaults.resolution;
+  const choices = resolutionChoices.some(r => r.value.join() === own.join())
+    ? resolutionChoices
+    : [{ label: own.join(' + '), value: own }, ...resolutionChoices];
+  const lokr = String(preset.base.config.process[0]?.network?.type ?? '').toLowerCase() === 'lokr';
   return (
     <Section kicker="Step 4" title="Settings">
       <div className="form-grid">
-        <Num label="Steps" value={k.steps} onChange={steps => set({ steps })} hint="Your best Krea results came at 2000–2750 of 3000." />
+        <Num label="Steps" value={k.steps} onChange={steps => set({ steps })} hint={krea ? 'Your best Krea results came at 2000–2750 of 3000.' : undefined} />
         <Num label="Save every" value={k.saveEvery} onChange={saveEvery => set({ saveEvery })} hint={`${saves} checkpoints to pick from`} />
         <fieldset className="field">
           <span>Resolution</span>
           <div className="seg">
-            {resolutionChoices.map(r => (
+            {choices.map(r => (
               <button key={r.label} type="button" className={r.value.join() === k.resolution.join() ? 'seg-on' : ''} onClick={() => set({ resolution: r.value })}>
                 {r.label}
               </button>
             ))}
           </div>
-          <small>1024 only was the key in your notes.</small>
+          {krea && <small>1024 only was the key in your notes.</small>}
         </fieldset>
         <label className="field">
           <span>Optimizer</span>
@@ -450,7 +457,7 @@ function StepSettings({ k, set, next, back }: { k: Knobs; set: (p: Partial<Knobs
           </select>
         </label>
         <Num label="Rank (linear / alpha)" value={k.rank} onChange={rank => set({ rank })} />
-        <Num label="LoKr factor" value={k.lokrFactor} onChange={lokrFactor => set({ lokrFactor })} hint="-1 = auto" />
+        {lokr && <Num label="LoKr factor" value={k.lokrFactor} onChange={lokrFactor => set({ lokrFactor })} hint="-1 = auto" />}
         <label className="check">
           <input type="checkbox" checked={k.cacheTextEmbeddings} onChange={e => set({ cacheTextEmbeddings: e.target.checked })} />
           <span>Cache text embeddings</span>
