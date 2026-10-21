@@ -64,6 +64,9 @@ func TestListWithCursorAndFilters(t *testing.T) {
 	if resp, _ := http.Get(srv.URL + "/v1/events?after=x"); resp.StatusCode != 400 {
 		t.Fatalf("bad cursor status %d", resp.StatusCode)
 	}
+	if now, _ := get("?after=now"); len(now) != 0 {
+		t.Fatalf("after=now must skip stored events, got %d", len(now))
+	}
 }
 
 func TestStreamReplaysThenFollows(t *testing.T) {

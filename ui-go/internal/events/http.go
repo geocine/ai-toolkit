@@ -14,6 +14,7 @@ import (
 
 	"github.com/geocine/aitoolkit/internal/httpx"
 	"github.com/geocine/aitoolkit/internal/settings"
+	"github.com/geocine/aitoolkit/internal/state"
 	"github.com/geocine/aitoolkit/internal/store"
 	"github.com/geocine/aitoolkit/internal/v1api"
 )
@@ -26,7 +27,12 @@ func Register(mux *http.ServeMux) {
 
 func parseQuery(r *http.Request) (after int64, f Filter, err error) {
 	q := r.URL.Query()
-	if s := q.Get("after"); s != "" {
+	if s := q.Get("after"); s == "now" {
+		// only what happens from here on (skip the history)
+		if err := state.DB.QueryRowContext(r.Context(), `SELECT COALESCE(MAX(id), 0) FROM events`).Scan(&after); err != nil {
+			return 0, f, err
+		}
+	} else if s != "" {
 		if after, err = strconv.ParseInt(s, 10, 64); err != nil || after < 0 {
 			return 0, f, fmt.Errorf("after must be a non-negative integer")
 		}

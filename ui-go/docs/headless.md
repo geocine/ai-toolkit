@@ -166,7 +166,8 @@ increasing `id`. Clients keep the last id they saw and resume from it.
 | `upload.state` | Upload |
 | `dataset.changed` | `{name}` |
 
-- `GET /v1/events?after=&job_id=&types=a,b&limit=` → `{items: [Event], next_cursor}` (polling)
+- `GET /v1/events?after=&job_id=&types=a,b&limit=` → `{items: [Event], next_cursor}` (polling;
+  `after=now` starts from the current end, skipping history)
 - `GET /v1/events/stream?after=&job_id=&types=` → `text/event-stream`; each
   event is `id: <id>\nevent: <type>\ndata: <Event JSON>\n\n`; honors
   `Last-Event-ID`; `: ping` every 15 s. With `job_id` and `types` including
