@@ -472,9 +472,10 @@ function LogTab({ job, log, setLog }: { job: Job; log: LogState; setLog: (fn: (l
   );
 }
 
-/** tqdm redraws lines with \r; show only the latest state of each line. */
+/** tqdm redraws lines with \r (and ANSI cursor moves); show only the latest state of each line. */
 const cleanLog = (t: string) =>
   t
+    .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
     .split('\n')
     .map(line => {
       const parts = line.split('\r').filter(p => p !== '');
