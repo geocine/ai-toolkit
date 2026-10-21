@@ -144,6 +144,10 @@ func Open(path string) error {
 		db.Close()
 		return fmt.Errorf("migrate %s: %w", path, err)
 	}
+	// it holds API key hashes and remote credentials: owner-only (no-op on Windows)
+	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+		os.Chmod(p, 0o600)
+	}
 	DB = db
 	return nil
 }
