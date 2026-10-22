@@ -29,6 +29,7 @@ import (
 
 	"github.com/geocine/aitoolkit/internal/collation"
 	"github.com/geocine/aitoolkit/internal/events"
+	"github.com/geocine/aitoolkit/internal/jobview"
 	"github.com/geocine/aitoolkit/internal/safepath"
 	"github.com/geocine/aitoolkit/internal/settings"
 	"github.com/geocine/aitoolkit/internal/thumbs"
@@ -294,11 +295,17 @@ func getDataset(w http.ResponseWriter, r *http.Request) {
 	if end < len(media) {
 		next = strconv.Itoa(end)
 	}
+	cj, err := latestCaptionJob(r.Context(), dir)
+	if err != nil {
+		v1api.Internal(w, r, err)
+		return
+	}
 	v1api.OK(w, struct {
 		datasetView
 		Items      []datasetItem `json:"items"`
 		NextCursor any           `json:"next_cursor"`
-	}{v, items, next})
+		CaptionJob *jobview.Job  `json:"caption_job"`
+	}{v, items, next, cj})
 }
 
 func deleteDataset(w http.ResponseWriter, r *http.Request) {

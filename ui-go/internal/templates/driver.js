@@ -147,4 +147,72 @@
     });
     return JSON.stringify({ config: cfg, arch_applied: applied });
   };
+
+  // ---- captioners: ui/src/helpers/captionOptions.ts and the dataset page's
+  // CaptionDatasetModal (default caption job, captioner select via
+  // handleCaptionerTypeChange, path_to_caption from the dataset)
+
+  function opts(list) {
+    return (plain(list) || []).map(function (o) { return { value: o.value, label: o.label }; });
+  }
+
+  globalThis.__aitkCaptioners = function () {
+    var O = U.captionOptions;
+    return JSON.stringify({
+      default_config: plain(U.defaultCaptionJobConfig),
+      captioners: (O.captionerTypes || []).map(function (c) {
+        var defaults = {};
+        var d = c.defaults || {};
+        // [value when selected, value when switched away]
+        Object.keys(d).forEach(function (k) {
+          var v = plain(Array.isArray(d[k]) ? d[k][0] : d[k]);
+          if (v !== undefined) defaults[k] = v;
+        });
+        return {
+          name: c.name,
+          label: c.label,
+          group: c.group,
+          defaults: defaults,
+          model_options: opts(c.name_or_path_options),
+          model2_options: opts(c.name_or_path2_options),
+          caption_prompts: plain(c.captionPrompts) || {},
+          additional_sections: plain(c.additionalSections) || [],
+          supports_loras: !!c.supportsLoras,
+          cloud_loras: plain(c.cloudLoras) || [],
+          no_compile: !!c.noCompile,
+          min_new_tokens: c.minNewTokens || null,
+          multi_line_prompts: !!c.hasMultiLinePrompts,
+        };
+      }),
+      options: {
+        quantization: opts(O.quantizationOptions),
+        caption_format: opts(O.captionFormatOptions),
+        batch_size: opts(O.batchSizeOptions),
+        max_res: opts(O.maxResOptions),
+        max_new_tokens: opts(O.maxNewTokensOptions),
+        video_fps: opts(O.videoFpsOptions),
+        mtp_depth: opts(O.mtpDepthOptions),
+      },
+    });
+  };
+
+  globalThis.__aitkRenderCaption = function (reqJSON) {
+    var req = JSON.parse(reqJSON);
+    var cfg = U.objectCopy(U.defaultCaptionJobConfig);
+    var set = function (value, path) {
+      cfg = U.setNestedValue(cfg, value, path);
+    };
+    set(req.path, 'config.process[0].caption.path_to_caption');
+    var current = cfg.config.process[0].type;
+    if (req.captioner && req.captioner !== current) {
+      U.handleCaptionerTypeChange(current, req.captioner, cfg, set);
+    }
+    if (req.name) set(req.name, 'config.name');
+    var applied = cfg.config.process[0].type;
+    var overrides = req.overrides || {};
+    Object.keys(overrides).forEach(function (k) {
+      set(overrides[k], k);
+    });
+    return JSON.stringify({ config: cfg, captioner_applied: applied });
+  };
 })();

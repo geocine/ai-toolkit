@@ -53,6 +53,7 @@ func Register(mux *http.ServeMux) {
 	httpx.Handle(mux, "PUT /v1/datasets/{name}/files/{file...}", putDatasetFile)
 	httpx.Handle(mux, "PUT /v1/datasets/{name}/captions/{file...}", putCaption)
 	httpx.Handle(mux, "DELETE /v1/datasets/{name}/files/{file...}", deleteDatasetFile)
+	httpx.Handle(mux, "POST /v1/datasets/{name}/caption", captionDataset)
 
 	httpx.Handle(mux, "GET /v1/files", listFiles)
 	httpx.Handle(mux, "GET /v1/files/content", getFile)

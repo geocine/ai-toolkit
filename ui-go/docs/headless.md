@@ -125,6 +125,12 @@ with step 0 and no trainer progress yet).
 - `POST /v1/datasets/{name}/archive` body = zip (or multipart `file`) → `{added: n, skipped: [..]}` (safe extraction: no traversal, no symlinks, size and count limits)
 - `PUT /v1/datasets/{name}/files/{file...}` body = the file's bytes → item (creates or replaces it; may contain `/`; hidden names refused)
 - `POST /v1/datasets/{name}/import {url, file?, caption?}` → `{added, files: [..], skipped: [..]}`: the server downloads an http(s) URL; a zip is unpacked like `/archive`, an image/video is saved as `file` (default: from Content-Disposition or the URL, the extension sniffed from the bytes when missing) with `caption` written beside it
+- `POST /v1/datasets/{name}/caption {captioner?, model?, prompt?, recaption?, overrides?, gpu_ids?}` → 201 Job (type `caption`, ref the dataset folder) plus `warnings`, already queued:
+  one of upstream's captioner models writes a `.txt` next to each file as it goes, skipping files
+  that have one unless `recaption`. The config is upstream's default caption job with the
+  captioner selected the way its dataset page does (`handleCaptionerTypeChange`); `overrides`
+  keys are relative to `config.process[0]` (`caption.max_res`). 409 while one runs for the
+  dataset. `GET /v1/datasets/{name}` returns the newest as `caption_job`.
 - `PUT /v1/datasets/{name}/captions/{file...} {caption}` → item
 - `DELETE /v1/datasets/{name}/files/{file...}` → 204 (also removes its caption)
 - `DELETE /v1/datasets/{name}` → 204
@@ -184,6 +190,10 @@ class reads which section (`internal/templates/fields.go`).
   section are not checked.
 - `GET /v1/templates/examples` → `{items: [{name, file, arch, model, network, error}]}` (upstream's `config/examples`)
 - `GET /v1/templates/examples/{name}` → `{name, file, arch, model, network, error, yaml, config}`
+- `GET /v1/templates/captioners` → `{captioners: [{name, label, group, defaults, model_options, caption_prompts, additional_sections, python_accepted, ...}], default_config, options}`:
+  upstream's captioners (`ui/src/helpers/captionOptions.ts`, `captionJobConfig.ts`), read
+  the same way as the archs; `defaults` are the dotted paths selecting one sets,
+  `additional_sections` the settings its dialog shows (`caption.caption_prompt`, `caption.max_res`, ...)
 
 ## Events
 

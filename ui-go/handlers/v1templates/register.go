@@ -21,6 +21,16 @@ func Register(mux *http.ServeMux) {
 	httpx.Handle(mux, "POST /v1/templates/check", check)
 	httpx.Handle(mux, "GET /v1/templates/examples", examples)
 	httpx.Handle(mux, "GET /v1/templates/examples/{name}", example)
+	httpx.Handle(mux, "GET /v1/templates/captioners", captioners)
+}
+
+func captioners(w http.ResponseWriter, r *http.Request) {
+	c, err := templates.Captioners(r.Context())
+	if err != nil {
+		v1api.Internal(w, r, err)
+		return
+	}
+	v1api.OK(w, c)
 }
 
 func list(w http.ResponseWriter, r *http.Request) {

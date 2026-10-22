@@ -1881,6 +1881,67 @@ a.runs-row:hover {
   margin-bottom: 4px;
 }
 
+.template > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.template > summary::-webkit-details-marker {
+  display: none;
+}
+
+.auto-caption {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.auto-caption-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.auto-caption-head svg {
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
+}
+
+.auto-caption-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 12px;
+}
+
+.auto-caption .field select + textarea {
+  margin-top: 6px;
+}
+
+.auto-caption-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.auto-caption-run {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+
+.auto-caption-run .progress {
+  width: 100%;
+}
+
+.auto-caption-status {
+  font-size: 13px;
+}
+
 .template-head {
   display: flex;
   align-items: center;

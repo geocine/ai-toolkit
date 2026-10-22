@@ -243,7 +243,13 @@ export interface Job {
 }
 export interface Dataset { name: string; path: string; images: number; captions: number; size: number; modified: string }
 export interface DatasetItem { file: string; caption: string | null; size: number; width?: number; height?: number }
-export interface DatasetDetail extends Dataset { items: DatasetItem[]; next_cursor: string | null }
+export interface DatasetDetail extends Dataset { items: DatasetItem[]; next_cursor: string | null; caption_job: Job | null }
+export interface CaptionOption { value: unknown; label: string }
+export interface Captioner {
+  name: string; label: string; group: string; defaults: Record<string, unknown>;
+  model_options: CaptionOption[]; caption_prompts: Record<string, string>; additional_sections: string[];
+}
+export interface CaptionCatalog { captioners: Captioner[]; default_config: JobConfig; options: Record<string, CaptionOption[]> }
 export interface Remote { id: string; name: string; kind: 's3' | 'hf' | 'fs'; config: Record<string, any> }
 export interface Upload { id: string; remote_id: string; job_id: string | null; path: string; url: string | null; state: 'queued' | 'running' | 'done' | 'failed'; bytes: number; bytes_done: number; error: string | null }
 export interface SyncStatus { remote: string | null; last_sync_at: string | null; last_error: string | null; step?: number | null; lease: { node_label: string; expires_at: string } | null }

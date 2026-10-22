@@ -62,7 +62,24 @@ export type LossSeries = { keys: string[]; key: string; points: { step: number; 
 export type Queue = { gpu_ids: string; running: boolean; current_job_id: string | null; queued: number };
 export type Dataset = { name: string; path: string; images: number; captions: number; size: number; modified: string };
 export type DatasetItem = { file: string; caption: string | null; size: number; width?: number; height?: number };
-export type DatasetDetail = Dataset & { items: DatasetItem[]; next_cursor: string | null };
+export type DatasetDetail = Dataset & { items: DatasetItem[]; next_cursor: string | null; caption_job: Job | null };
+export type CaptionOption = { value: unknown; label: string };
+export type Captioner = {
+  name: string;
+  label: string;
+  group: string;
+  defaults: Record<string, unknown>;
+  model_options: CaptionOption[];
+  model2_options: CaptionOption[];
+  caption_prompts: Record<string, string>;
+  additional_sections: string[];
+  supports_loras: boolean;
+  no_compile: boolean;
+  min_new_tokens: number | null;
+  multi_line_prompts: boolean;
+  python_accepted: boolean;
+};
+export type CaptionCatalog = { captioners: Captioner[]; default_config: unknown; options: Record<string, CaptionOption[]> };
 
 export type RemoteKind = 's3' | 'hf' | 'fs';
 export type Remote = { id: string; name: string; kind: RemoteKind; config: Record<string, any>; created_at: string };

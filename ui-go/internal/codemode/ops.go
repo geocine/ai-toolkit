@@ -137,6 +137,13 @@ var Ops = []Op{
 			opt("caption", "string", "body", "caption to write next to a single image")}},
 	{Group: "datasets", Name: "delete", Method: "DELETE", Path: "/v1/datasets/{name}", Result: "null", Doc: "Delete a dataset.",
 		Params: []Param{p("name", "string", "path", "")}},
+	{Group: "datasets", Name: "caption", Method: "POST", Path: "/v1/datasets/{name}/caption", Result: "Job & { warnings: string[] }",
+		Doc: "Caption the dataset's files with one of upstream's captioner models (templates.captioners): creates a job of type caption and queues it. Captions land next to each file as it goes (.txt); files that already have one are skipped unless recaption. Follow it with jobs.get or datasets.get (caption_job). 409 while one is running for the dataset.",
+		Params: []Param{p("name", "string", "path", ""), opt("captioner", "string", "body", "name from templates.captioners (default: upstream's default, Qwen3OmniCaptioner)"),
+			opt("model", "string", "body", "caption.model_name_or_path, e.g. one of the captioner's model_options"), opt("prompt", "string", "body", "caption.caption_prompt"),
+			opt("recaption", "boolean", "body", "replace existing captions (default false)"),
+			opt("overrides", "Record<string, unknown>", "body", `dotted paths relative to config.process[0], e.g. {"caption.max_res": 768, "caption.quantize": false}`),
+			opt("gpu_ids", "string", "body", "default 0")}},
 
 	// files
 	{Group: "files", Name: "list", Method: "GET", Path: "/v1/files", Result: "FileListing", Doc: "List a folder inside an allowed root.",
@@ -204,6 +211,8 @@ var Ops = []Op{
 		Params: []Param{p("config", "JobConfig", "body", "")}},
 	{Group: "templates", Name: "examples", Method: "GET", Path: "/v1/templates/examples", Result: "Items<TemplateExample>",
 		Doc: "Upstream's example configs (config/examples): one per model family, with arch, model and network type."},
+	{Group: "templates", Name: "captioners", Method: "GET", Path: "/v1/templates/captioners", Result: "CaptionCatalog",
+		Doc: "Upstream's captioner models (ui/src/helpers/captionOptions.ts): each with its model choices, named caption prompts and the config defaults selecting it sets; plus the default caption job and the select options. Use with datasets.caption."},
 	{Group: "templates", Name: "example", Method: "GET", Path: "/v1/templates/examples/{name}", Result: "TemplateExampleConfig",
 		Doc:    "One example config, as written (yaml, with its comments) and parsed (config).",
 		Params: []Param{p("name", "string", "path", "name from templates.examples")}},
@@ -441,7 +450,10 @@ type LossSeries = { keys: string[]; key: string; points: { step: number; value: 
 type Queue = { gpu_ids: string; running: boolean; current_job_id: string | null; queued: number };
 type Dataset = { name: string; path: string; images: number; captions: number; size: number; modified: string };
 type DatasetItem = { file: string; caption: string | null; size: number; width?: number; height?: number };
-type DatasetDetail = Dataset & { items: DatasetItem[]; next_cursor: string | null };
+type DatasetDetail = Dataset & { items: DatasetItem[]; next_cursor: string | null; caption_job: Job | null };
+type CaptionOption = { value: unknown; label: string };
+type Captioner = { name: string; label: string; group: string; defaults: Record<string, unknown>; model_options: CaptionOption[]; model2_options: CaptionOption[]; caption_prompts: Record<string, string>; additional_sections: string[]; supports_loras: boolean; cloud_loras: unknown[]; no_compile: boolean; min_new_tokens: number | null; multi_line_prompts: boolean; python_accepted: boolean };
+type CaptionCatalog = { captioners: Captioner[]; default_config: JobConfig; options: Record<string, CaptionOption[]> };
 type FileRoot = "datasets" | "training" | "data" | "models";
 type FileListing = { root: FileRoot; path: string; items: { name: string; type: "file" | "dir"; size: number; modified: string }[] };
 type FileWritten = { root: FileRoot; path: string; size: number; sha256: string };
