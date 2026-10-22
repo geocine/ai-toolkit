@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, Camera, Download, OctagonX, Play, Save, Square, Upload as UploadIcon, X } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { LossChart } from '../components/LossChart';
 import { ErrorNote, NeedServer, Progress, Section, StatePill, useLoad } from '../components/ui';
@@ -18,7 +19,7 @@ import {
   type Upload,
 } from '../lib/api';
 import { useServer } from '../lib/context';
-import { ago, bytes, duration, pad, stepsPerSecond } from '../lib/format';
+import { ago, bytes, duration, stepsPerSecond } from '../lib/format';
 import { href } from '../lib/route';
 import { totalSteps } from './Runs';
 
@@ -130,7 +131,7 @@ export function RunView({ id }: { id: string }) {
     return [...m.entries()].sort((a, b) => b[0] - a[0]);
   }, [samples.data]);
 
-  if (!server) return <NeedServer />;
+  if (!server) return <NeedServer title="Run" />;
   const j = job.data;
   if (!j) return <ErrorNote error={job.error} />;
 
@@ -140,88 +141,144 @@ export function RunView({ id }: { id: string }) {
   const p = j.config?.config?.process?.[0] ?? {};
   const ckpts = checkpoints.data?.items ?? [];
 
+  const facts: { label: string; value: ReactNode; mono?: boolean; wide?: boolean }[] = [
+    { label: 'Trigger', value: p.trigger_word ?? '–' },
+    { label: 'Model', value: p.model?.name_or_path ?? '–', mono: true, wide: true },
+    {
+      label: 'Network',
+      value: (
+        <>
+          {p.network?.type ?? '–'} {p.network?.linear}
+          {p.network?.lokr_factor !== undefined && ` / f${p.network.lokr_factor}`}
+        </>
+      ),
+    },
+    { label: 'Optimizer', value: p.train?.optimizer ?? '–', mono: true },
+    { label: 'GPU', value: j.gpu_ids || '–' },
+    { label: 'Attempts', value: j.attempts },
+  ];
+  if (sync.data?.remote)
+    facts.push({
+      label: 'Portable on',
+      wide: true,
+      value: (
+        <>
+          {sync.data.remote}
+          {sync.data.last_sync_at && (
+            <span className="fact-note">
+              {' '}
+              · synced {ago(sync.data.last_sync_at)}
+              {sync.data.step != null ? ` at step ${sync.data.step}` : ''}
+            </span>
+          )}
+          {sync.data.last_error && <span className="warn"> · sync error: {sync.data.last_error}</span>}
+        </>
+      ),
+    });
+
+  const liveLabel = live === null ? 'Connecting' : live ? 'Live' : 'Reconnecting';
+  const prompt = view ? String(p.sample?.samples?.[view.index ?? -1]?.prompt ?? '').replaceAll('[trigger]', p.trigger_word ?? '[trigger]') : '';
+
   return (
     <>
+      <a className="back" href={href({ page: 'runs' })}>
+        <ArrowLeft aria-hidden />
+        Runs
+      </a>
       <header className="run-head">
-        <a className="kicker back" href={href({ page: 'runs' })}>
-          ← Runs
-        </a>
         <div className="run-title">
           <h1>{j.name}</h1>
           <StatePill state={j.state} />
-          <span className={live ? 'live live-on' : 'live'} title={live ? 'live updates' : 'waiting for the event stream'}>
-            {live === null ? 'connecting' : live ? 'live' : 'reconnecting'}
+          <span className={`live live-${live === null ? 'wait' : live ? 'on' : 'off'}`} title={live ? 'Live updates' : 'Waiting for the event stream'}>
+            <span className="dot" aria-hidden />
+            {liveLabel}
           </span>
-        </div>
-        <div className="run-counter">
-          <span className="counter mono">{pad(j.step)}</span>
-          <span className="dim mono">/ {total ?? '?'}</span>
-          <div className="counter-side">
-            <p>{j.info || '—'}</p>
-            <p className="dim">
-              {j.speed || 'no speed yet'}
-              {eta !== null && <> · about {duration(eta)} left</>}
-            </p>
+          <div className="run-actions">
+            {ACTIVE.includes(j.state) ? (
+              <>
+                {j.state === 'running' && (
+                  <>
+                    <button className="btn" onClick={() => act('sample_now')}>
+                      <Camera />
+                      Sample now
+                    </button>
+                    <button className="btn" onClick={() => act('save_now')}>
+                      <Save />
+                      Save now
+                    </button>
+                  </>
+                )}
+                {j.state === 'stopping' ? (
+                  <button className="btn btn-danger" onClick={() => confirm('Force-kill the trainer? Unsaved steps are lost.') && act('kill')}>
+                    <OctagonX />
+                    Force stop
+                  </button>
+                ) : (
+                  <button className="btn btn-danger" onClick={() => act('stop')}>
+                    <Square />
+                    Stop
+                  </button>
+                )}
+              </>
+            ) : (
+              j.state !== 'completed' && (
+                <button className="btn btn-primary" onClick={() => act('start')}>
+                  <Play />
+                  {j.step > 0 ? `Resume from ${j.latest_checkpoint?.step ?? 'last checkpoint'}` : 'Start'}
+                </button>
+              )
+            )}
           </div>
         </div>
-        <Progress value={j.step} max={total} />
-        <div className="run-actions">
-          {ACTIVE.includes(j.state) ? (
-            <>
-              {j.state === 'running' && (
-                <>
-                  <button className="btn" onClick={() => act('sample_now')}>
-                    Sample now
-                  </button>
-                  <button className="btn" onClick={() => act('save_now')}>
-                    Save now
-                  </button>
-                </>
-              )}
-              {j.state === 'stopping' ? (
-                <button className="btn btn-grease" onClick={() => confirm('Force-kill the trainer? Unsaved steps are lost.') && act('kill')}>
-                  Force stop
-                </button>
-              ) : (
-                <button className="btn btn-grease" onClick={() => act('stop')}>
-                  Stop
-                </button>
-              )}
-            </>
-          ) : (
-            j.state !== 'completed' && (
-              <button className="btn btn-ink" onClick={() => act('start')}>
-                {j.step > 0 ? `Resume from ${j.latest_checkpoint?.step ?? 'last checkpoint'}` : 'Start'}
-              </button>
-            )
-          )}
+        <div className="run-progress">
+          <Progress value={j.step} max={total} />
+          <dl className="run-stats">
+            <div>
+              <dt className="visually-hidden">Step</dt>
+              <dd>
+                {j.step.toLocaleString()}
+                <span className="of"> / {total?.toLocaleString() ?? '?'}</span>
+              </dd>
+            </div>
+            <div>
+              <dt className="visually-hidden">Speed</dt>
+              <dd>{sps ? `${sps.toFixed(2)} it/s` : j.speed || '– it/s'}</dd>
+            </div>
+            <div>
+              <dt>ETA</dt>
+              <dd>{eta !== null ? duration(eta) : '–'}</dd>
+            </div>
+          </dl>
         </div>
+        {j.info && <p className="run-info">{j.info}</p>}
         <ErrorNote error={error} />
-        <p className="dim run-facts">
-          trigger <b>{p.trigger_word ?? '—'}</b> · {p.model?.name_or_path} · {p.network?.type} {p.network?.linear}
-          {p.network?.lokr_factor !== undefined && ` / f${p.network.lokr_factor}`} · {p.train?.optimizer} · gpu {j.gpu_ids} ·{' '}
-          {j.attempts} attempt{j.attempts === 1 ? '' : 's'}
-          {sync.data?.remote && (
-            <>
-              {' '}
-              · portable on <b>{sync.data.remote}</b>
-              {sync.data.last_sync_at ? ` (synced ${ago(sync.data.last_sync_at)}${sync.data.step != null ? ` at step ${sync.data.step}` : ''})` : ''}
-              {sync.data.last_error && <span className="warn"> · sync error: {sync.data.last_error}</span>}
-            </>
-          )}
-        </p>
+        <dl className="card facts run-facts">
+          {facts.map(f => (
+            <div key={f.label} className={f.wide ? 'fact-wide' : undefined}>
+              <dt>{f.label}</dt>
+              <dd className={f.mono ? 'mono' : undefined} title={typeof f.value === 'string' ? f.value : undefined}>
+                {f.value}
+              </dd>
+            </div>
+          ))}
+        </dl>
       </header>
 
-      <Section kicker="Contact sheets" title="Samples">
-        {!byStep.length && <p className="dim">Samples appear here as the trainer writes them.</p>}
+      <Section title="Samples" description={byStep.length ? 'Grouped by step, newest first.' : undefined}>
+        {!byStep.length && <p className="quiet-note">Samples appear here as the trainer writes them.</p>}
         {byStep.map(([step, list]) => (
-          <div key={step} className="strip">
-            <span className="strip-label mono">{step >= 0 ? `STEP ${pad(step)}` : 'OTHER'}</span>
-            <div className="strip-frames">
+          <div key={step} className="sample-set">
+            <p className="sample-step">{step >= 0 ? `Step ${step.toLocaleString()}` : 'Other'}</p>
+            <div className="sample-grid">
               {list.map(s => (
-                <button key={s.name} className="strip-frame" onClick={() => setView(s)}>
+                <button
+                  key={s.name}
+                  className="sample"
+                  onClick={() => setView(s)}
+                  title={s.index !== null ? `Prompt ${s.index + 1}` : s.name}
+                  aria-label={`Open ${s.name}`}
+                >
                   <img src={mediaUrl(server, s.path, true)} alt={s.name} loading="lazy" />
-                  <span className="mono">{s.index !== null ? `▸${s.index}` : ''}</span>
                 </button>
               ))}
             </div>
@@ -229,26 +286,38 @@ export function RunView({ id }: { id: string }) {
         ))}
       </Section>
 
-      <Section kicker="Loss" title={loss.data?.key ?? 'Loss'}>
-        <LossChart points={loss.data?.points ?? []} checkpoints={ckpts.map(c => c.step).filter((s): s is number => s !== null)} totalSteps={total} />
+      <Section title="Loss" actions={loss.data?.key && <span className="mono chart-key">{loss.data.key}</span>}>
+        <div className="card chart-card">
+          <LossChart points={loss.data?.points ?? []} checkpoints={ckpts.map(c => c.step).filter((s): s is number => s !== null)} totalSteps={total} />
+        </div>
       </Section>
 
-      <Section kicker="Weights" title="Checkpoints">
+      <Section title="Checkpoints">
         <Checkpoints job={j} items={ckpts} remotes={remotes.data?.items ?? []} uploads={uploads.data?.items ?? []} onUpload={uploads.reload} />
       </Section>
 
-      <Section kicker="Trainer" title="Log">
+      <Section title="Log">
         <LogTail text={log} />
       </Section>
 
-      {/* portalled: the page's rise animation makes it a containing block for fixed children */}
+      {/* portalled so it sits above the shell's stacking contexts */}
       {view &&
         createPortal(
-          <div className="lightbox" onClick={() => setView(null)} role="dialog">
-            <img src={mediaUrl(server, view.path)} alt={view.name} />
-            <p className="mono">
-              step {view.step ?? '?'} · prompt {view.index ?? '?'} — {String(p.sample?.samples?.[view.index ?? -1]?.prompt ?? '').replaceAll('[trigger]', p.trigger_word ?? '[trigger]')}
-            </p>
+          <div className="lightbox" onClick={() => setView(null)} role="dialog" aria-modal="true" aria-label={view.name}>
+            <figure className="lightbox-panel">
+              <img src={mediaUrl(server, view.path)} alt={view.name} />
+              <figcaption>
+                <div>
+                  <p className="lightbox-title">
+                    Step {view.step?.toLocaleString() ?? '?'} · prompt {view.index !== null ? view.index + 1 : '?'}
+                  </p>
+                  {prompt && <p className="lightbox-prompt">{prompt}</p>}
+                </div>
+                <button className="btn btn-ghost btn-icon" onClick={() => setView(null)} aria-label="Close">
+                  <X />
+                </button>
+              </figcaption>
+            </figure>
           </div>,
           document.body,
         )}
@@ -261,7 +330,7 @@ function Checkpoints({ job, items, remotes, uploads, onUpload }: { job: Job; ite
   const [remote, setRemote] = useState('');
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState('');
-  if (!items.length) return <p className="dim">Checkpoints appear every {job.config?.config?.process?.[0]?.save?.save_every ?? '…'} steps.</p>;
+  if (!items.length) return <p className="quiet-note">Checkpoints appear every {job.config?.config?.process?.[0]?.save?.save_every ?? '…'} steps.</p>;
   const uploadFor = (c: Checkpoint) => uploads.find(u => u.path.replace(/\\/g, '/').endsWith('/' + c.name));
   const dl = async (c: Checkpoint) => {
     setBusy(c.name);
@@ -287,59 +356,71 @@ function Checkpoints({ job, items, remotes, uploads, onUpload }: { job: Job; ite
   return (
     <>
       {remotes.length > 0 && (
-        <label className="field field-inline">
-          <span>Push to</span>
-          <select value={remote} onChange={e => setRemote(e.target.value)}>
-            <option value="">choose a remote</option>
-            {remotes.map(r => (
-              <option key={r.id} value={r.name}>
-                {r.name} ({r.kind})
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="ckpt-toolbar">
+          <label className="field field-inline">
+            <span>Push to</span>
+            <select value={remote} onChange={e => setRemote(e.target.value)}>
+              <option value="">Choose a remote</option>
+              {remotes.map(r => (
+                <option key={r.id} value={r.name}>
+                  {r.name} ({r.kind})
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       )}
       <ErrorNote error={error} />
-      <table className="ckpts">
-        <thead>
-          <tr>
-            <th>Step</th>
-            <th>File</th>
-            <th>Size</th>
-            <th>Saved</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {[...items].reverse().map(c => {
-            const u = uploadFor(c);
-            return (
-              <tr key={c.name}>
-                <td className="mono step-cell">{c.step ?? 'final'}</td>
-                <td className="mono">{c.name}</td>
-                <td className="mono">{bytes(c.size)}</td>
-                <td className="dim">{ago(c.modified)}</td>
-                <td className="ckpt-actions">
-                  <button className="btn" disabled={busy === c.name} onClick={() => dl(c)}>
-                    {busy === c.name ? 'Downloading…' : 'Download'}
-                  </button>
-                  {remotes.length > 0 && (
-                    <button className="btn" disabled={!remote} onClick={() => push(c)}>
-                      Push
-                    </button>
-                  )}
-                  {u && (
-                    <span className={`upload-state up-${u.state}`}>
-                      {u.state === 'running' && u.bytes ? `${Math.round((u.bytes_done / u.bytes) * 100)}%` : u.state}
-                      {u.error && ` · ${u.error}`}
-                    </span>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <div className="table-wrap">
+        <table className="table ckpts">
+          <thead>
+            <tr>
+              <th className="num">Step</th>
+              <th>File</th>
+              <th className="num">Size</th>
+              <th>Saved</th>
+              <th>
+                <span className="visually-hidden">Actions</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {[...items].reverse().map(c => {
+              const u = uploadFor(c);
+              return (
+                <tr key={c.name}>
+                  <td className="num step-cell">{c.step?.toLocaleString() ?? 'Final'}</td>
+                  <td className="mono file-cell" title={c.name}>
+                    {c.name}
+                  </td>
+                  <td className="num">{bytes(c.size)}</td>
+                  <td className="muted-cell">{ago(c.modified)}</td>
+                  <td>
+                    <div className="ckpt-actions">
+                      {u && (
+                        <StatePill
+                          state={u.state}
+                          label={(u.state === 'running' && u.bytes ? `${Math.round((u.bytes_done / u.bytes) * 100)}%` : u.state[0].toUpperCase() + u.state.slice(1)) + (u.error ? ` · ${u.error}` : '')}
+                        />
+                      )}
+                      <button className="btn btn-sm" disabled={busy === c.name} onClick={() => dl(c)}>
+                        <Download />
+                        {busy === c.name ? 'Downloading…' : 'Download'}
+                      </button>
+                      {remotes.length > 0 && (
+                        <button className="btn btn-sm" disabled={!remote} onClick={() => push(c)}>
+                          <UploadIcon />
+                          Push
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </>
   );
 }
@@ -361,7 +442,7 @@ function LogTail({ text }: { text: string }) {
         stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
       }}
     >
-      {text ? collapseCR(text) : 'no output yet'}
+      {text ? collapseCR(text) : 'No output yet.'}
     </pre>
   );
 }

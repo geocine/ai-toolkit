@@ -1,3 +1,4 @@
+import { Upload } from 'lucide-react';
 import { useRef, useState } from 'react';
 
 const accepted = /\.(jpe?g|png|webp|bmp|gif|avif|heic|txt)$/i;
@@ -31,7 +32,7 @@ export function Dropzone({ onFiles }: { onFiles: (f: File[]) => void }) {
   const take = (fs: File[]) => onFiles(fs.filter(f => accepted.test(f.name)));
   return (
     <div
-      className={over ? 'dropzone dropzone-over' : 'dropzone'}
+      className={over ? 'dropzone is-over' : 'dropzone'}
       onDragOver={e => {
         e.preventDefault();
         setOver(true);
@@ -57,8 +58,11 @@ export function Dropzone({ onFiles }: { onFiles: (f: File[]) => void }) {
         onClick={e => e.stopPropagation()}
         onChange={e => take(Array.from(e.target.files ?? []))}
       />
-      <p className="dropzone-title">Drop the photos here</p>
-      <p className="dim">or a folder · or click to choose · matching .txt files become captions</p>
+      <span className="dropzone-icon">
+        <Upload aria-hidden />
+      </span>
+      <p className="dropzone-title">Drop photos or a folder here</p>
+      <p className="dropzone-hint">or click to choose. Matching .txt files become captions.</p>
     </div>
   );
 }
