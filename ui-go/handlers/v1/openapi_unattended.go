@@ -12,7 +12,7 @@ func init() {
 		op{"POST", "/v1/lifecycle/now", "lifecycle", "Verify results and stop/destroy now (409 while a job is queued or running)", nil, "", 200, "object"},
 		op{"GET", "/v1/notify", "notify", "Notification sinks (secrets never returned), event filter, link bases", nil, "", 200, "object"},
 		op{"PATCH", "/v1/notify", "notify", "Change the event filter, public/studio URL, sample interval", nil, "object", 200, "object"},
-		op{"POST", "/v1/notify/sinks", "notify", "Add a sink ({url}: ntfy, Discord webhook, telegram://, or a JSON webhook)", nil, "object", 201, "object"},
+		op{"POST", "/v1/notify/sinks", "notify", "Add a sink ({url}: ntfy, Discord webhook, telegram://, pushover://, or a JSON webhook)", nil, "object", 201, "object"},
 		op{"DELETE", "/v1/notify/sinks/{id}", "notify", "Remove a sink", nil, "", 204, ""},
 		op{"POST", "/v1/notify/test", "notify", "Send a test notification and report each sink's answer", nil, "object", 200, "object"},
 	)

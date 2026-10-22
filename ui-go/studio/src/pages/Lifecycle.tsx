@@ -311,16 +311,87 @@ function Seg<T extends string>({ value, options, onChange, label, disabled }: { 
 
 // ---- notifications ----
 
-const sinkHelp: { label: string; example: string }[] = [
-  { label: 'ntfy', example: 'https://ntfy.sh/your-topic' },
-  { label: 'Discord', example: 'https://discord.com/api/webhooks/…' },
-  { label: 'Telegram', example: 'telegram://<bot token>@<chat id>' },
-  { label: 'Anything else', example: 'https://… (receives JSON)' },
+// How to get each kind of destination URL; picking one also sets the
+// input's placeholder.
+const ext = (url: string, label: string) => (
+  <a className="link" href={url} target="_blank" rel="noreferrer">
+    {label}
+  </a>
+);
+const sinkGuides: { id: string; label: string; placeholder: string; steps: ReactNode[] }[] = [
+  {
+    id: 'ntfy',
+    label: 'ntfy',
+    placeholder: 'https://ntfy.sh/your-topic',
+    steps: [
+      <>Install the ntfy app on your phone, or open {ext('https://ntfy.sh/app', 'ntfy.sh/app')} in a browser.</>,
+      <>Subscribe to a topic with a name nobody could guess, like <span className="mono">aitk-7f3k9q</span>. Anyone who knows the name can read it.</>,
+      <>
+        Add <span className="mono">https://ntfy.sh/&lt;topic&gt;</span>. A server of your own: <span className="mono">ntfy+https://&lt;host&gt;/&lt;topic&gt;</span>, with an access token{' '}
+        <span className="mono">https://:&lt;token&gt;@&lt;host&gt;/&lt;topic&gt;</span>.
+      </>,
+    ],
+  },
+  {
+    id: 'discord',
+    label: 'Discord',
+    placeholder: 'https://discord.com/api/webhooks/…',
+    steps: [
+      <>In Discord, open the channel's settings, then Integrations › Webhooks › New Webhook.</>,
+      <>Click Copy Webhook URL and add it here.</>,
+    ],
+  },
+  {
+    id: 'telegram',
+    label: 'Telegram',
+    placeholder: 'telegram://<bot token>@<chat id>',
+    steps: [
+      <>
+        Message {ext('https://t.me/BotFather', '@BotFather')}, send <span className="mono">/newbot</span> and copy the token it gives you (<span className="mono">123456:ABC…</span>).
+      </>,
+      <>Send your new bot any message, or add it to a group.</>,
+      <>
+        Open <span className="mono">https://api.telegram.org/bot&lt;token&gt;/getUpdates</span> and copy the number after <span className="mono">"chat":{'{'}"id":</span>. A group's id starts with -.
+      </>,
+      <>
+        Add <span className="mono">telegram://&lt;token&gt;@&lt;chat id&gt;</span>.
+      </>,
+    ],
+  },
+  {
+    id: 'pushover',
+    label: 'Pushover',
+    placeholder: 'pushover://<api token>@<user key>',
+    steps: [
+      <>Install the Pushover app and sign in. Your User Key is at the top of {ext('https://pushover.net', 'pushover.net')}.</>,
+      <>
+        {ext('https://pushover.net/apps/build', 'Create an application')} (any name, e.g. AI Toolkit) and copy its API Token.
+      </>,
+      <>
+        Add <span className="mono">pushover://&lt;api token&gt;@&lt;user key&gt;</span>. Add <span className="mono">/&lt;device&gt;</span> to the end to reach one device only. Failed runs arrive at high priority.
+      </>,
+    ],
+  },
+  {
+    id: 'webhook',
+    label: 'Webhook',
+    placeholder: 'https://example.com/hook',
+    steps: [
+      <>
+        Any other <span className="mono">https://</span> URL gets a POST with JSON: <span className="mono">kind, level, title, body, url, job_id, job_name, at, server</span>, and{' '}
+        <span className="mono">image_jpeg_base64</span> when there is a sample grid.
+      </>,
+      <>
+        Start the URL with <span className="mono">webhook+</span> to get JSON from a URL that looks like ntfy or Discord.
+      </>,
+    ],
+  },
 ];
 
 function Notifications({ server }: { server: Server }) {
   const cfg = useLoad(server, s => get<NotifyConfig>(s, '/v1/notify'), []);
   const [url, setUrl] = useState('');
+  const [guide, setGuide] = useState(sinkGuides[0]);
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -438,7 +509,7 @@ function Notifications({ server }: { server: Server }) {
                   <input
                     value={url}
                     onChange={e => setUrl(e.target.value)}
-                    placeholder="https://ntfy.sh/your-topic"
+                    placeholder={guide.placeholder}
                     inputMode="url"
                     autoCapitalize="off"
                     autoCorrect="off"
@@ -452,14 +523,15 @@ function Notifications({ server }: { server: Server }) {
                 </div>
                 {addError && <small className="field-error">{addError}</small>}
               </label>
-              <dl className="sink-help">
-                {sinkHelp.map(h => (
-                  <div key={h.label}>
-                    <dt>{h.label}</dt>
-                    <dd className="mono">{h.example}</dd>
-                  </div>
-                ))}
-              </dl>
+              <div className="sink-guide">
+                <span className="sink-guide-label">How to set one up</span>
+                <Seg value={guide.id} options={sinkGuides.map(g => ({ value: g.id, label: g.label }))} onChange={id => setGuide(sinkGuides.find(g => g.id === id)!)} label="Destination type" />
+                <ol className="sink-steps">
+                  {guide.steps.map((s, i) => (
+                    <li key={i}>{s}</li>
+                  ))}
+                </ol>
+              </div>
               <p className="quiet-note">The URL holds its secret, so it is stored on the server and shown shortened.</p>
             </form>
             {c.sinks.length > 1 && (

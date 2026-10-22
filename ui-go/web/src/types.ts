@@ -172,6 +172,6 @@ export type Lifecycle = {
   results: { job_id: string; job_name: string; safe: boolean; via: string; detail: string }[] | null;
   updated_at: string;
 };
-export type NotifySink = { id: string; kind: 'ntfy' | 'discord' | 'telegram' | 'webhook'; target: string; source: 'env' | 'api'; created_at: string };
+export type NotifySink = { id: string; kind: 'ntfy' | 'discord' | 'telegram' | 'pushover' | 'webhook'; target: string; source: 'env' | 'api'; created_at: string };
 export type NotifyConfig = { sinks: NotifySink[]; events: string[] | null; kinds: string[]; public_url: string; studio_url: string; sample_every_s: number };
 export type NotifyTest = { sink: string; kind: string; target: string; ok: boolean; detail: string };

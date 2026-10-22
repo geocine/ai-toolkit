@@ -131,7 +131,7 @@ export function clock(sec: number): string {
 // ---- notifications ----
 
 export type NotifyKind = 'started' | 'resumed' | 'sample' | 'checkpoint' | 'completed' | 'failed' | 'interrupted' | 'lease_lost' | 'sync_failed' | 'lifecycle';
-export interface NotifySink { id: string; kind: 'ntfy' | 'discord' | 'telegram' | 'webhook'; target: string; source: 'env' | 'api'; created_at: string }
+export interface NotifySink { id: string; kind: 'ntfy' | 'discord' | 'telegram' | 'pushover' | 'webhook'; target: string; source: 'env' | 'api'; created_at: string }
 export interface NotifyConfig { sinks: NotifySink[]; events: NotifyKind[] | null; kinds: NotifyKind[]; public_url: string; studio_url: string; sample_every_s: number }
 export interface TestResult { sink: string; kind: string; target: string; ok: boolean; detail: string }
 
@@ -152,5 +152,6 @@ export const sinkLabel: Record<NotifySink['kind'], string> = {
   ntfy: 'ntfy',
   discord: 'Discord',
   telegram: 'Telegram',
+  pushover: 'Pushover',
   webhook: 'Webhook',
 };
