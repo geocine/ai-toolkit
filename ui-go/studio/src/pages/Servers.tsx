@@ -1,5 +1,6 @@
+import { Plus } from 'lucide-react';
 import { useState } from 'react';
-import { ErrorNote, Section } from '../components/ui';
+import { ErrorNote, PageHeader, Section } from '../components/ui';
 import { get, type Health, type Server, type SystemInfo } from '../lib/api';
 import { useStudio } from '../lib/context';
 import { uid } from '../lib/store';
@@ -40,43 +41,48 @@ export function Servers() {
 
   return (
     <>
-      <Section
-        kicker="Connections"
-        title="Training servers"
+      <PageHeader
+        title="Servers"
+        description="Each server is the ai-toolkit Go image running somewhere: RunPod, Vast, your own box. The URL and token stay in this browser."
         actions={
           !draft && (
-            <button className="btn btn-ink" onClick={() => setDraft(blank())}>
+            <button className="btn btn-primary" onClick={() => setDraft(blank())}>
+              <Plus />
               Add server
             </button>
           )
         }
-      >
-        <p className="lede">
-          Each server is the ai-toolkit Go image running somewhere — RunPod, Vast, your own box. The studio keeps the URL and
-          token in this browser only.
-        </p>
+      />
+      {servers.length > 0 && (
         <ul className="server-list">
           {servers.map(s => {
             const c = checks[s.id];
+            const inUse = s.id === active?.id;
             return (
-              <li key={s.id} className={s.id === active?.id ? 'server server-on' : 'server'}>
+              <li key={s.id} className="card server">
                 <div className="server-main">
                   <p className="server-name">
                     {s.name}
-                    {s.id === active?.id && <span className="pill pill-completed">in use</span>}
+                    {inUse && <span className="badge tone-accent">In use</span>}
                   </p>
-                  <p className="mono dim">{s.base}</p>
-                  {c === 'pending' && <p className="dim">testing…</p>}
+                  <p className="mono server-base">{s.base}</p>
+                  {c === 'pending' && (
+                    <p className="server-check conn conn-checking">
+                      <span className="dot" aria-hidden />
+                      Testing
+                    </p>
+                  )}
                   {c && c !== 'pending' && c.ok && (
-                    <p className="ok-note">
-                      reachable{c.health.upstream_version ? ` · ai-toolkit ${c.health.upstream_version}` : ''} ·{' '}
+                    <p className="server-check conn conn-up">
+                      <span className="dot" aria-hidden />
+                      Reachable{c.health.upstream_version ? ` · ai-toolkit ${c.health.upstream_version}` : ''} ·{' '}
                       {c.system.gpus.length ? c.system.gpus.map(g => g.name).join(', ') : 'no GPU reported'}
                     </p>
                   )}
                   {c && c !== 'pending' && !c.ok && <ErrorNote error={c.error} />}
                 </div>
                 <div className="server-actions">
-                  {s.id !== active?.id && (
+                  {!inUse && (
                     <button className="btn" onClick={() => setActiveId(s.id)}>
                       Use
                     </button>
@@ -88,7 +94,7 @@ export function Servers() {
                     Edit
                   </button>
                   <button
-                    className="btn btn-quiet"
+                    className="btn btn-ghost btn-danger"
                     onClick={() => {
                       if (confirm(`Remove ${s.name} from the studio? The server itself is untouched.`))
                         setServers(list => list.filter(x => x.id !== s.id));
@@ -101,12 +107,12 @@ export function Servers() {
             );
           })}
         </ul>
-      </Section>
+      )}
 
       {draft && (
-        <Section kicker={servers.some(s => s.id === draft.id) ? 'Edit' : 'New'} title="Server">
+        <Section title={servers.some(s => s.id === draft.id) ? 'Edit server' : 'New server'}>
           <form
-            className="form-grid"
+            className="card form-grid server-form"
             onSubmit={e => {
               e.preventDefault();
               saveDraft();
@@ -143,14 +149,14 @@ export function Servers() {
               />
             </label>
             <div className="form-actions">
-              <button className="btn btn-ink" type="submit">
-                Save and test
-              </button>
               {servers.length > 0 && (
-                <button className="btn btn-quiet" type="button" onClick={() => setDraft(null)}>
+                <button className="btn btn-ghost" type="button" onClick={() => setDraft(null)}>
                   Cancel
                 </button>
               )}
+              <button className="btn btn-primary" type="submit">
+                Save and test
+              </button>
             </div>
           </form>
         </Section>

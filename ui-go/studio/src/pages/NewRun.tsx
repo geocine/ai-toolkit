@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, Copy, Rocket, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import YAML from 'yaml';
 import { Dropzone } from '../components/Dropzone';
-import { ErrorNote, NeedServer, Section, useLoad } from '../components/ui';
+import { Callout, ErrorNote, NeedServer, PageHeader, Progress, useLoad } from '../components/ui';
 import {
   ApiError,
   call,
@@ -55,18 +56,19 @@ export function NewRun() {
   const setPreset = (p: Preset) => setDraft(d => ({ ...d, presetId: p.id }));
   const setDataset = (name: string) => setDraft(d => ({ ...d, dataset: name }));
 
-  if (!server) return <NeedServer />;
+  if (!server) return <NeedServer title="New run" />;
 
   const set = (patch: Partial<Knobs>) => setK(prev => ({ ...prev, ...patch }));
 
   return (
     <div className="wizard">
-      <ol className="steps">
+      <PageHeader title="New run" description="The draft is kept in this browser until you launch it." />
+      <ol className="stepper">
         {steps.map((s, i) => (
-          <li key={s} className={i === step ? 'step step-on' : i < step ? 'step step-done' : 'step'}>
-            <button disabled={i > step || (i >= 2 && !dataset)} onClick={() => setStep(i)}>
-              <span className="step-n">{String(i + 1).padStart(2, '0')}</span>
-              {s}
+          <li key={s} className={i === step ? 'is-current' : i < step ? 'is-done' : undefined}>
+            <button disabled={i > step || (i >= 2 && !dataset)} onClick={() => setStep(i)} aria-current={i === step ? 'step' : undefined}>
+              <span className="stepper-n">{i < step ? <Check aria-hidden /> : i + 1}</span>
+              <span className="stepper-label">{s}</span>
             </button>
           </li>
         ))}
@@ -105,6 +107,18 @@ export function NewRun() {
   );
 }
 
+function WizardStep({ title, description, children }: { title: string; description?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="card wizard-step">
+      <header className="wizard-head">
+        <h2>{title}</h2>
+        {description && <p className="section-desc">{description}</p>}
+      </header>
+      {children}
+    </section>
+  );
+}
+
 // ---- 1. subject ----
 
 function StepSubject(props: {
@@ -121,7 +135,7 @@ function StepSubject(props: {
   const [nameTouched, setNameTouched] = useState(Boolean(k.name));
   const ok = k.trigger.trim() && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(k.name);
   return (
-    <Section kicker="Step 1" title="Who are we training?">
+    <WizardStep title="Who are we training?">
       <div className="form-grid">
         <label className="field field-wide">
           <span>Preset</span>
@@ -164,7 +178,7 @@ function StepSubject(props: {
             <span>Subject</span>
             <div className="seg">
               {(['female', 'male', 'man'] as Subject[]).map(s => (
-                <button key={s} type="button" className={k.subject === s ? 'seg-on' : ''} onClick={() => props.onSubject(s)}>
+                <button key={s} type="button" className={k.subject === s ? 'is-on' : ''} onClick={() => props.onSubject(s)}>
                   {s === 'female' ? 'Young woman' : s === 'male' ? 'Young man' : 'Man'}
                 </button>
               ))}
@@ -176,17 +190,18 @@ function StepSubject(props: {
       <PresetNotes preset={preset} />
       <div className="wizard-nav">
         {k.name || k.trigger ? (
-          <button className="btn btn-quiet" onClick={props.onReset}>
+          <button className="btn btn-ghost" onClick={props.onReset}>
             Start over
           </button>
         ) : (
           <span />
         )}
-        <button className="btn btn-ink" disabled={!ok} onClick={props.next}>
-          Next: images →
+        <button className="btn btn-primary" disabled={!ok} onClick={props.next}>
+          Next: images
+          <ArrowRight />
         </button>
       </div>
-    </Section>
+    </WizardStep>
   );
 }
 
@@ -227,18 +242,18 @@ function StepImages({ k, dataset, onDone, back }: { k: Knobs; dataset: string; o
   };
 
   return (
-    <Section kicker="Step 2" title="Images">
+    <WizardStep title="Images">
       <div className="form-grid">
         <label className="field">
           <span>Dataset name</span>
           <input value={name} onChange={e => setName(datasetSafe(e.target.value))} />
-          <small>{already ? `Exists on the server (${already.images} images) — new files are added to it.` : 'Created on the server.'}</small>
+          <small>{already ? `Exists on the server (${already.images} images). New files are added to it.` : 'Created on the server.'}</small>
         </label>
         {existing.data && existing.data.items.length > 0 && (
           <label className="field">
-            <span>…or reuse a dataset</span>
+            <span>Or reuse a dataset</span>
             <select value={already ? name : ''} onChange={e => e.target.value && setName(e.target.value)}>
-              <option value="">—</option>
+              <option value="">Choose a dataset</option>
               {existing.data.items.map(d => (
                 <option key={d.name} value={d.name}>
                   {d.name} · {d.images} images
@@ -251,41 +266,44 @@ function StepImages({ k, dataset, onDone, back }: { k: Knobs; dataset: string; o
       <Dropzone onFiles={fs => setFiles(prev => [...prev, ...fs])} />
       {files.length > 0 && (
         <>
-          <p className="tally">
-            <span className="tally-n">{images.length}</span> images
-            {captions.length > 0 && <> · {captions.length} captions</>} · {bytes(files.reduce((n, f) => n + f.size, 0))}
-            {images.length > 0 && images.length < 15 && <span className="warn"> · fewer than ~15 images rarely holds a likeness</span>}
-            {images.length > 40 && <span className="dim"> · ~25 was enough in your notes</span>}
-            <button className="link" onClick={() => setFiles([])}>
-              clear
+          <div className="tally">
+            <p>
+              <strong className="num">{images.length}</strong> images
+              {captions.length > 0 && <> · {captions.length} captions</>} · {bytes(files.reduce((n, f) => n + f.size, 0))}
+              {images.length > 0 && images.length < 15 && <span className="warn"> · fewer than ~15 images rarely holds a likeness</span>}
+              {images.length > 40 && <span className="muted"> · ~25 was enough in your notes</span>}
+            </p>
+            <button className="btn btn-ghost btn-sm" onClick={() => setFiles([])}>
+              Clear
             </button>
-          </p>
-          <div className="contact">
-            {urls.map((u, i) => (
-              <figure key={u} className="contact-frame">
+          </div>
+          <div className="thumb-grid">
+            {urls.map(u => (
+              <span key={u} className="thumb">
                 <img src={u} alt="" />
-                <figcaption className="mono">{String(i + 1).padStart(2, '0')}</figcaption>
-              </figure>
+              </span>
             ))}
           </div>
         </>
       )}
       {progress !== null && (
-        <div className="upload-bar">
-          <div style={{ width: `${Math.round(progress * 100)}%` }} />
-          <span className="mono">{Math.round(progress * 100)}%</span>
+        <div className="upload-progress">
+          <Progress value={Math.round(progress * 100)} max={100} />
+          <span className="num">Uploading {Math.round(progress * 100)}%</span>
         </div>
       )}
       <ErrorNote error={error} />
       <div className="wizard-nav">
-        <button className="btn btn-quiet" onClick={back}>
-          ← Back
+        <button className="btn btn-ghost" onClick={back}>
+          <ArrowLeft />
+          Back
         </button>
-        <button className="btn btn-ink" disabled={!name || (!files.length && !already) || progress !== null} onClick={go}>
-          {files.length ? `Upload ${files.length} files →` : 'Use this dataset →'}
+        <button className="btn btn-primary" disabled={!name || (!files.length && !already) || progress !== null} onClick={go}>
+          {files.length ? `Upload ${files.length} files` : 'Use this dataset'}
+          <ArrowRight />
         </button>
       </div>
-    </Section>
+    </WizardStep>
   );
 }
 
@@ -322,39 +340,46 @@ function StepCaptions({ preset, k, dataset, next, back }: { preset: Preset; k: K
   };
 
   return (
-    <Section kicker="Step 3" title="Captions">
+    <WizardStep title="Captions">
       {template && (
         <div className="template">
-          <p className="kicker">Caption prompt for your VLM · {k.subject}</p>
-          <pre>{template}</pre>
-          <button
-            className="btn"
-            onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(template);
-                setCopied(true);
-                setTimeout(() => setCopied(false), 1500);
-              } catch {
-                /* clipboard blocked */
-              }
-            }}
-          >
-            {copied ? 'Copied' : 'Copy prompt'}
-          </button>
+          <div className="template-head">
+            <p>
+              Caption prompt for your VLM <span className="muted">· {k.subject}</span>
+            </p>
+            <button
+              className="btn btn-sm"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(template);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                } catch {
+                  /* clipboard blocked */
+                }
+              }}
+            >
+              {copied ? <Check /> : <Copy />}
+              {copied ? 'Copied' : 'Copy prompt'}
+            </button>
+          </div>
+          <pre className="code-block">{template}</pre>
         </div>
       )}
-      <p className="tally">
-        <span className="tally-n">{items.length - missing.length}</span> of {items.length} captioned
+      <div className="tally">
+        <p>
+          <strong className="num">{items.length - missing.length}</strong> of {items.length} captioned
+        </p>
         {missing.length > 0 && (
-          <span className="fill">
-            · fill {missing.length} missing with
-            <input value={fallback} onChange={e => setFallback(e.target.value)} />
+          <div className="fill">
+            <label htmlFor="fill-missing">Fill {missing.length} missing with</label>
+            <input id="fill-missing" value={fallback} onChange={e => setFallback(e.target.value)} />
             <button className="btn" disabled={busy || !fallback.trim()} onClick={fillMissing}>
               {busy ? 'Saving…' : 'Fill'}
             </button>
-          </span>
+          </div>
         )}
-      </p>
+      </div>
       <ErrorNote error={error || detail.error} />
       <div className="caption-grid">
         {items.map(item => (
@@ -362,14 +387,16 @@ function StepCaptions({ preset, k, dataset, next, back }: { preset: Preset; k: K
         ))}
       </div>
       <div className="wizard-nav">
-        <button className="btn btn-quiet" onClick={back}>
-          ← Back
+        <button className="btn btn-ghost" onClick={back}>
+          <ArrowLeft />
+          Back
         </button>
-        <button className="btn btn-ink" disabled={!items.length} onClick={next}>
-          Next: settings →
+        <button className="btn btn-primary" disabled={!items.length} onClick={next}>
+          Next: settings
+          <ArrowRight />
         </button>
       </div>
-    </Section>
+    </WizardStep>
   );
 }
 
@@ -394,12 +421,20 @@ function CaptionCard({ item, src, onSave }: { item: DatasetItem; src: string; on
     }
   };
   return (
-    <figure className={text.trim() ? 'caption-card' : 'caption-card caption-missing'}>
+    <figure className="caption-card">
       <img src={src} alt="" loading="lazy" />
       <figcaption>
-        <span className="mono dim">{item.file}</span>
-        <textarea value={text} rows={3} placeholder="no caption — the default caption is used" onChange={e => setText(e.target.value)} onBlur={commit} />
-        <span className={`save-state save-${state}`}>{state === 'saving' ? 'saving…' : state === 'saved' ? 'saved' : state === 'error' ? 'not saved' : ''}</span>
+        <div className="caption-meta">
+          <span className="mono caption-file" title={item.file}>
+            {item.file}
+          </span>
+          {state !== 'idle' ? (
+            <span className={`save-state save-${state}`}>{state === 'saving' ? 'Saving…' : state === 'saved' ? 'Saved' : 'Not saved'}</span>
+          ) : (
+            !text.trim() && <span className="badge tone-warn">No caption</span>
+          )}
+        </div>
+        <textarea value={text} rows={3} placeholder="No caption; the default caption is used" onChange={e => setText(e.target.value)} onBlur={commit} />
       </figcaption>
     </figure>
   );
@@ -433,71 +468,92 @@ function StepSettings({ preset, k, set, next, back }: { preset: Preset; k: Knobs
     : [{ label: own.join(' + '), value: own }, ...resolutionChoices];
   const lokr = String(preset.base.config.process[0]?.network?.type ?? '').toLowerCase() === 'lokr';
   return (
-    <Section kicker="Step 4" title="Settings">
-      <div className="form-grid">
-        <Num label="Steps" value={k.steps} onChange={steps => set({ steps })} hint={krea ? 'Your best Krea results came at 2000–2750 of 3000.' : undefined} />
-        <Num label="Save every" value={k.saveEvery} onChange={saveEvery => set({ saveEvery })} hint={`${saves} checkpoints to pick from`} />
-        <fieldset className="field">
-          <span>Resolution</span>
-          <div className="seg">
-            {choices.map(r => (
-              <button key={r.label} type="button" className={r.value.join() === k.resolution.join() ? 'seg-on' : ''} onClick={() => set({ resolution: r.value })}>
-                {r.label}
-              </button>
-            ))}
-          </div>
-          {krea && <small>1024 only was the key in your notes.</small>}
-        </fieldset>
-        <label className="field">
-          <span>Optimizer</span>
-          <select value={k.optimizer} onChange={e => set({ optimizer: e.target.value })}>
-            {Array.from(new Set(['automagic2', 'automagic3', 'adamw8bit', 'adafactor', k.optimizer])).map(o => (
-              <option key={o}>{o}</option>
-            ))}
-          </select>
-        </label>
-        <Num label="Rank (linear / alpha)" value={k.rank} onChange={rank => set({ rank })} />
-        {lokr && <Num label="LoKr factor" value={k.lokrFactor} onChange={lokrFactor => set({ lokrFactor })} hint="-1 = auto" />}
-        <label className="check">
-          <input type="checkbox" checked={k.cacheTextEmbeddings} onChange={e => set({ cacheTextEmbeddings: e.target.checked })} />
-          <span>Cache text embeddings</span>
-        </label>
-        <label className="check">
-          <input type="checkbox" checked={k.lowVram} onChange={e => set({ lowVram: e.target.checked })} />
-          <span>Low VRAM</span>
-        </label>
-        <label className="check">
-          <input type="checkbox" checked={k.sampling} onChange={e => set({ sampling: e.target.checked })} />
-          <span>Generate samples while training</span>
-        </label>
-        {k.sampling && <Num label="Sample every" value={k.sampleEvery} onChange={sampleEvery => set({ sampleEvery })} />}
-      </div>
-      {k.sampling && (
-        <div className="prompts">
-          <p className="kicker">Sample prompts</p>
-          {k.prompts.map((p, i) => (
-            <div key={i} className="prompt-row">
-              <span className="mono dim">{String(i + 1).padStart(2, '0')}</span>
-              <textarea rows={2} value={p} onChange={e => set({ prompts: k.prompts.map((x, j) => (j === i ? e.target.value : x)) })} />
-              <button className="btn btn-quiet" onClick={() => set({ prompts: k.prompts.filter((_, j) => j !== i) })} aria-label="remove prompt">
-                ×
-              </button>
+    <WizardStep title="Settings" description={`Starting from ${preset.name}. Only the knobs you usually change per run are here.`}>
+      <div className="form-section">
+        <h3>Training</h3>
+        <div className="form-grid">
+          <Num label="Steps" value={k.steps} onChange={steps => set({ steps })} hint={krea ? 'Your best Krea results came at 2000–2750 of 3000.' : undefined} />
+          <Num label="Save every" value={k.saveEvery} onChange={saveEvery => set({ saveEvery })} hint={`${saves} checkpoints to pick from`} />
+          <label className="field">
+            <span>Optimizer</span>
+            <select value={k.optimizer} onChange={e => set({ optimizer: e.target.value })}>
+              {Array.from(new Set(['automagic2', 'automagic3', 'adamw8bit', 'adafactor', k.optimizer])).map(o => (
+                <option key={o}>{o}</option>
+              ))}
+            </select>
+          </label>
+          <Num label="Rank (linear / alpha)" value={k.rank} onChange={rank => set({ rank })} />
+          {lokr && <Num label="LoKr factor" value={k.lokrFactor} onChange={lokrFactor => set({ lokrFactor })} hint="-1 = auto" />}
+          <fieldset className="field field-wide">
+            <span>Resolution</span>
+            <div className="seg">
+              {choices.map(r => (
+                <button key={r.label} type="button" className={r.value.join() === k.resolution.join() ? 'is-on' : ''} onClick={() => set({ resolution: r.value })}>
+                  {r.label}
+                </button>
+              ))}
             </div>
-          ))}
-          <button className="btn" onClick={() => set({ prompts: [...k.prompts, 'A portrait photograph of [trigger]'] })}>
-            Add prompt
-          </button>
+            {krea && <small>1024 only was the key in your notes.</small>}
+          </fieldset>
         </div>
-      )}
+      </div>
+      <div className="form-section">
+        <h3>Memory</h3>
+        <div className="checks">
+          <label className="check">
+            <input type="checkbox" checked={k.cacheTextEmbeddings} onChange={e => set({ cacheTextEmbeddings: e.target.checked })} />
+            <span>Cache text embeddings</span>
+          </label>
+          <label className="check">
+            <input type="checkbox" checked={k.lowVram} onChange={e => set({ lowVram: e.target.checked })} />
+            <span>Low VRAM</span>
+          </label>
+        </div>
+      </div>
+      <div className="form-section">
+        <h3>Samples</h3>
+        <div className="checks">
+          <label className="check">
+            <input type="checkbox" checked={k.sampling} onChange={e => set({ sampling: e.target.checked })} />
+            <span>Generate samples while training</span>
+          </label>
+        </div>
+        {k.sampling && (
+          <>
+            <div className="form-grid">
+              <Num label="Sample every" value={k.sampleEvery} onChange={sampleEvery => set({ sampleEvery })} />
+            </div>
+            <div className="prompts">
+              <p className="label">Sample prompts</p>
+              {k.prompts.map((p, i) => (
+                <div key={i} className="prompt-row">
+                  <span className="prompt-n num">{i + 1}</span>
+                  <textarea rows={2} value={p} onChange={e => set({ prompts: k.prompts.map((x, j) => (j === i ? e.target.value : x)) })} />
+                  <button className="btn btn-ghost btn-icon" onClick={() => set({ prompts: k.prompts.filter((_, j) => j !== i) })} aria-label="Remove prompt" title="Remove prompt">
+                    <X />
+                  </button>
+                </div>
+              ))}
+              <div>
+                <button className="btn" onClick={() => set({ prompts: [...k.prompts, 'A portrait photograph of [trigger]'] })}>
+                  Add prompt
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
       <div className="wizard-nav">
-        <button className="btn btn-quiet" onClick={back}>
-          ← Back
+        <button className="btn btn-ghost" onClick={back}>
+          <ArrowLeft />
+          Back
         </button>
-        <button className="btn btn-ink" onClick={next}>
-          Next: review →
+        <button className="btn btn-primary" onClick={next}>
+          Next: review
+          <ArrowRight />
         </button>
       </div>
-    </Section>
+    </WizardStep>
   );
 }
 
@@ -546,26 +602,37 @@ function StepLaunch({ preset, k, dataset, back }: { preset: Preset; k: Knobs; da
   };
 
   return (
-    <Section kicker="Step 5" title="Review and launch">
+    <WizardStep title="Review and launch">
       <ErrorNote error={info.error} />
       {info.data && (
         <>
-          <dl className="spec spec-big">
-            <dt>Run</dt>
-            <dd>
-              {k.name} <span className="dim">· trigger</span> {k.trigger}
-            </dd>
-            <dt>Dataset</dt>
-            <dd>
-              {dataset} <span className="dim">· {info.data.ds.images} images, {info.data.ds.captions} captions</span>
-            </dd>
-            <dt>Training</dt>
-            <dd>
-              {k.steps} steps <span className="dim">· save every</span> {k.saveEvery} <span className="dim">·</span> {k.optimizer}{' '}
-              <span className="dim">·</span> {k.resolution.join('+')}px
-            </dd>
-            <dt>Samples</dt>
-            <dd>{k.sampling ? `${k.prompts.length} prompts every ${k.sampleEvery} steps` : 'off'}</dd>
+          <dl className="summary">
+            <div>
+              <dt>Run</dt>
+              <dd>
+                {k.name} <span className="muted">· trigger</span> {k.trigger}
+              </dd>
+            </div>
+            <div>
+              <dt>Dataset</dt>
+              <dd>
+                {dataset}{' '}
+                <span className="muted">
+                  · {info.data.ds.images} images, {info.data.ds.captions} captions
+                </span>
+              </dd>
+            </div>
+            <div>
+              <dt>Training</dt>
+              <dd className="num">
+                {k.steps} steps <span className="muted">· save every</span> {k.saveEvery} <span className="muted">·</span> {k.optimizer}{' '}
+                <span className="muted">·</span> {k.resolution.join('+')}px
+              </dd>
+            </div>
+            <div>
+              <dt>Samples</dt>
+              <dd>{k.sampling ? `${k.prompts.length} prompts every ${k.sampleEvery} steps` : 'Off'}</dd>
+            </div>
           </dl>
           <div className="form-grid">
             <label className="field">
@@ -581,8 +648,8 @@ function StepLaunch({ preset, k, dataset, back }: { preset: Preset; k: Knobs; da
             <label className="field">
               <span>Keep portable on</span>
               <select value={syncRemote} onChange={e => setSyncRemote(e.target.value)}>
-                <option value="">server default</option>
-                <option value="-">none</option>
+                <option value="">Server default</option>
+                <option value="-">None</option>
                 {info.data.remotes.map(r => (
                   <option key={r.id} value={r.name}>
                     {r.name} ({r.kind})
@@ -591,33 +658,40 @@ function StepLaunch({ preset, k, dataset, back }: { preset: Preset; k: Knobs; da
               </select>
               <small>Synced runs continue on another server if this one goes away.</small>
             </label>
-            <label className="check">
+            <label className="check field-wide">
               <input type="checkbox" checked={autoResume} onChange={e => setAutoResume(e.target.checked)} />
               <span>Resume automatically after an interruption</span>
             </label>
           </div>
           {problems.length > 0 && (
-            <ul className="problems">
-              {problems.map(p => (
-                <li key={p}>{p}</li>
-              ))}
-            </ul>
+            <Callout kind="warn">
+              <ul className="problems">
+                {problems.map(p => (
+                  <li key={p}>{p}</li>
+                ))}
+              </ul>
+            </Callout>
           )}
-          <button className="link" onClick={() => setShowConfig(v => !v)}>
-            {showConfig ? 'hide' : 'show'} the job config
-          </button>
-          {showConfig && config && <pre className="config-preview">{YAML.stringify(config, { lineWidth: 0 })}</pre>}
+          <div className="config-toggle">
+            <button className="btn btn-ghost btn-sm" aria-expanded={showConfig} onClick={() => setShowConfig(v => !v)}>
+              {showConfig ? <ChevronDown /> : <ChevronRight />}
+              {showConfig ? 'Hide' : 'Show'} the job config
+            </button>
+          </div>
+          {showConfig && config && <pre className="code-block config-preview">{YAML.stringify(config, { lineWidth: 0 })}</pre>}
         </>
       )}
       <ErrorNote error={error} />
       <div className="wizard-nav">
-        <button className="btn btn-quiet" onClick={back}>
-          ← Back
+        <button className="btn btn-ghost" onClick={back}>
+          <ArrowLeft />
+          Back
         </button>
-        <button className="btn btn-grease" disabled={!config || problems.length > 0 || busy} onClick={launch}>
+        <button className="btn btn-primary" disabled={!config || problems.length > 0 || busy} onClick={launch}>
+          <Rocket />
           {busy ? 'Starting…' : 'Create and start training'}
         </button>
       </div>
-    </Section>
+    </WizardStep>
   );
 }

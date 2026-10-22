@@ -1,5 +1,6 @@
+import { ChevronDown, Download, FileUp, Lightbulb } from 'lucide-react';
 import { useRef, useState } from 'react';
-import { ErrorNote, Section } from '../components/ui';
+import { ErrorNote, PageHeader } from '../components/ui';
 import { useStudio } from '../lib/context';
 import { presetFromText, presetToYAML, type Preset } from '../lib/presets';
 
@@ -14,13 +15,16 @@ function saveText(name: string, text: string) {
 export function PresetNotes({ preset }: { preset: Preset }) {
   if (!preset.notes.length) return null;
   return (
-    <ul className="notes">
-      {preset.notes.map(n => (
-        <li key={n.title}>
-          <strong>{n.title}.</strong> <span dangerouslySetInnerHTML={{ __html: md(n.body) }} />
-        </li>
-      ))}
-    </ul>
+    <div className="callout callout-info notes">
+      <Lightbulb className="callout-icon" aria-hidden />
+      <ul className="callout-body">
+        {preset.notes.map(n => (
+          <li key={n.title}>
+            <strong>{n.title}.</strong> <span dangerouslySetInnerHTML={{ __html: md(n.body) }} />
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -48,70 +52,85 @@ export function Presets() {
   };
 
   return (
-    <Section
-      kicker="Recipes"
-      title="Presets"
-      actions={
-        <>
-          <input
-            ref={file}
-            type="file"
-            accept=".yml,.yaml,.json"
-            multiple
-            className="visually-hidden"
-            aria-label="Import ai-toolkit config files"
-            onChange={e => onFiles(e.target.files)}
-          />
-          <button className="btn btn-ink" onClick={() => file.current?.click()}>
-            Import config…
-          </button>
-        </>
-      }
-    >
-      <p className="lede">
-        A preset is a full ai-toolkit job config plus the handful of knobs you change per run. Import any ai-toolkit YAML or
-        JSON — the two settings traps found in your Krea files are checked on everything imported.
-      </p>
+    <>
+      <PageHeader
+        title="Presets"
+        description="A preset is a full ai-toolkit job config plus the handful of knobs you change per run. Import any ai-toolkit YAML or JSON; the two settings traps found in your Krea files are checked on everything imported."
+        actions={
+          <>
+            <input
+              ref={file}
+              type="file"
+              accept=".yml,.yaml,.json"
+              multiple
+              className="visually-hidden"
+              aria-label="Import ai-toolkit config files"
+              onChange={e => onFiles(e.target.files)}
+            />
+            <button className="btn btn-primary" onClick={() => file.current?.click()}>
+              <FileUp />
+              Import config
+            </button>
+          </>
+        }
+      />
       <ErrorNote error={error} />
       <div className="preset-list">
-        {presets.map((p, i) => {
+        {presets.map(p => {
           const proc = p.base.config.process[0] ?? {};
+          const isOpen = open === p.id;
           return (
-            <article key={p.id} className={open === p.id ? 'preset preset-open' : 'preset'} style={{ animationDelay: `${i * 60}ms` }}>
-              <button className="preset-head" onClick={() => setOpen(open === p.id ? null : p.id)}>
-                <span className="preset-tag">{p.builtIn ? 'built-in' : 'imported'}</span>
-                <span className="preset-name">{p.name}</span>
+            <article key={p.id} className={isOpen ? 'card preset is-open' : 'card preset'}>
+              <button className="preset-head" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : p.id)}>
+                <span className="preset-title">
+                  <span className="preset-name">{p.name}</span>
+                  <span className={p.builtIn ? 'badge tone-quiet' : 'badge tone-accent'}>{p.builtIn ? 'Built-in' : 'Imported'}</span>
+                </span>
                 <span className="preset-desc">{p.description}</span>
+                <ChevronDown className="preset-chevron" aria-hidden />
               </button>
-              {open === p.id && (
+              {isOpen && (
                 <div className="preset-body">
-                  <dl className="spec">
-                    <dt>Model</dt>
-                    <dd className="mono">{proc.model?.name_or_path ?? '–'}</dd>
-                    <dt>Arch</dt>
-                    <dd className="mono">{proc.model?.arch ?? '–'}</dd>
-                    <dt>Network</dt>
-                    <dd className="mono">
-                      {proc.network?.type ?? 'lora'} · {p.defaults.rank}
-                      {proc.network?.type === 'lokr' ? ` · factor ${p.defaults.lokrFactor}` : ''}
-                    </dd>
-                    <dt>Steps</dt>
-                    <dd className="mono">
-                      {p.defaults.steps} · save every {p.defaults.saveEvery}
-                    </dd>
-                    <dt>Optimizer</dt>
-                    <dd className="mono">{p.defaults.optimizer}</dd>
-                    <dt>Resolution</dt>
-                    <dd className="mono">{p.defaults.resolution.join(' + ')}</dd>
+                  <dl className="facts">
+                    <div className="fact-wide">
+                      <dt>Model</dt>
+                      <dd className="mono">{proc.model?.name_or_path ?? '–'}</dd>
+                    </div>
+                    <div>
+                      <dt>Arch</dt>
+                      <dd className="mono">{proc.model?.arch ?? '–'}</dd>
+                    </div>
+                    <div>
+                      <dt>Network</dt>
+                      <dd>
+                        {proc.network?.type ?? 'lora'} · rank {p.defaults.rank}
+                        {proc.network?.type === 'lokr' ? ` · factor ${p.defaults.lokrFactor}` : ''}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Steps</dt>
+                      <dd className="num">
+                        {p.defaults.steps.toLocaleString()} · save every {p.defaults.saveEvery}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Optimizer</dt>
+                      <dd className="mono">{p.defaults.optimizer}</dd>
+                    </div>
+                    <div>
+                      <dt>Resolution</dt>
+                      <dd className="num">{p.defaults.resolution.join(' + ')}</dd>
+                    </div>
                   </dl>
                   <PresetNotes preset={p} />
                   <div className="row">
                     <button className="btn" onClick={() => saveText(`${p.name.replace(/[^\w.-]+/g, '_')}.yml`, presetToYAML(p))}>
+                      <Download />
                       Export YAML
                     </button>
                     {!p.builtIn && (
                       <button
-                        className="btn btn-quiet"
+                        className="btn btn-danger"
                         onClick={() => {
                           if (confirm(`Delete preset ${p.name}?`)) setImported(list => list.filter(x => x.id !== p.id));
                         }}
@@ -126,6 +145,6 @@ export function Presets() {
           );
         })}
       </div>
-    </Section>
+    </>
   );
 }

@@ -20,7 +20,7 @@ training.
   captions) → captions (inline editing, fill missing, copy the caption
   prompt) → knobs → review → create and start, optionally portable on a
   remote with auto-resume.
-- **Runs**: live progress over the event stream, ETA, samples as film strips
+- **Runs**: live progress over the event stream, ETA, samples in grids by step
   per step, an SVG loss chart with checkpoint marks, checkpoints to download
   or push to a remote, sync / portability status, the trainer log.
 
