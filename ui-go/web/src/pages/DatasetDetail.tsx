@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FileArchive, Save, Trash2, Upload as UploadIcon } from 'lucide-react';
+import { ChevronRight, FileArchive, FileX, ImagePlus, Save, Trash2, Upload as UploadIcon } from 'lucide-react';
 import { api, ApiError, fmtBytes, imgUrl, joinServerPath, plural, upload } from '../api';
 import { go, href } from '../router';
 import type { DatasetDetail as Detail, DatasetItem } from '../types';
@@ -84,8 +84,16 @@ export function DatasetDetail({ name }: { name: string }) {
 
   if (missing)
     return (
-      <Empty title="Dataset not found">
-        <a href={href('datasets')}>Back to datasets</a>
+      <Empty
+        icon={<FileX size={18} />}
+        title="Dataset not found"
+        action={
+          <a className="btn btn-sm" href={href('datasets')}>
+            Back to datasets
+          </a>
+        }
+      >
+        It may have been deleted or renamed.
       </Empty>
     );
   if (!ds) return <Loading what="dataset" />;
@@ -94,23 +102,25 @@ export function DatasetDetail({ name }: { name: string }) {
     <>
       <div className="crumbs">
         <a href={href('datasets')}>Datasets</a>
+        <ChevronRight size={14} />
+        <span>{ds.name}</span>
       </div>
       <div className="page-head">
         <div>
           <h1 className="page-title">{ds.name}</h1>
-          <div className="page-sub">
+          <div className="page-sub ellipsis" title={ds.path}>
             {plural(ds.images, 'image')} · {plural(ds.captions, 'caption')} · {fmtBytes(ds.size)} · <span className="mono">{ds.path}</span>
           </div>
         </div>
-        <div className="row-wrap">
-          <button className="btn" onClick={() => fileInput.current?.click()} disabled={progress !== null}>
-            <UploadIcon size={12} /> Upload files
+        <div className="page-actions">
+          <button className="btn btn-destructive" onClick={delDataset}>
+            <Trash2 size={14} /> Delete
           </button>
           <button className="btn" onClick={() => zipInput.current?.click()} disabled={progress !== null}>
-            <FileArchive size={12} /> Import zip
+            <FileArchive size={14} /> Import zip
           </button>
-          <button className="btn btn-ghost-danger" onClick={delDataset}>
-            <Trash2 size={12} /> Delete
+          <button className="btn btn-primary" onClick={() => fileInput.current?.click()} disabled={progress !== null}>
+            <UploadIcon size={14} /> Upload files
           </button>
         </div>
       </div>
@@ -119,7 +129,6 @@ export function DatasetDetail({ name }: { name: string }) {
 
       <div
         className={over ? 'drop over' : 'drop'}
-        style={{ marginBottom: 20 }}
         onClick={() => fileInput.current?.click()}
         onDragOver={e => {
           e.preventDefault();
@@ -133,24 +142,28 @@ export function DatasetDetail({ name }: { name: string }) {
         }}
       >
         {progress !== null ? (
-          <div className="stack" style={{ alignItems: 'center' }}>
-            <span className="row">
-              <Spinner size={12} /> Uploading {Math.round(progress * 100)}%
+          <div className="stack" style={{ alignItems: 'center', gap: 10 }}>
+            <span className="row num">
+              <Spinner size={14} /> Uploading {Math.round(progress * 100)}%
             </span>
             <div style={{ width: 240 }}>
               <Bar value={progress} max={1} />
             </div>
           </div>
         ) : (
-          'Drop images, videos, .txt captions or a .zip here'
+          <>
+            <ImagePlus size={16} /> Drop images, videos, .txt captions or a .zip here, or click to browse
+          </>
         )}
       </div>
 
       {items.length === 0 ? (
-        <Empty title="Empty dataset">Upload media with matching .txt captions (image.png + image.txt).</Empty>
+        <Empty icon={<ImagePlus size={18} />} title="Empty dataset">
+          Upload media with matching .txt captions (<span className="mono">image.png</span> + <span className="mono">image.txt</span>).
+        </Empty>
       ) : (
         <>
-          <div className="grid grid-media">
+          <div className="grid grid-items">
             {items.map(it => (
               <ItemCard key={it.file} dsName={name} folder={ds.path} item={it} onDeleted={() => setItems(x => x.filter(y => y.file !== it.file))} />
             ))}
@@ -210,34 +223,34 @@ function ItemCard({ dsName, folder, item, onDeleted }: { dsName: string; folder:
   };
 
   return (
-    <div className="thumb">
+    <div className="card item">
       {isVideo(item.file) ? (
-        <video src={imgUrl(path)} muted preload="metadata" style={{ width: '100%', aspectRatio: '1', objectFit: 'cover' }} />
+        <video className="item-media" src={imgUrl(path)} muted preload="metadata" />
       ) : isAudio(item.file) ? (
-        <img src={`/api/audio/art/${encodeURIComponent(path.slice(0, Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))))}/${encodeURIComponent(item.file.split('/').pop()!)}`} alt="" loading="lazy" />
+        <img className="item-media" src={`/api/audio/art/${encodeURIComponent(path.slice(0, Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))))}/${encodeURIComponent(item.file.split('/').pop()!)}`} alt="" loading="lazy" />
       ) : (
-        <img src={imgUrl(path, true)} alt={item.file} loading="lazy" />
+        <img className="item-media" src={imgUrl(path, true)} alt={item.file} loading="lazy" />
       )}
-      <div className="thumb-meta">
-        <div className="row" style={{ justifyContent: 'space-between' }}>
-          <span className="mono small ellipsis" title={item.file}>
+      <div className="item-head">
+        <div style={{ minWidth: 0 }}>
+          <div className="mono ellipsis" title={item.file} style={{ fontSize: 12 }}>
             {item.file}
-          </span>
-          <button className="icon-btn ghost" onClick={del} aria-label="Delete file" title="Delete file">
-            <Trash2 size={12} />
-          </button>
+          </div>
+          <div className="item-meta">
+            {item.width && item.height ? `${item.width} × ${item.height} · ` : ''}
+            {fmtBytes(item.size)}
+          </div>
         </div>
-        <span className="dim small mono">
-          {item.width && item.height ? `${item.width}×${item.height} · ` : ''}
-          {fmtBytes(item.size)}
-        </span>
-        <textarea rows={3} value={caption} onChange={e => setCaption(e.target.value)} placeholder="No caption" style={{ fontSize: 11 }} />
-        {caption !== saved && (
-          <button className="btn btn-sm btn-primary" onClick={save} disabled={saving}>
-            {saving ? <Spinner size={10} /> : <Save size={10} />} Save caption
-          </button>
-        )}
+        <button className="icon-btn sm danger" onClick={del} aria-label="Delete file" title="Delete file">
+          <Trash2 size={14} />
+        </button>
       </div>
+      <textarea className="caption" rows={3} value={caption} onChange={e => setCaption(e.target.value)} placeholder="No caption" aria-label={`Caption for ${item.file}`} />
+      {caption !== saved && (
+        <button className="btn btn-sm btn-primary" onClick={save} disabled={saving}>
+          {saving ? <Spinner size={14} /> : <Save size={14} />} Save caption
+        </button>
+      )}
     </div>
   );
 }

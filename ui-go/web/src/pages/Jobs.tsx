@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
-import { ListChecks } from 'lucide-react';
+import { ListChecks, Search } from 'lucide-react';
 import { api, fmtAgo, plural } from '../api';
 import { go, href } from '../router';
 import type { Items, Job } from '../types';
-import { Bar, Empty, Loading, Mono, StateBadge, usePoll } from '../ui';
+import { Bar, Empty, Loading, StateBadge, sentence, usePoll } from '../ui';
 
 const FILTERS = ['all', 'active', 'running', 'queued', 'completed', 'failed', 'interrupted', 'stopped', 'draft'] as const;
 
@@ -12,11 +12,11 @@ export function JobTableHead() {
     <thead>
       <tr>
         <th>Name</th>
-        <th>State</th>
-        <th style={{ minWidth: 140 }}>Progress</th>
-        <th>Speed</th>
-        <th>GPU</th>
-        <th>Updated</th>
+        <th className="col-state">State</th>
+        <th className="col-progress">Progress</th>
+        <th className="col-speed hide-sm">Speed</th>
+        <th className="col-gpu hide-sm">GPU</th>
+        <th className="col-updated hide-sm">Updated</th>
       </tr>
     </thead>
   );
@@ -27,10 +27,10 @@ export function JobRow({ job: j }: { job: Job }) {
   return (
     <tr className="clickable" onClick={() => go('jobs', j.id)}>
       <td>
-        <a href={href('jobs', j.id)} onClick={e => e.stopPropagation()} style={{ fontWeight: 700 }}>
+        <a className="cell-title" href={href('jobs', j.id)} onClick={e => e.stopPropagation()}>
           {j.name}
         </a>
-        <div className="dim small ellipsis" style={{ maxWidth: 360 }} title={j.info}>
+        <div className="cell-sub ellipsis" title={j.info}>
           {j.info || j.type}
         </div>
       </td>
@@ -38,17 +38,17 @@ export function JobRow({ job: j }: { job: Job }) {
         <StateBadge state={j.state} />
       </td>
       <td>
-        <div className="mono small">
-          {j.step}
-          {total ? ` / ${total}` : ''}
+        <div className="cell-progress">
+          {total ? <Bar value={j.step} max={total} /> : null}
+          <span className="num">
+            {j.step}
+            {total ? ` / ${total}` : ''}
+          </span>
         </div>
-        {total ? <Bar value={j.step} max={total} /> : null}
       </td>
-      <td className="mono small nowrap">{j.speed || '—'}</td>
-      <td>
-        <Mono>{j.gpu_ids}</Mono>
-      </td>
-      <td className="small muted nowrap">{fmtAgo(j.updated_at)}</td>
+      <td className="small muted nowrap hide-sm">{j.speed || '—'}</td>
+      <td className="small muted hide-sm">{j.gpu_ids}</td>
+      <td className="small muted nowrap hide-sm">{fmtAgo(j.updated_at)}</td>
     </tr>
   );
 }
@@ -81,14 +81,17 @@ export function Jobs() {
       <div className="page-head">
         <div>
           <h1 className="page-title">Jobs</h1>
-          <div className="page-sub">{jobs ? plural(jobs.length, 'job') : ''}</div>
+          <div className="page-sub">{jobs ? `${plural(jobs.length, 'job')} on this server` : 'Training jobs on this server'}</div>
         </div>
-        <div className="row-wrap">
-          <input type="search" placeholder="Filter by name" value={query} onChange={e => setQuery(e.target.value)} style={{ width: 200 }} />
-          <select value={filter} onChange={e => setFilter(e.target.value as any)} style={{ width: 150 }}>
+        <div className="page-actions">
+          <label className="search">
+            <Search size={14} />
+            <input type="search" placeholder="Filter by name" value={query} onChange={e => setQuery(e.target.value)} style={{ width: 220 }} aria-label="Filter by name" />
+          </label>
+          <select value={filter} onChange={e => setFilter(e.target.value as any)} style={{ width: 150 }} aria-label="State">
             {FILTERS.map(f => (
               <option key={f} value={f}>
-                {f}
+                {f === 'all' ? 'All states' : sentence(f)}
               </option>
             ))}
           </select>
@@ -97,12 +100,28 @@ export function Jobs() {
       {!jobs ? (
         <Loading what="jobs" />
       ) : shown.length === 0 ? (
-        <Empty icon={<ListChecks size={28} />} title={jobs.length ? 'No jobs match' : 'No jobs yet'}>
-          Jobs are created by apps and agents through the API (POST /v1/jobs or MCP).
+        <Empty
+          icon={<ListChecks size={18} />}
+          title={jobs.length ? 'No jobs match' : 'No jobs yet'}
+          action={
+            jobs.length ? (
+              <button
+                className="btn btn-sm"
+                onClick={() => {
+                  setQuery('');
+                  setFilter('all');
+                }}
+              >
+                Clear filters
+              </button>
+            ) : undefined
+          }
+        >
+          {jobs.length ? 'Try another name or state.' : <>Apps and agents create jobs through the API (<span className="mono">POST /v1/jobs</span> or MCP).</>}
         </Empty>
       ) : (
         <div className="table-wrap">
-          <table>
+          <table className="fixed">
             <JobTableHead />
             <tbody>
               {shown.map(j => (

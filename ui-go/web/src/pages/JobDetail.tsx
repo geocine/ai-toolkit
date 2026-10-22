@@ -1,16 +1,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Camera, Download, Hash, Octagon, Play, RefreshCw, Save, Square, Trash2, UploadCloud } from 'lucide-react';
-import { api, fileUrl, fmtAgo, fmtBytes, fmtTime, imgUrl, qs, streamEvents, type AitkEvent } from '../api';
+import { Activity, Camera, ChevronRight, Download, FileX, Hash, History, Image as ImageIcon, Octagon, Package, Play, RefreshCw, Save, Square, Trash2, UploadCloud } from 'lucide-react';
+import { api, fileUrl, fmtAgo, fmtBytes, fmtTime, imgUrl, plural, qs, streamEvents, type AitkEvent } from '../api';
 import { LossChart } from '../LossChart';
 import { go, href } from '../router';
 import type { Attempt, Checkpoint, Items, Job, LogChunk, LossSeries, Remote, Sample, SyncStatus } from '../types';
-import { Bar, CopyButton, Empty, Field, Loading, Modal, Mono, Section, StateBadge, Spinner, usePoll, useConfirm, useToast } from '../ui';
+import { Bar, Callout, CopyButton, Empty, Field, Loading, Modal, Mono, StateBadge, Spinner, sentence, usePoll, useConfirm, useToast } from '../ui';
 import { stepsOf } from './Jobs';
 
 const TABS = ['overview', 'log', 'loss', 'samples', 'checkpoints', 'attempts', 'config'] as const;
 type Tab = (typeof TABS)[number];
 const LIVE_TYPES = ['job.state', 'job.progress', 'job.checkpoint', 'job.sample', 'job.attempt', 'job.sync', 'job.loss', 'job.log', 'job.deleted'];
 const LOG_KEEP = 512 * 1024;
+
+/** Time left from the trainer's speed text ("2.2 iter/sec" or "1.4 sec/iter"). */
+const etaOf = (speed: string | undefined, left: number): string | null => {
+  const m = speed?.match(/([\d.]+)\s*(iter\/sec|it\/s|sec\/iter|s\/it)/i);
+  if (!m || left <= 0) return null;
+  const v = Number(m[1]);
+  if (!v) return null;
+  const secs = /^(iter|it)/i.test(m[2]) ? left / v : left * v;
+  const h = Math.floor(secs / 3600);
+  const min = Math.floor((secs % 3600) / 60);
+  return h ? `${h}h ${min}m` : min ? `${min}m` : `${Math.max(1, Math.round(secs))}s`;
+};
 
 export function JobDetail({ id }: { id: string }) {
   const toast = useToast();
@@ -99,8 +111,16 @@ export function JobDetail({ id }: { id: string }) {
 
   if (missing) {
     return (
-      <Empty title="Job not found">
-        It may have been deleted. <a href={href('jobs')}>Back to jobs</a>
+      <Empty
+        icon={<FileX size={18} />}
+        title="Job not found"
+        action={
+          <a className="btn btn-sm" href={href('jobs')}>
+            Back to jobs
+          </a>
+        }
+      >
+        It may have been deleted.
       </Empty>
     );
   }
@@ -139,75 +159,80 @@ export function JobDetail({ id }: { id: string }) {
     }
   };
 
+  const eta = running && total ? etaOf(job.speed, total - job.step) : null;
+
   return (
     <>
       <div className="crumbs">
-        <a href={href('jobs')}>Jobs</a> / {job.type}
+        <a href={href('jobs')}>Jobs</a>
+        <ChevronRight size={14} />
+        <span>{sentence(job.type)}</span>
       </div>
       <div className="page-head">
-        <div className="grow">
-          <div className="row-wrap">
+        <div>
+          <div className="title-row">
             <h1 className="page-title">{job.name}</h1>
-            <StateBadge state={job.state} />
+            <StateBadge state={job.state} badge />
             <span className={live ? 'live on' : 'live'} title={live ? 'Receiving live events' : 'Reconnecting; polling meanwhile'}>
-              <span className="live-dot" />
-              {live ? 'live' : 'offline'}
+              <span className="dot" />
+              {live ? 'Live' : 'Offline'}
             </span>
           </div>
           <div className="page-sub ellipsis" title={job.info}>
             {job.info || '—'}
           </div>
         </div>
-        <div className="row-wrap">
-          {!active && (
-            <button className="btn btn-primary" disabled={!!busy} onClick={() => act('start', 'start', 'Job queued')}>
-              {busy === 'start' ? <Spinner size={12} /> : <Play size={12} />} {job.step > 0 ? 'Resume' : 'Start'}
-            </button>
-          )}
+        <div className="page-actions">
           {running && (
             <>
               <button className="btn" disabled={!!busy} onClick={() => act('save', 'save_now', 'Will save at the next step')}>
-                <Save size={12} /> Save now
+                <Save size={14} /> Save now
               </button>
               <button className="btn" disabled={!!busy} onClick={() => act('sample', 'sample_now', 'Will sample at the next step')}>
-                <Camera size={12} /> Sample now
+                <Camera size={14} /> Sample now
               </button>
             </>
           )}
           {active && (
             <button className="btn" disabled={!!busy || job.state === 'stopping'} onClick={() => act('stop', 'stop', 'Stopping')}>
-              <Square size={12} /> Stop
+              <Square size={14} /> Stop
             </button>
           )}
           {(running || job.state === 'stopping') && (
-            <button className="btn btn-ghost-danger" disabled={!!busy} onClick={kill}>
-              <Octagon size={12} /> Kill
+            <button className="btn btn-destructive" disabled={!!busy} onClick={kill}>
+              <Octagon size={14} /> Kill
             </button>
           )}
           {!active && (
-            <button className="btn btn-ghost-danger" onClick={del}>
-              <Trash2 size={12} /> Delete
+            <button className="btn btn-destructive" onClick={del}>
+              <Trash2 size={14} /> Delete
+            </button>
+          )}
+          {!active && (
+            <button className="btn btn-primary" disabled={!!busy} onClick={() => act('start', 'start', 'Job queued')}>
+              {busy === 'start' ? <Spinner size={14} /> : <Play size={14} />} {job.step > 0 ? 'Resume' : 'Start'}
             </button>
           )}
         </div>
       </div>
 
-      <div className="card" style={{ marginBottom: 20 }}>
-        <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
-          <span className="mono">
-            step {job.step}
-            {total ? ` / ${total}` : ''}
-            {total ? <span className="muted"> · {((job.step / total) * 100).toFixed(1)}%</span> : null}
-          </span>
-          <span className="mono muted small">{job.speed}</span>
-        </div>
+      <div className="run-progress">
         <Bar value={job.step} max={total ?? 0} />
+        <div className="run-stats">
+          <span>
+            Step <b>{job.step}</b>
+            {total ? <> / {total}</> : null}
+            {total ? <span className="dim"> · {((job.step / total) * 100).toFixed(1)}%</span> : null}
+          </span>
+          {job.speed && <span>{job.speed}</span>}
+          {eta && <span>ETA {eta}</span>}
+        </div>
       </div>
 
       <div className="tabs" role="tablist">
         {TABS.map(t => (
-          <button key={t} role="tab" className={tab === t ? 'tab active' : 'tab'} onClick={() => setTab(t)}>
-            {t}
+          <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'tab active' : 'tab'} onClick={() => setTab(t)}>
+            {sentence(t)}
           </button>
         ))}
       </div>
@@ -279,18 +304,21 @@ function OverviewTab({ job, onChange, syncVer }: { job: Job; onChange: (j: Job) 
   return (
     <div className="grid grid-2">
       <div className="card">
+        <div className="card-head">
+          <h3 className="card-title">Details</h3>
+        </div>
         <dl className="kv">
           <dt>ID</dt>
-          <dd className="row">
+          <dd className="row" style={{ gap: 4 }}>
             <Mono>{job.id}</Mono> <CopyButton text={job.id} />
           </dd>
           <dt>Type</dt>
-          <dd>{job.type}</dd>
+          <dd>{sentence(job.type)}</dd>
           <dt>GPUs</dt>
-          <dd className="mono">{job.gpu_ids}</dd>
+          <dd className="num">{job.gpu_ids}</dd>
           <dt>Status</dt>
-          <dd className="mono">
-            {job.status} {job.pid ? <span className="muted">· pid {job.pid}</span> : null}
+          <dd>
+            {job.status || '—'} {job.pid ? <span className="muted num">· pid {job.pid}</span> : null}
           </dd>
           <dt>Created</dt>
           <dd title={fmtTime(job.created_at)}>{fmtAgo(job.created_at)}</dd>
@@ -314,7 +342,7 @@ function OverviewTab({ job, onChange, syncVer }: { job: Job; onChange: (j: Job) 
                 {job.latest_checkpoint.name}
               </a>
             ) : (
-              <span className="dim">none yet</span>
+              <span className="dim">None yet</span>
             )}
           </dd>
           {job.ref && (
@@ -327,8 +355,8 @@ function OverviewTab({ job, onChange, syncVer }: { job: Job; onChange: (j: Job) 
       </div>
 
       <div className="card">
-        <div className="section-head">
-          <h2>Policy</h2>
+        <div className="card-head">
+          <h3 className="card-title">Policy</h3>
         </div>
         <div className="form-grid">
           <label className="check">
@@ -340,7 +368,7 @@ function OverviewTab({ job, onChange, syncVer }: { job: Job; onChange: (j: Job) 
           </Field>
           <Field label="Sync remote" hint="Keeps the job portable to another server">
             <select value={policy.sync_remote} onChange={e => setPolicy({ ...policy, sync_remote: e.target.value })}>
-              <option value="">none</option>
+              <option value="">None</option>
               {remotes.map(r => (
                 <option key={r.id} value={r.id}>
                   {r.name} ({r.kind})
@@ -350,7 +378,7 @@ function OverviewTab({ job, onChange, syncVer }: { job: Job; onChange: (j: Job) 
           </Field>
           <Field label="Auto-upload remote" hint="Every new checkpoint is uploaded">
             <select value={policy.auto_upload_remote} onChange={e => setPolicy({ ...policy, auto_upload_remote: e.target.value })}>
-              <option value="">none</option>
+              <option value="">None</option>
               {remotes.map(r => (
                 <option key={r.id} value={r.id}>
                   {r.name} ({r.kind})
@@ -360,19 +388,19 @@ function OverviewTab({ job, onChange, syncVer }: { job: Job; onChange: (j: Job) 
           </Field>
         </div>
         <div className="form-actions">
-          {busy && <span className="muted small">Policy can be changed while the job is not queued or running.</span>}
+          {busy && <span className="muted small grow">Policy can be changed while the job is not queued or running.</span>}
           <button className="btn btn-primary" onClick={savePolicy} disabled={saving || busy}>
-            {saving ? <Spinner size={12} /> : <Save size={12} />} Save policy
+            {saving ? <Spinner size={14} /> : <Save size={14} />} Save policy
           </button>
         </div>
       </div>
 
       <div className="card">
-        <div className="section-head">
-          <h2>Portable sync</h2>
+        <div className="card-head">
+          <h3 className="card-title">Portable sync</h3>
           {sync?.remote && (
             <button className="btn btn-sm" onClick={forceSync} disabled={syncing}>
-              {syncing ? <Spinner size={12} /> : <UploadCloud size={12} />} Sync now
+              {syncing ? <Spinner size={14} /> : <UploadCloud size={14} />} Sync now
             </button>
           )}
         </div>
@@ -385,7 +413,7 @@ function OverviewTab({ job, onChange, syncVer }: { job: Job; onChange: (j: Job) 
             <dt>Remote</dt>
             <dd>{remoteName(sync.remote)}</dd>
             <dt>Synced step</dt>
-            <dd className="mono">{sync.step ?? '—'}</dd>
+            <dd className="num">{sync.step ?? '—'}</dd>
             <dt>Last sync</dt>
             <dd title={fmtTime(sync.last_sync_at)}>{fmtAgo(sync.last_sync_at)}</dd>
             <dt>Lease</dt>
@@ -395,16 +423,15 @@ function OverviewTab({ job, onChange, syncVer }: { job: Job; onChange: (j: Job) 
                   <Mono>{sync.lease.node_label}</Mono> <span className="muted">until {fmtTime(sync.lease.expires_at)}</span>
                 </>
               ) : (
-                <span className="muted">released</span>
+                <span className="muted">Released</span>
               )}
             </dd>
-            {sync.last_error && (
-              <>
-                <dt>Error</dt>
-                <dd className="danger-text">{sync.last_error}</dd>
-              </>
-            )}
           </dl>
+        )}
+        {sync?.last_error && (
+          <div style={{ marginTop: 14 }}>
+            <Callout tone="danger">{sync.last_error}</Callout>
+          </div>
         )}
       </div>
     </div>
@@ -448,15 +475,19 @@ function LogTab({ job, log, setLog }: { job: Job; log: LogState; setLog: (fn: (l
 
   return (
     <>
-      <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
+      <div className="toolbar">
         <label className="check small">
-          <input type="checkbox" checked={follow} onChange={e => setFollow(e.target.checked)} /> Follow
+          <input type="checkbox" checked={follow} onChange={e => setFollow(e.target.checked)} /> Follow output
         </label>
         <button className="btn btn-sm" onClick={load}>
-          <RefreshCw size={12} /> Reload
+          <RefreshCw size={14} /> Reload
         </button>
       </div>
-      {error && <div className="danger-text small">{error}</div>}
+      {error && (
+        <div style={{ marginBottom: 12 }}>
+          <Callout tone="danger">{error}</Callout>
+        </div>
+      )}
       {!log.loaded ? (
         <Loading what="log" />
       ) : (
@@ -509,30 +540,47 @@ function LossTab({ job, live }: { job: Job; live: { step: number; key: string; v
   }, [series, live]);
 
   if (!series) return <Loading what="loss" />;
-  if (series.keys.length === 0) return <Empty title="No metrics yet">The trainer writes loss_log.db once training steps start.</Empty>;
+  if (series.keys.length === 0)
+    return (
+      <Empty icon={<Activity size={18} />} title="No metrics yet">
+        The trainer writes <span className="mono">loss_log.db</span> once training steps start.
+      </Empty>
+    );
   const last = points[points.length - 1];
   return (
     <div className="card">
-      <div className="row-wrap" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
-        <div className="row-wrap">
-          <select value={series.key} onChange={e => setKey(e.target.value)} style={{ width: 200 }}>
+      <div className="toolbar">
+        <div className="row-wrap" style={{ gap: 16 }}>
+          <select className="sm" value={series.key} onChange={e => setKey(e.target.value)} style={{ width: 180 }} aria-label="Metric">
             {series.keys.map(k => (
               <option key={k}>{k}</option>
             ))}
           </select>
           <label className="check small">
-            <input type="checkbox" checked={log} onChange={e => setLogScale(e.target.checked)} /> Log scale
-          </label>
-          <label className="check small">
             Smoothing
             <input type="range" min={0} max={0.99} step={0.01} value={smoothing} onChange={e => setSmoothing(Number(e.target.value))} />
-            <span className="mono">{smoothing.toFixed(2)}</span>
+            <span className="num" style={{ minWidth: 28 }}>
+              {smoothing.toFixed(2)}
+            </span>
+          </label>
+          <label className="check small">
+            <input type="checkbox" checked={log} onChange={e => setLogScale(e.target.checked)} /> Log scale
           </label>
         </div>
         {last && (
-          <span className="mono small muted">
-            step {last.step} · {last.value.toPrecision(4)} · {points.length} points
-          </span>
+          <div className="legend">
+            <span>
+              <i />
+              Smoothed
+            </span>
+            <span>
+              <i className="raw" />
+              Raw
+            </span>
+            <span className="hide-sm">
+              Step {last.step} · {last.value.toPrecision(4)} · {points.length} points
+            </span>
+          </div>
         )}
       </div>
       <LossChart points={points} smoothing={smoothing} log={log} />
@@ -547,29 +595,45 @@ function SamplesTab({ job, ver }: { job: Job; ver: number }) {
   const [open, setOpen] = useState<Sample | null>(null);
   usePoll(async () => setItems((await api.get<Items<Sample>>(`/v1/jobs/${encodeURIComponent(job.id)}/samples`)).items), 30000, [job.id, ver]);
 
+  // newest step first, one row per step
+  const groups = useMemo(() => {
+    const out: { step: number | null; items: Sample[] }[] = [];
+    for (const s of [...(items ?? [])].reverse()) {
+      const g = out[out.length - 1];
+      if (g && g.step === (s.step ?? null)) g.items.push(s);
+      else out.push({ step: s.step ?? null, items: [s] });
+    }
+    for (const g of out) g.items.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+    return out;
+  }, [items]);
+
   if (!items) return <Loading what="samples" />;
-  if (items.length === 0) return <Empty title="No samples yet">Samples appear at every sample_every steps.</Empty>;
-  const byStep = [...items].reverse();
+  if (items.length === 0)
+    return (
+      <Empty icon={<ImageIcon size={18} />} title="No samples yet">
+        Samples appear every <span className="mono">sample_every</span> steps.
+      </Empty>
+    );
   const isVideo = (n: string) => /\.(mp4|webm)$/i.test(n);
   return (
     <>
-      <div className="grid grid-media">
-        {byStep.map(s => (
-          <button key={s.name} className="thumb" style={{ padding: 0, cursor: 'zoom-in', font: 'inherit', color: 'inherit', textAlign: 'left' }} onClick={() => setOpen(s)}>
-            {isVideo(s.name) ? <video src={imgUrl(s.path)} muted /> : <img src={imgUrl(s.path, true)} loading="lazy" alt={s.name} />}
-            <div className="thumb-meta">
-              <span className="mono small">
-                step {s.step ?? '—'} · #{s.index ?? '—'}
-              </span>
-            </div>
-          </button>
-        ))}
-      </div>
+      {groups.map(g => (
+        <div className="sample-group" key={String(g.step) + g.items[0].name}>
+          <div className="sample-step">{g.step === null ? 'Unknown step' : `Step ${g.step}`}</div>
+          <div className="grid grid-media">
+            {g.items.map(s => (
+              <button key={s.name} className="sample-thumb" onClick={() => setOpen(s)} title={`Sample ${s.index ?? '—'}`} aria-label={`Open step ${s.step ?? '—'} sample ${s.index ?? '—'}`}>
+                {isVideo(s.name) ? <video src={imgUrl(s.path)} muted /> : <img src={imgUrl(s.path, true)} loading="lazy" alt={s.name} />}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
       {open && (
         <Modal title={`Step ${open.step ?? '—'} · sample ${open.index ?? '—'}`} onClose={() => setOpen(null)} wide>
           <div className="modal-body">
             {isVideo(open.name) ? <video className="lightbox" src={imgUrl(open.path)} controls autoPlay /> : <img className="lightbox" src={imgUrl(open.path)} alt={open.name} />}
-            <div className="mono small muted" style={{ marginTop: 8 }}>
+            <div className="mono dim" style={{ marginTop: 10, fontSize: 12 }}>
               {open.name}
             </div>
           </div>
@@ -614,16 +678,20 @@ function CheckpointsTab({ job, ver }: { job: Job; ver: number }) {
   };
 
   if (!items) return <Loading what="checkpoints" />;
-  if (items.length === 0) return <Empty title="No checkpoints yet">They are saved every save_every steps and at the end.</Empty>;
+  if (items.length === 0)
+    return (
+      <Empty icon={<Package size={18} />} title="No checkpoints yet">
+        They are saved every <span className="mono">save_every</span> steps and at the end.
+      </Empty>
+    );
   return (
-    <Section
-      title={`${items.length} checkpoints`}
-      actions={
+    <>
+      <div className="toolbar">
+        <span className="muted small">{plural(items.length, 'checkpoint')}</span>
         <button className="btn btn-sm" onClick={hash} disabled={hashing}>
-          {hashing ? <Spinner size={12} /> : <Hash size={12} />} Compute sha256
+          {hashing ? <Spinner size={14} /> : <Hash size={14} />} Compute sha256
         </button>
-      }
-    >
+      </div>
       <div className="table-wrap">
         <table>
           <thead>
@@ -631,8 +699,8 @@ function CheckpointsTab({ job, ver }: { job: Job; ver: number }) {
               <th>File</th>
               <th>Step</th>
               <th>Size</th>
-              <th>Saved</th>
-              <th />
+              <th className="hide-sm">Saved</th>
+              <th className="actions" />
             </tr>
           </thead>
           <tbody>
@@ -640,22 +708,21 @@ function CheckpointsTab({ job, ver }: { job: Job; ver: number }) {
               <tr key={c.name}>
                 <td>
                   <div className="mono">{c.name}</div>
-                  {c.sha256 && <div className="mono dim small ellipsis" style={{ maxWidth: 420 }}>{c.sha256}</div>}
+                  {c.sha256 && (
+                    <div className="mono dim ellipsis" style={{ maxWidth: 420, fontSize: 12 }}>
+                      {c.sha256}
+                    </div>
+                  )}
                 </td>
-                <td className="mono">{c.step ?? 'final'}</td>
-                <td className="mono nowrap">{fmtBytes(c.size)}</td>
-                <td className="small muted nowrap" title={fmtTime(c.modified)}>
+                <td>{c.step ?? 'Final'}</td>
+                <td className="nowrap">{fmtBytes(c.size)}</td>
+                <td className="small muted nowrap hide-sm" title={fmtTime(c.modified)}>
                   {fmtAgo(c.modified)}
                 </td>
                 <td className="actions">
-                  <div className="row" style={{ justifyContent: 'flex-end' }}>
+                  <div className="row end">
                     {remotes.length > 0 && (
-                      <select
-                        value=""
-                        onChange={e => e.target.value && uploadTo(c, e.target.value)}
-                        style={{ width: 130, padding: '4px 6px', fontSize: 11 }}
-                        aria-label="Upload to remote"
-                      >
+                      <select className="sm" value="" onChange={e => e.target.value && uploadTo(c, e.target.value)} style={{ width: 132 }} aria-label="Upload to remote">
                         <option value="">Upload to…</option>
                         {remotes.map(r => (
                           <option key={r.id} value={r.id}>
@@ -665,7 +732,7 @@ function CheckpointsTab({ job, ver }: { job: Job; ver: number }) {
                       </select>
                     )}
                     <a className="btn btn-sm" href={fileUrl(c.path)} download>
-                      <Download size={12} /> Download
+                      <Download size={14} /> Download
                     </a>
                   </div>
                 </td>
@@ -674,7 +741,7 @@ function CheckpointsTab({ job, ver }: { job: Job; ver: number }) {
           </tbody>
         </table>
       </div>
-    </Section>
+    </>
   );
 }
 
@@ -684,34 +751,45 @@ function AttemptsTab({ job, ver }: { job: Job; ver: number }) {
   const [items, setItems] = useState<Attempt[] | null>(null);
   usePoll(async () => setItems((await api.get<Items<Attempt>>(`/v1/jobs/${encodeURIComponent(job.id)}/attempts`)).items), 15000, [job.id, ver]);
   if (!items) return <Loading what="attempts" />;
-  if (items.length === 0) return <Empty title="Never started">Each launch of the job is recorded here.</Empty>;
+  if (items.length === 0)
+    return (
+      <Empty icon={<History size={18} />} title="Never started">
+        Each launch of the job is recorded here.
+      </Empty>
+    );
   return (
     <div className="table-wrap">
       <table>
         <thead>
           <tr>
-            <th>#</th>
+            <th>Attempt</th>
             <th>Started</th>
             <th>Steps</th>
             <th>Ended</th>
-            <th>Reason</th>
+            <th className="hide-sm">Reason</th>
           </tr>
         </thead>
         <tbody>
           {[...items].reverse().map(a => (
             <tr key={a.n}>
-              <td className="mono">
-                {a.n}
-                {a.auto && <span className="badge" style={{ marginLeft: 6 }}>auto</span>}
+              <td>
+                <span className="row" style={{ gap: 8 }}>
+                  <span className="cell-title">#{a.n}</span>
+                  {a.auto && <span className="tag">Auto</span>}
+                </span>
               </td>
-              <td className="small nowrap">{fmtTime(a.started_at)}</td>
-              <td className="mono">
+              <td className="small muted nowrap">{fmtTime(a.started_at)}</td>
+              <td className="nowrap">
                 {a.start_step} → {a.end_step ?? '…'}
               </td>
               <td>{a.end_state ? <StateBadge state={a.end_state} /> : <StateBadge state="running" />}</td>
-              <td className="small muted" style={{ maxWidth: 420 }}>
+              <td className="small muted hide-sm" style={{ maxWidth: 420 }}>
                 {a.end_reason ?? ''}
-                {a.pid ? <span className="dim"> · pid {a.pid}</span> : null}
+                {a.pid ? (
+                  <span className="dim">
+                    {a.end_reason ? ' · ' : ''}pid {a.pid}
+                  </span>
+                ) : null}
               </td>
             </tr>
           ))}
@@ -727,8 +805,9 @@ function ConfigTab({ job }: { job: Job }) {
   const text = useMemo(() => JSON.stringify(job.config, null, 2), [job.config]);
   return (
     <>
-      <div className="row" style={{ justifyContent: 'flex-end', marginBottom: 8 }}>
-        <CopyButton text={text} />
+      <div className="toolbar">
+        <span className="muted small">Job config as sent to the trainer</span>
+        <CopyButton text={text} bordered />
       </div>
       <pre className="json">{text}</pre>
     </>
