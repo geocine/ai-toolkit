@@ -44,8 +44,8 @@ type remoteSpec struct {
 	Credentials json.RawMessage `json:"credentials"`
 }
 
-// remotesFromEnv collects AITK_REMOTES plus the R2/S3 and Hugging Face
-// shorthands.
+// remotesFromEnv collects AITK_REMOTES plus the S3-compatible and Hugging
+// Face shorthands.
 func remotesFromEnv() ([]remoteSpec, error) {
 	var specs []remoteSpec
 	if raw := env("AITK_REMOTES"); raw != "" {
@@ -53,16 +53,16 @@ func remotesFromEnv() ([]remoteSpec, error) {
 			return nil, fmt.Errorf("AITK_REMOTES is not a JSON array of {name, kind, config, credentials}: %w", err)
 		}
 	}
-	if endpoint := env("AITK_R2_ENDPOINT"); endpoint != "" {
-		region := envOr("AITK_R2_REGION", "auto")
-		cfg := map[string]any{"endpoint": endpoint, "bucket": env("AITK_R2_BUCKET"), "region": region,
-			"prefix": env("AITK_R2_PREFIX")}
-		if env("AITK_R2_PATH_STYLE") == "1" || env("AITK_R2_PATH_STYLE") == "true" {
+	if endpoint := env("AITK_S3_ENDPOINT"); endpoint != "" {
+		// an empty region lets the client pick ("auto" for R2, the bucket's own for AWS)
+		cfg := map[string]any{"endpoint": endpoint, "bucket": env("AITK_S3_BUCKET"), "region": env("AITK_S3_REGION"),
+			"prefix": env("AITK_S3_PREFIX")}
+		if env("AITK_S3_PATH_STYLE") == "1" || env("AITK_S3_PATH_STYLE") == "true" {
 			cfg["path_style"] = true
 		}
-		specs = append(specs, remoteSpec{Name: envOr("AITK_R2_NAME", "r2"), Kind: "s3", Config: mustJSON(cfg),
+		specs = append(specs, remoteSpec{Name: envOr("AITK_S3_NAME", "s3"), Kind: "s3", Config: mustJSON(cfg),
 			Credentials: mustJSON(map[string]string{
-				"access_key_id": env("AITK_R2_ACCESS_KEY_ID"), "secret_access_key": env("AITK_R2_SECRET_ACCESS_KEY")})})
+				"access_key_id": env("AITK_S3_ACCESS_KEY_ID"), "secret_access_key": env("AITK_S3_SECRET_ACCESS_KEY")})})
 	}
 	if repo := env("AITK_HF_REPO"); repo != "" {
 		cfg := map[string]any{"repo_id": repo, "repo_type": envOr("AITK_HF_REPO_TYPE", "model"), "private": true,

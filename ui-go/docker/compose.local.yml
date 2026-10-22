@@ -1,6 +1,6 @@
 # Local test stack only. Production is the single image (docs/deploy.md).
 #
-# Stands in for "one image on two GPU providers": MinIO plays Cloudflare R2,
+# Stands in for "one image on two GPU providers": MinIO plays the S3-compatible bucket (R2, S3, B2, ...),
 # node-a and node-b are two independent servers that share nothing but the
 # bucket (and, to skip re-downloading base models, the Hugging Face cache).
 #
@@ -18,13 +18,13 @@ x-node: &node
       condition: service_completed_successfully
   environment:
     AI_TOOLKIT_AUTH: ${AI_TOOLKIT_AUTH:-secret}
-    AITK_R2_ENDPOINT: http://minio:9000
-    AITK_R2_BUCKET: aitk
-    AITK_R2_REGION: us-east-1
-    AITK_R2_PATH_STYLE: "1"
-    AITK_R2_ACCESS_KEY_ID: aitkadmin
-    AITK_R2_SECRET_ACCESS_KEY: aitksecret123
-    AITK_SYNC_REMOTE: r2
+    AITK_S3_ENDPOINT: http://minio:9000
+    AITK_S3_BUCKET: aitk
+    AITK_S3_REGION: us-east-1
+    AITK_S3_PATH_STYLE: "1"
+    AITK_S3_ACCESS_KEY_ID: aitkadmin
+    AITK_S3_SECRET_ACCESS_KEY: aitksecret123
+    AITK_SYNC_REMOTE: s3
     AITK_AUTO_RESUME: "1"
     AITK_IMPORT_ON_BOOT: all
     AITK_CORS_ORIGINS: ${AITK_CORS_ORIGINS:-}

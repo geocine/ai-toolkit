@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Provider failover, end to end, on this machine (GPU required).
 
-Runs ui-go/docker/compose.local.yml: MinIO plays Cloudflare R2 and two
+Runs ui-go/docker/compose.local.yml: MinIO plays the S3-compatible bucket and two
 containers of the same image play two GPU providers.
 
   1. node-a: an agent (MCP code mode) creates a dataset and an SD 1.5 LoRA job;

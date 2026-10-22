@@ -264,7 +264,7 @@ const ds = await aitk.datasets.create({ name: "my_set" });
 const { config } = await aitk.templates.render({ arch: "sd1", name: "my_lora", datasets: [ds.name],
   overrides: { "config.process[0].train.steps": 1500 } });
 const job = await aitk.jobs.create({ name: "my_lora", gpu_ids: "0", config,
-  policy: { auto_resume: true, auto_upload_remote: "r2" } });
+  policy: { auto_resume: true, auto_upload_remote: "s3" } });
 await aitk.jobs.start(job.id);
 return (await aitk.jobs.get(job.id)).state;
 ```
