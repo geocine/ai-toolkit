@@ -57,6 +57,11 @@ func Register(mux *http.ServeMux) {
 	httpx.Handle(mux, "GET /v1/datasets/{name}/captions/check", checkCaptions)
 	httpx.Handle(mux, "POST /v1/datasets/{name}/captions/fix", fixCaptions)
 
+	httpx.Handle(mux, "GET /v1/presets", listPresets)
+	httpx.Handle(mux, "GET /v1/presets/{id}", getPreset)
+	httpx.Handle(mux, "PUT /v1/presets/{id}", putPreset)
+	httpx.Handle(mux, "DELETE /v1/presets/{id}", deletePreset)
+
 	httpx.Handle(mux, "GET /v1/files", listFiles)
 	httpx.Handle(mux, "GET /v1/files/content", getFile)
 	httpx.Handle(mux, "PUT /v1/files/content", putFile)

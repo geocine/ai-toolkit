@@ -99,6 +99,10 @@ var ops = []op{
 	{"POST", "/v1/templates/check", "templates", "Keys in a job config the trainer ignores, with where they belong", nil, "ConfigCheckRequest", 200, "ConfigCheck"},
 	{"GET", "/v1/templates/examples", "templates", "Upstream's example configs", nil, "", 200, "items:TemplateExample"},
 	{"GET", "/v1/templates/examples/{name}", "templates", "One example config, as YAML and parsed", nil, "", 200, "TemplateExampleConfig"},
+	{"GET", "/v1/presets", "presets", "The studio's training presets kept on this server", []string{"deleted:boolean"}, "", 200, "items:object"},
+	{"GET", "/v1/presets/{id}", "presets", "One training preset", nil, "", 200, "object"},
+	{"PUT", "/v1/presets/{id}", "presets", "Create or replace a training preset", nil, "object", 200, "object"},
+	{"DELETE", "/v1/presets/{id}", "presets", "Delete a training preset (kept as a tombstone for syncing)", nil, "", 204, ""},
 	{"GET", "/v1/templates/captioners", "templates", "Upstream's captioner models, their model choices, prompts and defaults", nil, "", 200, "CaptionCatalog"},
 
 	{"GET", "/v1/portable/jobs", "portable", "Portable jobs on a remote", []string{"remote:string"}, "", 200, "items:PortableJob"},

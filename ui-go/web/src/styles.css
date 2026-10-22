@@ -1918,8 +1918,9 @@ input[aria-invalid='true'] {
   gap: 8px 12px;
   margin-bottom: 12px;
 }
-.caption-check-trigger {
-  width: 160px;
+.caption-check input.caption-check-trigger {
+  width: 180px;
+  flex: none;
 }
 .caption-form {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));

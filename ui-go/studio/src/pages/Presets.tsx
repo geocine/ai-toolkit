@@ -132,7 +132,7 @@ export function Presets({ tab = 'settings' }: { tab?: 'settings' | 'data' }) {
 }
 
 function SettingsPresets() {
-  const { presets, setImported, savePreset, resetPreset } = useStudio();
+  const { presets, addPreset, savePreset, resetPreset, deletePreset } = useStudio();
   const [error, setError] = useState<unknown>(null);
   const file = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState<string | null>(presets[0]?.id ?? null);
@@ -140,7 +140,7 @@ function SettingsPresets() {
 
   const copy = (p: Preset) => {
     const c = duplicatePreset(p);
-    setImported(list => [...list, c]);
+    addPreset(c);
     setOpen(c.id);
   };
 
@@ -149,7 +149,7 @@ function SettingsPresets() {
     for (const f of Array.from(files ?? [])) {
       try {
         const p = presetFromText(await f.text(), f.name);
-        setImported(list => [...list, p]);
+        addPreset(p);
         setOpen(p.id);
       } catch (e) {
         setError(new Error(`${f.name}: ${e instanceof Error ? e.message : e}`));
@@ -271,7 +271,7 @@ function SettingsPresets() {
                       <button
                         className="btn btn-danger"
                         onClick={() => {
-                          if (confirm(`Delete preset ${p.name}?`)) setImported(list => list.filter(x => x.id !== p.id));
+                          if (confirm(`Delete preset ${p.name}?`)) deletePreset(p.id);
                         }}
                       >
                         Delete

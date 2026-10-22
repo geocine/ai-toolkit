@@ -362,7 +362,8 @@ function StepCaptions({ preset, k, dataset, next, back }: { preset: Preset; k: K
   const check = useLoad(server, s => get<CaptionCheck>(s, `/v1/datasets/${encodeURIComponent(dataset)}/captions/check?trigger=${encodeURIComponent(k.trigger)}`), [dataset, k.trigger, captionsKey]);
   const flagsOf = useMemo(() => new Map((check.data?.items ?? []).map(i => [i.file, i.flags])), [check.data]);
   const [onlyFlagged, setOnlyFlagged] = useState(false);
-  const shown = onlyFlagged ? items.filter(i => (flagsOf.get(i.file) ?? []).length > 0) : items;
+  // nothing left flagged: the filter lets everything through again
+  const shown = onlyFlagged && (check.data?.flagged ?? 0) > 0 ? items.filter(i => (flagsOf.get(i.file) ?? []).length > 0) : items;
   const triggerIssues = (check.data?.counts.no_trigger ?? 0) + (check.data?.counts.trigger_case ?? 0);
 
   const fixTriggers = async () => {

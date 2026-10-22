@@ -35,6 +35,8 @@ export interface Preset {
   notes: { title: string; body: string }[];
   /** A built-in preset the user has edited (the shipped one is kept for reset). */
   edited?: boolean;
+  /** Last change (ms): the newer copy wins when syncing with a server (lib/presetSync.ts). */
+  updatedAt?: number;
 }
 
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
@@ -318,6 +320,18 @@ const knobDefaults = (cfg: JobConfig): Preset['defaults'] => {
   const { name: _n, trigger: _t, ...k } = readKnobs(cfg);
   return k;
 };
+
+/** A preset as a server holds it (written by an agent, say), with whatever it lacks filled in. */
+export function normalizePreset(raw: Partial<Preset> & { id: string; base: JobConfig }): Preset {
+  return {
+    ...raw,
+    name: raw.name || raw.id,
+    description: raw.description ?? describe(raw.base),
+    builtIn: !!raw.builtIn,
+    defaults: raw.defaults && Object.keys(raw.defaults).length ? { ...knobDefaults(raw.base), ...raw.defaults } : knobDefaults(raw.base),
+    notes: raw.notes ?? [],
+  };
+}
 
 export function presetFromText(text: string, filename: string): Preset {
   const { cfg, notes } = parseConfig(text, filename.endsWith('.json'));
