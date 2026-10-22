@@ -55,8 +55,12 @@ func (l *Lease) Held(nodeID string, now time.Time) bool {
 
 // Manifest is jobs/<name>/manifest.json.
 type Manifest struct {
-	Schema     int              `json:"schema"`
-	Name       string           `json:"name"`
+	Schema int    `json:"schema"`
+	Name   string `json:"name"`
+	// RunID names the run across servers: the id of the job that first
+	// synced it, kept by every import. A job with the same name but another
+	// run id must never write over it.
+	RunID      string           `json:"run_id,omitempty"`
 	Type       string           `json:"type"`
 	Ref        *string          `json:"ref"`
 	GpuIDs     string           `json:"gpu_ids"`
@@ -140,6 +144,38 @@ func nodeLabel() string {
 		}
 	}
 	return host
+}
+
+func runKey(jobID string) string { return "portable.run." + jobID }
+
+// RunID is the portable run the local job continues: the id it was imported
+// with, else its own id.
+func RunID(ctx context.Context, jobID string) string {
+	if v, ok, _ := state.Setting(ctx, runKey(jobID)); ok && v != "" {
+		return v
+	}
+	return jobID
+}
+
+func setRunID(ctx context.Context, jobID, runID string) error {
+	if runID == "" || runID == jobID {
+		return nil
+	}
+	return state.SetSetting(ctx, runKey(jobID), runID)
+}
+
+// ErrOtherRun: the remote holds a different run under the job's name.
+var ErrOtherRun = errors.New("the remote holds a different run with this name")
+
+// newestStep is the highest checkpoint step among files (-1 for none).
+func newestStep(files []File) int {
+	n := -1
+	for _, f := range files {
+		if f.Step != nil && *f.Step > n {
+			n = *f.Step
+		}
+	}
+	return n
 }
 
 func newLease(ctx context.Context) (*Lease, error) {

@@ -272,9 +272,23 @@ func restore(ctx context.Context, c remote.Client, rem *remote.Remote, m *Manife
 		return nil, err
 	}
 
+	// the imported job continues the same run (an old manifest without a
+	// run id is claimed by this job's own id at its first sync)
+	if err := setRunID(ctx, job.ID, m.RunID); err != nil {
+		return nil, err
+	}
 	pol := m.Policy
 	syncRemote := req.Remote
 	pol.SyncRemote = &syncRemote
+	// remote ids are per server: the manifest names the auto-upload remote
+	// (older ones carry the source's id); unknown here means the default
+	if pol.AutoUploadRemote != nil && *pol.AutoUploadRemote != "" {
+		if r, err := remote.Get(ctx, *pol.AutoUploadRemote); err == nil && r != nil {
+			pol.AutoUploadRemote = &r.ID
+		} else {
+			pol.AutoUploadRemote = nil
+		}
+	}
 	if err := state.SetPolicy(ctx, job.ID, pol); err != nil {
 		return nil, err
 	}
