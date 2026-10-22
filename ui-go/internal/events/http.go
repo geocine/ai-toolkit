@@ -52,10 +52,49 @@ func list(w http.ResponseWriter, r *http.Request) {
 			limit = min(n, 5000)
 		}
 	}
+	var wait time.Duration
+	if s := r.URL.Query().Get("wait_ms"); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 0 {
+			v1api.Fail(w, v1api.CodeInvalidRequest, "wait_ms must be a non-negative integer")
+			return
+		}
+		wait = time.Duration(min(n, maxWaitMs)) * time.Millisecond
+	}
+	var live <-chan Event
+	if wait > 0 {
+		// subscribed before the read, so nothing lands between the two
+		ch, cancel := Subscribe(f)
+		defer cancel()
+		live = ch
+	}
 	items, err := List(r.Context(), after, f, limit)
 	if err != nil {
 		v1api.Internal(w, r, err)
 		return
+	}
+	if len(items) == 0 && wait > 0 {
+		// long poll: answer as soon as a stored event arrives
+		t := time.NewTimer(wait)
+		defer t.Stop()
+	waiting:
+		for {
+			select {
+			case e := <-live:
+				if e.ID == 0 {
+					continue // live-only (job.log)
+				}
+				break waiting
+			case <-t.C:
+				break waiting
+			case <-r.Context().Done():
+				return
+			}
+		}
+		if items, err = List(r.Context(), after, f, limit); err != nil {
+			v1api.Internal(w, r, err)
+			return
+		}
 	}
 	next := ""
 	if len(items) > 0 {
@@ -65,6 +104,10 @@ func list(w http.ResponseWriter, r *http.Request) {
 }
 
 const pingEvery = 15 * time.Second
+
+// maxWaitMs caps GET /v1/events?wait_ms= (long polling, the stream's
+// equivalent for clients that cannot hold an SSE connection, e.g. code mode).
+const maxWaitMs = 60000
 
 // stream is Server-Sent Events: stored events after the cursor first, then
 // live ones. Last-Event-ID (sent by EventSource on reconnect) wins over ?after.

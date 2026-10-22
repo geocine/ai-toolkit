@@ -25,6 +25,7 @@ import (
 	"github.com/geocine/aitoolkit/internal/settings"
 	"github.com/geocine/aitoolkit/internal/state"
 	"github.com/geocine/aitoolkit/internal/store"
+	"github.com/geocine/aitoolkit/internal/testutil"
 	_ "modernc.org/sqlite"
 )
 
@@ -49,7 +50,7 @@ type env struct {
 
 func setup(t *testing.T) *env {
 	t.Helper()
-	root := t.TempDir()
+	root := testutil.TempDir(t)
 	e := &env{root: root, training: filepath.Join(root, "output"), datasets: filepath.Join(root, "datasets"),
 		data: filepath.Join(root, "data"), models: filepath.Join(root, "models")}
 	for _, d := range []string{e.training, e.datasets, e.data, e.models} {

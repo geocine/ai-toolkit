@@ -114,3 +114,41 @@ func TestStreamReplaysThenFollows(t *testing.T) {
 	Emit(ctx, JobState, "j1", map[string]string{"to": "d"}) // id 5, live
 	expect("5")
 }
+
+func TestLongPoll(t *testing.T) {
+	srv := setup(t)
+	ctx := context.Background()
+	Emit(ctx, JobState, "j1", map[string]string{"to": "running"})
+	get := func(q string) ([]Event, time.Duration) {
+		start := time.Now()
+		resp, err := http.Get(srv.URL + "/v1/events" + q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var body struct {
+			Items []Event `json:"items"`
+		}
+		json.NewDecoder(resp.Body).Decode(&body)
+		return body.Items, time.Since(start)
+	}
+	// history answers at once
+	if items, took := get("?after=0&wait_ms=5000"); len(items) != 1 || took > 2*time.Second {
+		t.Fatalf("history: %d in %s", len(items), took)
+	}
+	// nothing newer: wait for the next stored event (live-only ones do not count)
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		Emit(ctx, JobLog, "j1", map[string]string{"text": "x"})
+		time.Sleep(200 * time.Millisecond)
+		Emit(ctx, JobProgress, "j1", map[string]int{"step": 2})
+	}()
+	items, took := get("?after=1&wait_ms=5000")
+	if len(items) != 1 || items[0].Type != JobProgress || took < 300*time.Millisecond || took > 4*time.Second {
+		t.Fatalf("long poll: %+v in %s", items, took)
+	}
+	// and gives up after wait_ms
+	if items, took := get("?after=2&wait_ms=300"); len(items) != 0 || took < 250*time.Millisecond {
+		t.Fatalf("timeout: %d in %s", len(items), took)
+	}
+}

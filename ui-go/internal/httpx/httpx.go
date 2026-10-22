@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/geocine/aitoolkit/internal/links"
 	"github.com/geocine/aitoolkit/internal/state"
 )
 
@@ -81,7 +82,8 @@ var guarded = []string{"/api/", "/v1/", "/mcp"}
 // AI_TOOLKIT_AUTH is set or any API key exists, those routes (except the
 // public ones) need `Authorization: Bearer <token>`, where the token is
 // AI_TOOLKIT_AUTH or an active API key. With neither, the server is open,
-// like upstream.
+// like upstream. A signed download link (internal/links) stands in for the
+// token on the GET it was signed for.
 func Auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		want := os.Getenv("AI_TOOLKIT_AUTH")
@@ -92,6 +94,10 @@ func Auth(next http.Handler) http.Handler {
 		token := ""
 		if parts := strings.Split(r.Header.Get("Authorization"), " "); len(parts) > 1 {
 			token = parts[1]
+		}
+		if token == "" && links.Valid(r) {
+			next.ServeHTTP(w, r)
+			return
 		}
 		ok := token != "" && ((want != "" && subtle.ConstantTimeCompare([]byte(token), []byte(want)) == 1) ||
 			state.VerifyKey(r.Context(), token))

@@ -278,3 +278,22 @@ func writeImageThumb(img image.Image, hasAlpha bool, out string) error {
 	}
 	return err
 }
+
+// Fit scales img down so neither side exceeds maxPx, keeping its aspect
+// (never up), flattened onto white so it encodes as JPEG: the preview an
+// agent looks at (MCP aitk_view), where a center crop would hide the edges.
+func Fit(img image.Image, maxPx int) *image.RGBA {
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	if maxPx > 0 && (w > maxPx || h > maxPx) {
+		if w >= h {
+			w, h = maxPx, max(1, h*maxPx/b.Dx())
+		} else {
+			w, h = max(1, w*maxPx/b.Dy()), maxPx
+		}
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, w, h))
+	draw.Draw(dst, dst.Bounds(), image.White, image.Point{}, draw.Src)
+	draw.CatmullRom.Scale(dst, dst.Bounds(), img, b, draw.Over, nil)
+	return dst
+}

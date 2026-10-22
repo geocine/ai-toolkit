@@ -8,9 +8,11 @@ package codemode
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -30,6 +32,7 @@ const (
 	MaxLogBytes    = 1 << 20
 	MaxResultBytes = 4 << 20
 	MaxTextBytes   = 1 << 20
+	MaxBinaryBytes = 16 << 20 // decoded base64 per call (ModeBase64, each ModeMultipart file)
 )
 
 // Response is what an in-process /v1 call returned.
@@ -115,6 +118,18 @@ aitk.jobs.wait = async function (id, options) {
     const job = await aitk.jobs.get(id);
     if (until.includes(job.state)) return job;
     if (Date.now() + poll > deadline) throw new AitkError('timeout', 0, 'job ' + id + ' still ' + job.state + ' after ' + o.timeout_ms + ' ms');
+    await sleep(poll);
+  }
+};
+aitk.bundles.wait = async function (id, options) {
+  const o = options || {};
+  const poll = Math.max(500, o.poll_ms || 3000);
+  const deadline = o.timeout_ms ? Date.now() + o.timeout_ms : Infinity;
+  const get = String(id).startsWith('bpsh_') ? aitk.bundles.pushStatus : aitk.bundles.importStatus;
+  for (;;) {
+    const t = await get(id);
+    if (t.state === 'done' || t.state === 'failed') return t;
+    if (Date.now() + poll > deadline) throw new AitkError('timeout', 0, 'bundle task ' + id + ' still ' + t.state + ' after ' + o.timeout_ms + ' ms');
     await sleep(poll);
   }
 };
@@ -441,18 +456,42 @@ func (r *run) invoke(op Op, args []goja.Value) goja.Value {
 		}
 	}
 
+	method := op.Method
 	var payload []byte
 	contentType := ""
 	switch {
-	case op.Text == "request":
+	case op.Mode == ModeTextRequest:
 		text, _ := body["text"].(string)
 		payload, contentType = []byte(text), "text/plain; charset=utf-8"
+	case op.Mode == ModeBase64:
+		payload, contentType = r.decodeBase64(op, body["base64"]), "application/octet-stream"
+	case op.Mode == ModeMultipart:
+		payload, contentType = r.multipartBody(op, body["files"])
+	case op.Mode == ModeLink:
+		// sign the download instead of buffering it
+		ttl := query.Get("ttl_s")
+		query.Del("ttl_s")
+		target := path
+		if len(query) > 0 {
+			target += "?" + query.Encode()
+		}
+		link := map[string]any{"path": target}
+		if ttl != "" {
+			n, err := strconv.ParseInt(ttl, 10, 64)
+			if err != nil {
+				r.throw("invalid_request", 400, fmt.Sprintf("aitk.%s.%s: ttl_s must be a number", op.Group, op.Name))
+			}
+			link["ttl_s"] = n
+		}
+		method, path, query = "POST", "/v1/links", url.Values{}
+		payload, _ = json.Marshal(link)
+		contentType = "application/json"
 	case hasBody:
 		payload, _ = json.Marshal(body)
 		contentType = "application/json"
 	}
 
-	resp, err := r.call(r.ctx, op.Method, path, query, payload, contentType)
+	resp, err := r.call(r.ctx, method, path, query, payload, contentType)
 	if err != nil {
 		if r.ctx.Err() != nil {
 			r.throw("timeout", 0, "run exceeded its time limit")
@@ -478,7 +517,7 @@ func (r *run) invoke(op Op, args []goja.Value) goja.Value {
 	if resp.Status == http.StatusNoContent || len(resp.Body) == 0 {
 		return goja.Null()
 	}
-	if op.Text == "response" {
+	if op.Mode == ModeTextResponse {
 		if len(resp.Body) > MaxTextBytes {
 			r.throw("too_large", 413, fmt.Sprintf("file is %d bytes; readText reads at most %d", len(resp.Body), MaxTextBytes))
 		}
@@ -490,6 +529,58 @@ func (r *run) invoke(op Op, args []goja.Value) goja.Value {
 		return r.vm.ToValue(string(resp.Body))
 	}
 	return v
+}
+
+func (r *run) decodeBase64(op Op, v any) []byte {
+	s, ok := v.(string)
+	if !ok {
+		r.throw("invalid_request", 400, fmt.Sprintf("aitk.%s.%s: base64 must be a string", op.Group, op.Name))
+	}
+	if base64.StdEncoding.DecodedLen(len(s)) > MaxBinaryBytes+3 {
+		r.throw("too_large", 413, fmt.Sprintf("aitk.%s.%s: at most %d bytes per call; send larger files by URL", op.Group, op.Name, MaxBinaryBytes))
+	}
+	s = strings.TrimSpace(s)
+	if i := strings.Index(s, ";base64,"); i >= 0 && strings.HasPrefix(s, "data:") {
+		s = s[i+len(";base64,"):] // a data: URL
+	}
+	for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding} {
+		if b, err := enc.DecodeString(s); err == nil {
+			if len(b) > MaxBinaryBytes {
+				break
+			}
+			return b
+		}
+	}
+	r.throw("invalid_request", 400, fmt.Sprintf("aitk.%s.%s: base64 is not valid base64 (or decodes to more than %d bytes)", op.Group, op.Name, MaxBinaryBytes))
+	return nil
+}
+
+// multipartBody builds files[] from [{name, base64}].
+func (r *run) multipartBody(op Op, v any) ([]byte, string) {
+	list, ok := v.([]any)
+	if !ok || len(list) == 0 {
+		r.throw("invalid_request", 400, fmt.Sprintf("aitk.%s.%s: files must be a non-empty array of { name, base64 }", op.Group, op.Name))
+	}
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	for _, item := range list {
+		f, _ := item.(map[string]any)
+		name, _ := f["name"].(string)
+		if name == "" {
+			r.throw("invalid_request", 400, fmt.Sprintf("aitk.%s.%s: every file needs a name", op.Group, op.Name))
+		}
+		data := r.decodeBase64(op, f["base64"])
+		w, err := mw.CreateFormFile("files", name)
+		if err != nil {
+			r.throw("internal", 0, err.Error())
+		}
+		w.Write(data)
+		if buf.Len() > 4*MaxBinaryBytes {
+			r.throw("too_large", 413, fmt.Sprintf("aitk.%s.%s: at most %d bytes per call", op.Group, op.Name, 4*MaxBinaryBytes))
+		}
+	}
+	mw.Close()
+	return buf.Bytes(), mw.FormDataContentType()
 }
 
 func isPlainObject(v goja.Value) bool {
