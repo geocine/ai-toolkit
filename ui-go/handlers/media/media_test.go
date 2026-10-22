@@ -361,6 +361,17 @@ func TestCaptionRoutes(t *testing.T) {
 	if resp.StatusCode != 400 || body != `{"error":"Invalid image path"}` {
 		t.Fatalf("invalid: %d %q", resp.StatusCode, body)
 	}
+	// a sibling folder that only shares the datasets root's prefix, and an ext that is a path
+	resp, _ = postJSON(t, f, "/api/img/caption", map[string]any{"imgPath": f.ds + "-other/x.png", "caption": "x"})
+	if resp.StatusCode != 400 {
+		t.Fatalf("prefix sibling: %d", resp.StatusCode)
+	}
+	for _, ext := range []string{"/../../escape", "x/../../y", "../x", `txt\..\x`} {
+		resp, _ = postJSON(t, f, "/api/img/caption", map[string]any{"imgPath": img, "caption": "x", "ext": ext})
+		if resp.StatusCode == 200 {
+			t.Fatalf("ext %q accepted", ext)
+		}
+	}
 
 	resp, body = postJSON(t, f, "/api/caption/getBatch", map[string]any{
 		"imgPaths": []any{img, filepath.Join(f.root, "outside-secret.png"), 5}, "ext": "caption",
@@ -471,6 +482,13 @@ func TestZip(t *testing.T) {
 	resp, body = postJSON(t, f, "/api/zip", map[string]any{"zipTarget": "dataset", "datasetName": "../nope"})
 	if resp.StatusCode != 404 || body != `{"error":"Dataset '../nope' not found"}` {
 		t.Fatalf("missing dataset: %d %q", resp.StatusCode, body)
+	}
+
+	for _, name := range []string{"..", "."} {
+		resp, _ = postJSON(t, f, "/api/zip", map[string]any{"zipTarget": "dataset", "datasetName": name})
+		if resp.StatusCode != 404 {
+			t.Fatalf("dataset %q: %d", name, resp.StatusCode)
+		}
 	}
 
 	resp, body = postJSON(t, f, "/api/zip", map[string]any{"jobName": "job"})

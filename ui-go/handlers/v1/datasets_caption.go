@@ -99,9 +99,11 @@ func captionDataset(w http.ResponseWriter, r *http.Request) {
 		v1api.Internal(w, r, err)
 		return
 	}
-	// no default policy: a caption job writes into the dataset, there is
-	// nothing to sync or keep
-	if err := state.SetPolicy(ctx, j.ID, state.Policy{}); err != nil {
+	// a caption job writes into the dataset: nothing to sync, upload or
+	// resume elsewhere. Explicit "" and false, because nil fields take the
+	// server's defaults (AITK_SYNC_REMOTE, ...) on the supervisor's next pass.
+	none, no := "", false
+	if err := state.SetPolicy(ctx, j.ID, state.Policy{AutoResume: &no, AutoUploadRemote: &none, SyncRemote: &none}); err != nil {
 		v1api.Internal(w, r, err)
 		return
 	}

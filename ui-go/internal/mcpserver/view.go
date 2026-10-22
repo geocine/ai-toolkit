@@ -98,7 +98,7 @@ func preview(full string, maxPx int) ([]byte, string, error) {
 		return nil, "", err
 	}
 	defer f.Close()
-	img, _, err := image.Decode(f)
+	img, err := thumbs.Decode(f)
 	if err != nil {
 		return nil, "", err
 	}

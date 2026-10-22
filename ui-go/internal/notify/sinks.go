@@ -197,6 +197,16 @@ func do(req *http.Request) error {
 	req.Header.Set("User-Agent", "aitk-server")
 	resp, err := client.Do(req)
 	if err != nil {
+		// a url.Error quotes the whole URL, which holds the sink's secret
+		// (telegram's bot token, a webhook key, ntfy credentials)
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			host := ""
+			if u, perr := url.Parse(ue.URL); perr == nil {
+				host = u.Scheme + "://" + u.Host
+			}
+			return fmt.Errorf("%s %s/…: %w", ue.Op, host, ue.Err)
+		}
 		return err
 	}
 	defer resp.Body.Close()

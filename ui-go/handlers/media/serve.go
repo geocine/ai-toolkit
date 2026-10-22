@@ -146,6 +146,11 @@ func serveFile(w http.ResponseWriter, r *http.Request, prefix string) {
 	h := w.Header()
 	h.Set("Content-Type", contentType(resolved))
 	h.Set("Accept-Ranges", "bytes")
+	// media is shown by <img>/<video> tags; opened directly (an .svg with a
+	// script, say) it must not run code on the app's origin, where the
+	// console keeps its token
+	h.Set("Content-Security-Policy", "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'")
+	h.Set("X-Content-Type-Options", "nosniff")
 	if isImg {
 		// weak ETag from inode/size/mtime: cheap and stable enough for
 		// revalidating thumbnails/videos the UI requests over and over
@@ -162,7 +167,6 @@ func serveFile(w http.ResponseWriter, r *http.Request, prefix string) {
 	} else {
 		h.Set("Cache-Control", "public, max-age=86400")
 		h.Set("Content-Disposition", `attachment; filename="`+encodeURIComponent(filepath.Base(resolved))+`"`)
-		h.Set("X-Content-Type-Options", "nosniff")
 	}
 
 	size := st.Size()

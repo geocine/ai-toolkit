@@ -40,6 +40,9 @@ type Response struct {
 	Status int
 	Header http.Header
 	Body   []byte
+	// Size is the full body length; more than len(Body) when the caller kept
+	// only the first MaxResponseBytes (0 means len(Body))
+	Size int64
 }
 
 // Caller performs one /v1 request in-process (with the caller's credentials).
@@ -461,7 +464,10 @@ func (r *run) invoke(op Op, args []goja.Value) goja.Value {
 	contentType := ""
 	switch {
 	case op.Mode == ModeTextRequest:
-		text, _ := body["text"].(string)
+		text, ok := body["text"].(string)
+		if !ok {
+			r.throw("invalid_request", 400, fmt.Sprintf("aitk.%s.%s: text must be a string", op.Group, op.Name))
+		}
 		payload, contentType = []byte(text), "text/plain; charset=utf-8"
 	case op.Mode == ModeBase64:
 		payload, contentType = r.decodeBase64(op, body["base64"]), "application/octet-stream"
@@ -517,11 +523,15 @@ func (r *run) invoke(op Op, args []goja.Value) goja.Value {
 	if resp.Status == http.StatusNoContent || len(resp.Body) == 0 {
 		return goja.Null()
 	}
+	size := max(resp.Size, int64(len(resp.Body)))
 	if op.Mode == ModeTextResponse {
-		if len(resp.Body) > MaxTextBytes {
-			r.throw("too_large", 413, fmt.Sprintf("file is %d bytes; readText reads at most %d", len(resp.Body), MaxTextBytes))
+		if size > MaxTextBytes {
+			r.throw("too_large", 413, fmt.Sprintf("file is %d bytes; readText reads at most %d", size, MaxTextBytes))
 		}
 		return r.vm.ToValue(string(resp.Body))
+	}
+	if size > int64(len(resp.Body)) {
+		r.throw("too_large", 413, fmt.Sprintf("aitk.%s.%s: the response is %d bytes, more than code mode keeps (%d)", op.Group, op.Name, size, MaxResponseBytes))
 	}
 	parse, _ := goja.AssertFunction(r.vm.Get("JSON").ToObject(r.vm).Get("parse"))
 	v, err := parse(goja.Undefined(), r.vm.ToValue(string(resp.Body)))

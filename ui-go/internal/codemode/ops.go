@@ -70,7 +70,7 @@ var Ops = []Op{
 		Params: []Param{p("id", "string", "path", "job id"), opt("name", "string", "body", ""), opt("gpu_ids", "string", "body", ""),
 			opt("config", "JobConfig", "body", ""), opt("policy", "JobPolicy", "body", "")}},
 	{Group: "jobs", Name: "delete", Method: "DELETE", Path: "/v1/jobs/{id}", Result: "null", Doc: "Delete a job that is not running.",
-		Params: []Param{p("id", "string", "path", "job id"), opt("files", "boolean", "query", "also delete its output folder")}},
+		Params: []Param{p("id", "string", "path", "job id"), opt("files", "boolean", "query", "true also deletes its output folder (checkpoints, samples); default false keeps it")}},
 	{Group: "jobs", Name: "start", Method: "POST", Path: "/v1/jobs/{id}/start", Result: "Job",
 		Doc:    "Queue the job and make sure its GPU queue runs. A job with checkpoints resumes from the latest one.",
 		Params: []Param{p("id", "string", "path", "job id")}},

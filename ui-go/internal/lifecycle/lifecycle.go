@@ -19,10 +19,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/geocine/aitoolkit/internal/bundles"
 	"github.com/geocine/aitoolkit/internal/events"
 	"github.com/geocine/aitoolkit/internal/jobstate"
 	"github.com/geocine/aitoolkit/internal/state"
 	"github.com/geocine/aitoolkit/internal/store"
+	"github.com/geocine/aitoolkit/internal/uploads"
 )
 
 // Event is the event type carrying Status on every change.
@@ -84,26 +86,49 @@ type Status struct {
 
 const configKey = "lifecycle.config"
 
-// cancelledKey remembers a cancelled ending across restarts.
-const cancelledKey = "lifecycle.cancelled"
+// handledKey remembers, across restarts, the ending that was already dealt
+// with (cancelled, held, failed or done), so a restarted server does not count
+// down and act on it again. Older servers stored a bare key: a cancel.
+const handledKey = "lifecycle.cancelled"
 
-// restoreCancel keeps a countdown cancelled before a restart cancelled.
-func (m *Manager) restoreCancel() {
+type handled struct {
+	Key   string `json:"key"`
+	State string `json:"state"`
+}
+
+// restoreHandled keeps an ending handled before a restart handled.
+func (m *Manager) restoreHandled() {
 	if state.DB == nil || m.cfg.Mode == ModeKeep {
 		return
 	}
-	if v, ok, _ := state.Setting(m.ctx, cancelledKey); ok && v != "" {
-		m.stopKey = v
+	v, ok, _ := state.Setting(m.ctx, handledKey)
+	if !ok || v == "" {
+		return
+	}
+	h := handled{Key: v, State: StateCancelled}
+	if strings.HasPrefix(v, "{") && json.Unmarshal([]byte(v), &h) != nil {
+		return
+	}
+	m.stopKey = h.Key
+	switch h.State {
+	case StateCancelled:
 		m.st.State, m.st.Reason = StateCancelled, "cancelled (before the server restarted): it stays up until the next job finishes"
+	default:
+		m.st.State, m.st.Reason = StateWaiting, "the last ending was already handled ("+h.State+") before the server restarted; waiting for the next job"
 	}
 }
 
-// rememberCancel persists (or, with "", forgets) the cancelled ending.
-func (m *Manager) rememberCancel(key string) {
+// remember persists (or, with "", forgets) the handled ending.
+func (m *Manager) remember(key, st string) {
 	if state.DB == nil {
 		return
 	}
-	if err := state.SetSetting(context.WithoutCancel(m.ctx), cancelledKey, key); err != nil {
+	v := ""
+	if key != "" {
+		b, _ := json.Marshal(handled{Key: key, State: st})
+		v = string(b)
+	}
+	if err := state.SetSetting(context.WithoutCancel(m.ctx), handledKey, v); err != nil {
 		log.Printf("lifecycle: %v", err)
 	}
 }
@@ -138,6 +163,8 @@ type Manager struct {
 	// lastLogged is the state last written to the log
 	lastLogged string
 	now        func() time.Time
+	// transfers reports work in flight besides jobs (tests replace it)
+	transfers func(context.Context) string
 }
 
 var (
@@ -256,7 +283,7 @@ var tick = 3 * time.Second
 // Start creates the manager and runs it until ctx ends.
 func Start(ctx context.Context) {
 	m := newManager(ctx, loadConfig(ctx), detectProvider())
-	m.restoreCancel()
+	m.restoreHandled()
 	mgrMu.Lock()
 	mgr = m
 	mgrMu.Unlock()
@@ -272,7 +299,7 @@ func Start(ctx context.Context) {
 }
 
 func newManager(ctx context.Context, c Config, p Provider) *Manager {
-	m := &Manager{cfg: c, provider: p, ctx: ctx, now: time.Now}
+	m := &Manager{cfg: c, provider: p, ctx: ctx, now: time.Now, transfers: transfers}
 	m.st = Status{State: StateWaiting, Results: []JobResult{}}
 	if c.Mode == ModeKeep {
 		m.st.State, m.st.Reason = StateOff, "when done: keep the server"
@@ -365,19 +392,54 @@ type lastEnd struct {
 	at    time.Time
 }
 
+// training reports whether j is a training run: what arms when done. Caption
+// jobs are work while they run but their ending arms nothing (the user is
+// still preparing a run); inference engines neither hold nor arm it (an
+// engine runs until stopped, and destroying the server ends it anyway).
+func training(j *store.Job) bool { return j.JobType == "" || j.JobType == "train" }
+
+// transfers describes bundle imports/pushes and remote uploads still in
+// flight ("" when none): ending the server under them loses what they carry.
+func transfers(ctx context.Context) string {
+	var parts []string
+	if state.DB != nil {
+		if tasks, err := bundles.ListTasks(ctx, ""); err == nil {
+			for _, t := range tasks {
+				if t.State == bundles.TaskQueued || t.State == bundles.TaskRunning {
+					parts = append(parts, "bundle "+t.Kind)
+					break
+				}
+			}
+		}
+		for _, st := range []string{uploads.Queued, uploads.Running} {
+			if us, err := uploads.List(ctx, "", st); err == nil && len(us) > 0 {
+				parts = append(parts, fmt.Sprintf("%d upload(s)", len(us)))
+				break
+			}
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
 // survey reads the jobs: whether any is queued/running/stopping, and the
-// one that ended last.
+// training run that ended last.
 func survey(ctx context.Context) (active *store.Job, last *lastEnd, err error) {
 	jobs, err := store.FindJobs(ctx, store.JobQuery{OrderBy: `"created_at" ASC`})
 	if err != nil {
 		return nil, nil, err
 	}
 	for _, j := range jobs {
+		if j.JobType == "inference" {
+			continue
+		}
 		switch j.Status {
 		case "queued", "running", "stopping":
 			if active == nil {
 				active = j
 			}
+			continue
+		}
+		if !training(j) {
 			continue
 		}
 		st := jobstate.FromStatus(j.Status, j.Step, j.Info)
@@ -398,8 +460,20 @@ func survey(ctx context.Context) (active *store.Job, last *lastEnd, err error) {
 	return active, last, nil
 }
 
-func (m *Manager) triggers(st string) bool {
-	return st == jobstate.Completed || m.cfg.On == OnAny && st == jobstate.Failed
+// interruptGrace is how long an interrupted run may sit before when done
+// (on any) takes it as its ending: an auto-resume requeues it well before.
+var interruptGrace = 2 * time.Minute
+
+func (m *Manager) triggers(l *lastEnd) bool {
+	switch l.state {
+	case jobstate.Completed:
+		return true
+	case jobstate.Failed:
+		return m.cfg.On == OnAny
+	case jobstate.Interrupted:
+		return m.cfg.On == OnAny && !m.now().Before(l.at.Add(interruptGrace))
+	}
+	return false
 }
 
 // evaluate moves the state machine on from what the jobs look like now.
@@ -433,7 +507,7 @@ func (m *Manager) evaluate() {
 		}
 		// new work: whatever was decided for the previous ending is over
 		if m.stopKey != "" {
-			m.rememberCancel("")
+			m.remember("", "")
 		}
 		m.armedKey, m.stopKey = "", ""
 		m.st.JobID, m.st.JobName = nil, nil
@@ -449,7 +523,7 @@ func (m *Manager) evaluate() {
 	}
 	id, name := last.job.ID, last.job.Name
 	m.st.JobID, m.st.JobName = &id, &name
-	if !m.triggers(last.state) {
+	if !m.triggers(last) {
 		m.armedKey = ""
 		m.set(StateWaiting, nil, fmt.Sprintf("last job %s ended %s (when done on %s)", name, last.state, m.cfg.On))
 		return
@@ -466,6 +540,11 @@ func (m *Manager) evaluate() {
 			actionWord(m.cfg.Mode), time.Duration(m.cfg.DelayS)*time.Second))
 	}
 	if m.st.Deadline != nil && !now.Before(*m.st.Deadline) {
+		// bundles and uploads still moving: act once they settle
+		if work := m.transfers(ctx); work != "" {
+			m.set(StateCountdown, m.st.Deadline, "waiting for "+work+" to finish")
+			return
+		}
 		m.startActLocked()
 	}
 }
@@ -492,6 +571,7 @@ func (m *Manager) act(key string) {
 			log.Printf("lifecycle: panic: %v", r)
 			m.mu.Lock()
 			m.busy, m.stopKey = false, key
+			m.remember(key, StateFailed)
 			m.set(StateFailed, nil, fmt.Sprintf("internal error: %v", r))
 			m.mu.Unlock()
 		}
@@ -512,6 +592,7 @@ func (m *Manager) act(key string) {
 	mode, dry, p := m.cfg.Mode, m.cfg.DryRun, m.provider
 	if !safe {
 		m.busy, m.stopKey = false, key
+		m.remember(key, StateHeld)
 		m.set(StateHeld, nil, "results only on this server, not "+strings.TrimSuffix(actionWord(mode), " the server")+": "+unsafeSummary(results))
 		m.mu.Unlock()
 		return
@@ -559,9 +640,11 @@ func (m *Manager) act(key string) {
 	defer m.mu.Unlock()
 	m.busy, m.stopKey = false, key
 	if err != nil {
+		m.remember(key, StateFailed)
 		m.set(StateFailed, nil, "could not end the server, staying up: "+err.Error())
 		return
 	}
+	m.remember(key, StateDone)
 	m.set(StateDone, nil, detail)
 }
 
@@ -620,7 +703,7 @@ func Cancel() (Status, error) {
 		return m.snapshotLocked(), failf(ErrConflict, "nothing to cancel (state %s)", m.st.State)
 	}
 	m.stopKey = m.armedKey
-	m.rememberCancel(m.stopKey)
+	m.remember(m.stopKey, StateCancelled)
 	m.set(StateCancelled, nil, "cancelled: the server stays up until the next job finishes")
 	return m.snapshotLocked(), nil
 }
@@ -669,6 +752,9 @@ func Now() (Status, error) {
 	}
 	if active != nil {
 		return m.snapshotLocked(), failf(ErrConflict, "job %s is %s", active.Name, active.Status)
+	}
+	if work := m.transfers(m.ctx); work != "" {
+		return m.snapshotLocked(), failf(ErrConflict, "%s still in flight", work)
 	}
 	m.armedKey = "now"
 	if last != nil {
@@ -722,7 +808,7 @@ func Update(ctx context.Context, p Patch) (Status, error) {
 		// an explicit change decides afresh, even for an ending that was
 		// cancelled or held: a countdown starts over with the new delay
 		m.armedKey, m.stopKey = "", ""
-		m.rememberCancel("")
+		m.remember("", "")
 		// not emitted: evaluate (below) publishes where it lands, so a
 		// countdown that only changed its delay is not reported as cancelled
 		m.st.State, m.st.Deadline, m.st.Reason = StateWaiting, nil, "configuration changed"

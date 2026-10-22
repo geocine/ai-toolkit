@@ -90,7 +90,7 @@ same machine.
 | `AITK_PUBLIC_URL` | This server's public URL, for tap-through links (default: RunPod's proxy URL or Vast.ai's mapped port when detected) and for signed download links (`POST /v1/links`; default: the URL the client called). |
 | `AITK_STUDIO_URL` | Where links open the studio (default `<public url>/studio/` when the image serves it). |
 | `AITK_WHEN_DONE` (`keep`) | `stop` or `destroy` this server once every queue is idle and the last job reached the trigger, after verifying the finished jobs' results are on a remote (never when they are only here). |
-| `AITK_WHEN_DONE_DELAY` (`10m`) | Countdown before acting; cancel, extend or skip it from the studio, the API or MCP. A job queued meanwhile cancels it. |
+| `AITK_WHEN_DONE_DELAY` (`10m`) | Countdown before acting; cancel, extend or skip it from the studio, the API or MCP. A job queued meanwhile cancels it; only training runs arm it (not caption jobs or inference engines), and it waits for bundle transfers and uploads in flight. |
 | `AITK_WHEN_DONE_ON` (`completed`) | `any` also triggers when the last job failed. |
 | `AITK_WHEN_DONE_BUNDLE` | A remote to keep each finished run in as a resumable bundle (`bundles/<name>_step<step>.zip`, docs/bundle-format.md) before acting. Pushed when missing, verified by size, and preferred over the sync and upload checks. |
 | `AITK_WHEN_DONE_DRY_RUN` (`0`) | Log and emit events instead of calling the provider. |

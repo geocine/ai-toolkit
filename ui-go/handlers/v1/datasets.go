@@ -796,7 +796,14 @@ func importDatasetURL(w http.ResponseWriter, r *http.Request) {
 		v1api.OK(w, res)
 		return
 	}
-	fname := b.File
+	fname := ""
+	if b.File != "" {
+		// a file name, never a path: the dataset folder is the only place it may land
+		if fname = uploadName(b.File); fname == "" || fname != b.File {
+			v1api.Fail(w, v1api.CodeInvalidRequest, "file must be a plain file name (no folders, not starting with a dot)")
+			return
+		}
+	}
 	if fname == "" {
 		if _, params, err := mime.ParseMediaType(resp.Header.Get("Content-Disposition")); err == nil {
 			fname = uploadName(params["filename"])

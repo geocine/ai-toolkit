@@ -280,7 +280,7 @@ func TestCountdownCancelExtendAndNewJob(t *testing.T) {
 	}
 	// a restart keeps it cancelled
 	m2 := startManager(t, Config{Mode: ModeDestroy, DelayS: 600}, p)
-	m2.restoreCancel()
+	m2.restoreHandled()
 	m2.evaluate()
 	if s := m2.Snapshot(); s.State != StateCancelled {
 		t.Fatalf("after restart: %+v", s)
@@ -483,5 +483,90 @@ func TestCommandAndExitProviders(t *testing.T) {
 	case <-exited:
 	case <-time.After(5 * time.Second):
 		t.Fatal("exit not called")
+	}
+}
+
+// Caption jobs are work while they run but never arm when done; an inference
+// engine neither holds nor arms it.
+func TestOnlyTrainingRunsArm(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	cap := e.finishedJob(t, "set_caption", "completed", "Captioning completed", false)
+	store.UpdateJob(ctx, cap.ID, store.Fields{"job_type": "caption"})
+	m := startManager(t, Config{Mode: ModeDestroy, DelayS: 600}, &fakeProvider{})
+	m.evaluate()
+	if s := m.Snapshot(); s.State != StateWaiting || !strings.Contains(s.Reason, "no job has finished") {
+		t.Fatalf("finished caption job: %+v", s)
+	}
+	run := e.finishedJob(t, "lora_t", "completed", "Job completed", false)
+	waitState(t, m, StateCountdown)
+
+	// a running caption job holds the countdown like any work
+	store.UpdateJob(ctx, cap.ID, store.Fields{"status": "running"})
+	waitState(t, m, StateWaiting)
+	store.UpdateJob(ctx, cap.ID, store.Fields{"status": "completed"})
+	if s := waitState(t, m, StateCountdown); *s.JobName != "lora_t" {
+		t.Fatalf("armed by %v", *s.JobName)
+	}
+
+	// a running engine does not hold it, and stopping it does not disarm it
+	eng := e.finishedJob(t, "engine", "running", "Engine ready", false)
+	store.UpdateJob(ctx, eng.ID, store.Fields{"job_type": "inference", "status": "running"})
+	m.evaluate()
+	if s := m.Snapshot(); s.State != StateCountdown {
+		t.Fatalf("with an engine running: %+v", s)
+	}
+	store.UpdateJob(ctx, eng.ID, store.Fields{"status": "stopped"})
+	m.evaluate()
+	if s := m.Snapshot(); s.State != StateCountdown || *s.JobName != run.Name {
+		t.Fatalf("after the engine stopped: %+v", s)
+	}
+}
+
+// With on any, an interrupted run that was not resumed is an ending.
+func TestInterruptedEndsAfterGrace(t *testing.T) {
+	e := setup(t)
+	e.finishedJob(t, "lora_i", "error", "Job process terminated with signal SIGKILL.", false)
+	m := startManager(t, Config{Mode: ModeStop, On: OnAny, DelayS: 600}, &fakeProvider{})
+	m.evaluate()
+	if s := m.Snapshot(); s.State != StateWaiting {
+		t.Fatalf("within the grace: %+v", s)
+	}
+	m.now = func() time.Time { return time.Now().Add(interruptGrace + time.Second) }
+	m.evaluate()
+	if s := m.Snapshot(); s.State != StateCountdown {
+		t.Fatalf("after the grace: %+v", s)
+	}
+}
+
+// An ending acted on is not acted on again after a restart, and transfers in
+// flight hold the action at the deadline.
+func TestDonePersistsAndTransfersHold(t *testing.T) {
+	e := setup(t)
+	e.finishedJob(t, "lora_p", "completed", "Job completed", false)
+	p := &fakeProvider{}
+	m := startManager(t, Config{Mode: ModeStop, DelayS: 0}, p)
+	work := "1 upload(s)"
+	m.transfers = func(context.Context) string { return work }
+	m.evaluate()
+	if s := m.Snapshot(); s.State != StateCountdown || !strings.Contains(s.Reason, "waiting for 1 upload(s)") {
+		t.Fatalf("with an upload in flight: %+v", s)
+	}
+	if _, err := Now(); !errors.Is(err, ErrConflict) {
+		t.Fatalf("now with an upload in flight: %v", err)
+	}
+	work = ""
+	waitState(t, m, StateDone)
+
+	m2 := startManager(t, Config{Mode: ModeStop, DelayS: 0}, p)
+	m2.transfers = func(context.Context) string { return "" }
+	m2.restoreHandled()
+	m2.evaluate()
+	time.Sleep(50 * time.Millisecond)
+	if s := m2.Snapshot(); s.State != StateWaiting || !strings.Contains(s.Reason, "already handled") {
+		t.Fatalf("after restart: %+v", s)
+	}
+	if c := p.Calls(); len(c) != 1 {
+		t.Fatalf("calls %v", c)
 	}
 }

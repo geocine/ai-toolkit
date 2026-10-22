@@ -129,7 +129,7 @@ func HasKeys() bool {
 	defer countMu.Unlock()
 	if !countValid {
 		if err := DB.QueryRow(`SELECT COUNT(*) FROM api_keys`).Scan(&countCache); err != nil {
-			return false
+			return true // fail closed: an unreadable key table must not open the server
 		}
 		countValid = true
 	}

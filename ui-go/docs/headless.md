@@ -94,7 +94,7 @@ with step 0 and no trainer progress yet).
 - `POST /v1/jobs {name, gpu_ids, config, type?, ref?, policy?}` → 201 Job (`draft`)
 - `GET /v1/jobs/{id}` → Job
 - `PATCH /v1/jobs/{id} {name?, gpu_ids?, config?, policy?}` → Job (409 while queued/running)
-- `DELETE /v1/jobs/{id}?files=true|false` → 204 (409 while running)
+- `DELETE /v1/jobs/{id}?files=true|false` → 204 (409 while running); the output folder is deleted only with `files=true`
 - `POST /v1/jobs/{id}/start` → Job. Queues it and makes sure its GPU queue runs.
   Starting a job that has checkpoints resumes from the latest one (ai-toolkit
   does this itself for the same job folder).
@@ -441,9 +441,15 @@ API ones persist (fork setting `notify.config`).
 
 ### When done
 `internal/lifecycle` watches the queues. When nothing is queued, running or
-stopping and the job that ended last ended `completed` (`on: any`: also
-`failed`), it starts a countdown (`delay_s`). A job queued meanwhile cancels
-it. At the deadline it checks every finished job (completed, failed, stopped,
+stopping and the training run that ended last ended `completed` (`on: any`:
+also `failed`, or `interrupted` and not resumed within 2 minutes), it starts a
+countdown (`delay_s`). A job queued meanwhile cancels it. Only training runs
+arm it: a caption job holds it while it runs but its ending arms nothing (you
+are still preparing a run), and an inference engine neither holds nor arms it.
+At the deadline it waits while bundle imports/pushes or remote uploads are in
+flight. An ending it already acted on (or held, failed or was cancelled for)
+is remembered across a restart, so a restarted server does not act on it
+again. At the deadline it checks every finished job (completed, failed, stopped,
 interrupted) that has a checkpoint: its newest model file must be on a remote,
 proven by the remote object's size. The first check that applies to a job
 decides:

@@ -73,7 +73,7 @@ func imgCaption(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// make sure the dataset path is in the image path
-	if !strings.HasPrefix(imgPath, rt.Datasets) {
+	if !underRoot(imgPath, rt.Datasets) {
 		httpx.Error(w, http.StatusBadRequest, "Invalid image path")
 		return
 	}
