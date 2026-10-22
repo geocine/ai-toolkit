@@ -1890,10 +1890,17 @@ input[aria-invalid='true'] {
   padding-top: 16px;
   border-top: 1px solid var(--border);
 }
-.sink-guide .seg {
-  flex-wrap: wrap;
-  align-self: flex-start;
-  max-width: 100%;
+.notify-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr));
+  align-items: stretch;
+}
+.sink-tabs {
+  gap: 16px;
+  margin-bottom: 4px;
+}
+.sink-tabs .tab {
+  height: 32px;
+  font-size: 13px;
 }
 .sink-steps {
   display: flex;

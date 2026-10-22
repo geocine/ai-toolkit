@@ -525,7 +525,13 @@ function Notifications({ server }: { server: Server }) {
               </label>
               <div className="sink-guide">
                 <span className="sink-guide-label">How to set one up</span>
-                <Seg value={guide.id} options={sinkGuides.map(g => ({ value: g.id, label: g.label }))} onChange={id => setGuide(sinkGuides.find(g => g.id === id)!)} label="Destination type" />
+                <div className="tabs sink-tabs" role="tablist" aria-label="Destination type">
+                  {sinkGuides.map(g => (
+                    <button key={g.id} type="button" role="tab" aria-selected={guide.id === g.id} className={guide.id === g.id ? 'tab is-active' : 'tab'} onClick={() => setGuide(g)}>
+                      {g.label}
+                    </button>
+                  ))}
+                </div>
                 <ol className="sink-steps">
                   {guide.steps.map((s, i) => (
                     <li key={i}>{s}</li>

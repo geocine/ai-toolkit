@@ -3202,6 +3202,22 @@ a.runs-row:hover {
   color: var(--text-2);
 }
 
+.tabs.sink-tabs {
+  gap: 16px;
+  margin: 0;
+}
+
+.sink-tabs .tab {
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
 .sink-steps {
   display: flex;
   flex-direction: column;
