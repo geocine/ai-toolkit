@@ -209,6 +209,23 @@ func syncJob(ctx context.Context, j *store.Job, r *remote.Remote, c remote.Clien
 	if prev != nil && prev.Lease.Held(me, time.Now()) {
 		return nil, prev.Lease, fmt.Errorf("%w: %s until %s", ErrLeaseLost, prev.Lease.NodeLabel, prev.Lease.ExpiresAt.Format(time.RFC3339))
 	}
+	runID := RunID(ctx, j.ID)
+	if prev != nil && prev.RunID != "" && prev.RunID != runID {
+		// a new job reusing a finished run's name: writing would replace that
+		// run's manifest and prune its checkpoints
+		return nil, nil, fmt.Errorf("%w: %q on %s was started by another job; rename this job or delete the remote run", ErrOtherRun, j.Name, r.Name)
+	}
+	var localNewest []File
+	for _, lf := range locals {
+		localNewest = append(localNewest, File{Step: lf.step})
+	}
+	if prev != nil {
+		if remoteStep, localStep := newestStep(prev.Files), newestStep(localNewest); remoteStep > localStep {
+			// another server carried the run further while this one was away
+			// (a paused pod that came back): never roll the remote back
+			return nil, prev.Lease, fmt.Errorf("%w: the remote run is at checkpoint step %d, this server only has %d", ErrLeaseLost, remoteStep, localStep)
+		}
+	}
 	have := map[string]bool{}
 	if prev != nil {
 		for _, f := range prev.Files {
@@ -238,7 +255,14 @@ func syncJob(ctx context.Context, j *store.Job, r *remote.Remote, c remote.Clien
 	}
 	samples := syncSamples(ctx, c, j.Name, folder, prev)
 
-	m := &Manifest{Name: j.Name, Type: j.JobType, Ref: portableRef(j.JobRef, dsRoot, trRoot), GpuIDs: j.GpuIDs,
+	// remote ids are per server: carry the auto-upload remote by name
+	if pol.AutoUploadRemote != nil && *pol.AutoUploadRemote != "" {
+		if ar, err := remote.Get(ctx, *pol.AutoUploadRemote); err == nil && ar != nil {
+			name := ar.Name
+			pol.AutoUploadRemote = &name
+		}
+	}
+	m := &Manifest{Name: j.Name, RunID: runID, Type: j.JobType, Ref: portableRef(j.JobRef, dsRoot, trRoot), GpuIDs: j.GpuIDs,
 		Config: cfg, Policy: pol, Datasets: names, Step: j.Step, TotalSteps: j.TotalSteps,
 		State: jobstate.FromStatus(j.Status, j.Step, j.Info), Files: files, Samples: samples}
 	if m.Datasets == nil {
@@ -533,6 +557,9 @@ func renewLease(ctx context.Context, c remote.Client, j *store.Job) (*Lease, err
 	}
 	if m.Lease.Held(me, time.Now()) {
 		return m.Lease, ErrLeaseLost
+	}
+	if m.RunID != "" && m.RunID != RunID(ctx, j.ID) {
+		return nil, fmt.Errorf("%w: %q", ErrOtherRun, j.Name)
 	}
 	if m.Lease, err = newLease(ctx); err != nil {
 		return nil, err

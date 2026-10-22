@@ -619,3 +619,46 @@ func TestPortablePaths(t *testing.T) {
 		t.Fatalf("not mapped back: %s", back)
 	}
 }
+
+// A new job reusing a finished run's name may not write over it, and a node
+// that is behind the remote (a paused pod that came back) may not roll it back.
+func TestOtherRunAndStaleNodeNeverOverwrite(t *testing.T) {
+	ctx := context.Background()
+	shared := t.TempDir()
+	a := newNode(t, shared)
+	j := setupJob(t, a, "shared")
+	if _, err := SyncJob(ctx, j.ID, ReasonStart); err != nil {
+		t.Fatal(err)
+	}
+	first := manifestOn(t, shared)
+	if first.RunID != j.ID {
+		t.Fatalf("run id %q, want %q", first.RunID, j.ID)
+	}
+
+	// the run goes on elsewhere to step 30
+	m := *first
+	step := 30
+	m.Files = append(append([]File{}, m.Files...), File{Name: jobName + "_000000030.safetensors", Key: "jobs/" + jobName + "/files/x/30", Step: &step})
+	m.Step, m.Lease = 30, nil
+	b, _ := json.Marshal(m)
+	write(t, filepath.Join(shared, "jobs", jobName, "manifest.json"), string(b))
+	if _, err := SyncJob(ctx, j.ID, ReasonCheckpoint); !errors.Is(err, ErrLeaseLost) {
+		t.Fatalf("stale sync: %v", err)
+	}
+	if got := manifestOn(t, shared); got.Step != 30 || newestStep(got.Files) != 30 {
+		t.Fatalf("remote rolled back to %d", got.Step)
+	}
+	if j2, _ := store.GetJob(ctx, j.ID); j2 == nil || !j2.Stop {
+		t.Fatalf("stale job not stopped: %+v", j2)
+	}
+
+	// another server, a new job with the same name
+	other := newNode(t, shared)
+	j3 := setupJob(t, other, "shared")
+	if _, err := SyncJob(ctx, j3.ID, ReasonStart); !errors.Is(err, ErrOtherRun) {
+		t.Fatalf("same name, other run: %v", err)
+	}
+	if got := manifestOn(t, shared); got.RunID != j.ID || got.Step != 30 {
+		t.Fatalf("other run overwrote the manifest: %+v", got)
+	}
+}
