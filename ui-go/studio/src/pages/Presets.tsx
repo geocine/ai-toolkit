@@ -1,4 +1,4 @@
-import { ChevronDown, Copy, Download, FileUp, Lightbulb, Pencil, RotateCcw } from 'lucide-react';
+import { ChevronDown, Copy, Download, FileUp, Lightbulb, Pencil, RotateCcw, X } from 'lucide-react';
 import { lazy, Suspense, useId, useRef, useState } from 'react';
 import { ErrorNote, NeedServer, PageHeader } from '../components/ui';
 import { useStudio } from '../lib/context';
@@ -16,7 +16,9 @@ function saveText(name: string, text: string) {
   setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
 }
 
+/** What an import or save changed in the config; each one can be dismissed. */
 export function PresetNotes({ preset }: { preset: Preset }) {
+  const { savePreset } = useStudio();
   if (!preset.notes.length) return null;
   return (
     <div className="callout callout-info notes">
@@ -24,7 +26,17 @@ export function PresetNotes({ preset }: { preset: Preset }) {
       <ul className="callout-body">
         {preset.notes.map(n => (
           <li key={n.title}>
-            <strong>{n.title}.</strong> <span dangerouslySetInnerHTML={{ __html: md(n.body) }} />
+            <span>
+              <strong>{n.title}.</strong> <span dangerouslySetInnerHTML={{ __html: md(n.body) }} />
+            </span>
+            <button
+              className="btn btn-ghost btn-icon note-dismiss"
+              aria-label={`Dismiss: ${n.title}`}
+              title="Dismiss"
+              onClick={() => savePreset({ ...preset, notes: preset.notes.filter(x => x.title !== n.title) })}
+            >
+              <X />
+            </button>
           </li>
         ))}
       </ul>

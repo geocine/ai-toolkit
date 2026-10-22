@@ -1167,6 +1167,29 @@ ul.callout-body {
   font-weight: 600;
 }
 
+.notes li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.notes li > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.note-dismiss.btn-icon {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin: -2px -4px 0 0;
+}
+
+.note-dismiss svg {
+  width: 14px;
+  height: 14px;
+}
+
 /* ---- runs ---- */
 
 .runs {
