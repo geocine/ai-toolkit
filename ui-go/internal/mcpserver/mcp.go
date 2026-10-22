@@ -32,7 +32,8 @@ The user's tuned training presets are aitk.presets.list() (from the studio): pre
 template; each preset's base is a full job config.
 To build or change a config: aitk.templates.fields({ section }) lists every key the trainer reads with its default and where
 it goes, aitk.templates.examples / example(name) are upstream's starting points, and aitk.templates.check({ config }) finds keys
-the trainer would ignore (wrong section, typos). Check before jobs.create.
+the trainer would ignore (wrong section, typos). Check before jobs.create, and run aitk.jobs.preflight({ job_id }) before
+jobs.start: it catches missing datasets, uncaptioned images, low disk and results with nowhere to go.
 To caption a dataset with a model: aitk.templates.captioners() lists upstream's captioners (model choices, named prompts),
 then aitk.datasets.caption(name, { captioner, model, prompt }) queues a caption job; datasets.get(name).caption_job follows it.
 Before training, aitk.datasets.checkCaptions(name, { trigger }) flags captions without the trigger, with a misspelled one,

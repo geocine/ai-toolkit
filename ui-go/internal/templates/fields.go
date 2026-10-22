@@ -80,17 +80,19 @@ var (
 	refMu    sync.Mutex
 	refCache *Reference
 	refFiles map[string]time.Time
+	refRoot  string
 )
 
 // Fields returns the reference, rebuilt when a scanned file changed.
 func Fields() Reference {
 	refMu.Lock()
 	defer refMu.Unlock()
-	if refCache != nil && filesFresh(refFiles) {
+	// a different toolkit (or one that was missing) reads afresh
+	if refCache != nil && refRoot == paths.ToolkitRoot && filesFresh(refFiles) {
 		return *refCache
 	}
 	ref, files := buildReference()
-	refCache, refFiles = &ref, files
+	refCache, refFiles, refRoot = &ref, files, paths.ToolkitRoot
 	return ref
 }
 

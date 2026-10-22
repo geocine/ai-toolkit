@@ -1890,6 +1890,14 @@ a.runs-row:hover {
   display: none;
 }
 
+.preflight-info {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--text-2);
+  list-style: disc;
+}
+
 .flag-summary {
   display: flex;
   flex-wrap: wrap;

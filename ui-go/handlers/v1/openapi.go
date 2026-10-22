@@ -58,6 +58,7 @@ var ops = []op{
 	{"POST", "/v1/datasets/{name}/import", "datasets", "Download an image or a zip of images from a URL into the dataset", nil, "DatasetImportURL", 200, "DatasetImport"},
 	{"GET", "/v1/datasets/{name}/captions/check", "datasets", "Captions with what is wrong with them (missing, trigger, truncated, ...)", []string{"trigger:string"}, "", 200, "object"},
 	{"POST", "/v1/datasets/{name}/captions/fix", "datasets", "Bulk-edit captions (preview unless apply)", nil, "object", 200, "object"},
+	{"POST", "/v1/jobs/preflight", "jobs", "Checks a config or job before it runs (block, warn, info)", nil, "object", 200, "object"},
 	{"POST", "/v1/datasets/{name}/caption", "datasets", "Caption the dataset with a captioner model (queues a caption job)", nil, "CaptionRequest", 201, "Job"},
 	{"PUT", "/v1/datasets/{name}/files/{file}", "datasets", "Write one file (raw body), replacing it", nil, "binary", 200, "DatasetItem"},
 	{"PUT", "/v1/datasets/{name}/captions/{file}", "datasets", "Set a file's caption", nil, "CaptionBody", 200, "DatasetItem"},

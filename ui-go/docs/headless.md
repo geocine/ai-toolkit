@@ -94,6 +94,11 @@ with step 0 and no trainer progress yet).
 - `POST /v1/jobs {name, gpu_ids, config, type?, ref?, policy?}` → 201 Job (`draft`)
 - `GET /v1/jobs/{id}` → Job
 - `PATCH /v1/jobs/{id} {name?, gpu_ids?, config?, policy?}` → Job (409 while queued/running)
+- `POST /v1/jobs/preflight {config | job_id}` → `{ok, checks: [{level: block|warn|info, message, fix?}]}`: what
+  would go wrong or be wasted before a GPU is paid for: keys the trainer ignores, a missing dataset
+  folder, images it skips (it reads jpg, jpeg, png, webp), uncaptioned, trigger-less or cut-off
+  captions, little disk, a missing local model, an unreachable sync remote, checkpoints that will not
+  be kept, when done set to stop/destroy with no remote for the results. `ok` is false when a check blocks.
 - `DELETE /v1/jobs/{id}?files=true|false` → 204 (409 while running); the output folder is deleted only with `files=true`
 - `POST /v1/jobs/{id}/start` → Job. Queues it and makes sure its GPU queue runs.
   Starting a job that has checkpoints resumes from the latest one (ai-toolkit
