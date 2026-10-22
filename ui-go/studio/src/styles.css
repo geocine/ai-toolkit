@@ -3191,23 +3191,35 @@ a.runs-row:hover {
   flex: 1;
 }
 
-.sink-help {
+.sink-guide {
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 4px 16px;
+  gap: 10px;
+}
+
+.sink-guide-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.sink-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+  list-style: decimal;
   font-size: 12px;
-}
-
-.sink-help > div {
-  display: contents;
-}
-
-.sink-help dt {
+  line-height: 1.5;
   color: var(--text-2);
 }
 
-.sink-help dd {
-  color: var(--text-2);
+.sink-steps li::marker {
+  color: var(--text-3);
+}
+
+.sink-steps .mono {
+  color: var(--text);
   overflow-wrap: anywhere;
 }
 
@@ -3275,15 +3287,6 @@ a.runs-row:hover {
 
   .sink-actions {
     justify-content: flex-start;
-  }
-
-  .sink-help {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0;
-  }
-
-  .sink-help dd {
-    margin-bottom: 6px;
   }
 
   .notify-links {

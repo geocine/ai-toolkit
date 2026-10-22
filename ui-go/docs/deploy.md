@@ -84,7 +84,7 @@ same machine.
 **Unattended runs** (docs/headless.md, "Unattended runs"; all changeable at runtime via `/v1/notify` and `/v1/lifecycle`)
 | Variable | Meaning |
 |---|---|
-| `AITK_NOTIFY` | Comma list of notification sinks: `https://ntfy.sh/<topic>` (self-hosted: `ntfy+https://<host>/<topic>`), a Discord webhook URL, `telegram://<bot token>@<chat id>`, any other `https://` URL (JSON webhook). |
+| `AITK_NOTIFY` | Comma list of notification sinks: `https://ntfy.sh/<topic>` (self-hosted: `ntfy+https://<host>/<topic>`), a Discord webhook URL, `telegram://<bot token>@<chat id>`, `pushover://<api token>@<user key>`, any other `https://` URL (JSON webhook). |
 | `AITK_NOTIFY_EVENTS` (all) | Kinds to send: `started,resumed,sample,checkpoint,completed,failed,interrupted,lease_lost,sync_failed,lifecycle`. |
 | `AITK_NOTIFY_SAMPLE_EVERY` (`15m`) | At most one sample grid per job this often. |
 | `AITK_PUBLIC_URL` | This server's public URL, for tap-through links (default: RunPod's proxy URL or Vast.ai's mapped port when detected) and for signed download links (`POST /v1/links`; default: the URL the client called). |

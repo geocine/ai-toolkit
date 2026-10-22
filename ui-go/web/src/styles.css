@@ -1882,6 +1882,37 @@ input[aria-invalid='true'] {
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr));
   gap: 8px 16px;
 }
+.sink-guide {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.sink-guide .seg {
+  flex-wrap: wrap;
+  align-self: flex-start;
+  max-width: 100%;
+}
+.sink-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+  list-style: decimal;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+.sink-steps li::marker {
+  color: var(--text-3);
+}
+.sink-steps .mono {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
 @media (max-width: 767px) {
   .sink-row {
     flex-direction: column;

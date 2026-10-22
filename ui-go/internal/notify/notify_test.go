@@ -40,6 +40,8 @@ func TestParseSink(t *testing.T) {
 		{"ntfy+https://ntfy.example.com/mytopic", SinkNtfy, "topic"},
 		{"https://discord.com/api/webhooks/123456789/tokenpart", SinkDiscord, "tokenpart"},
 		{"telegram://123456:AAH-secret@-1001234", SinkTelegram, "AAH-secret"},
+		{"pushover://azGDORePK8gMaC0QOYAMyEEuzJnyUi@uQiRzpo4DXghDmr9QzzfQu27cmVRsG", SinkPushover, "azGDORe"},
+		{"pushover://azGDORePK8gMaC0QOYAMyEEuzJnyUi@uQiRzpo4DXghDmr9QzzfQu27cmVRsG/phone", SinkPushover, "uQiRzpo"},
 		{"https://hooks.example.com/notify?key=s3cr3t", SinkWebhook, "s3cr3t"},
 		{"webhook+https://ntfy.sh/forced", SinkWebhook, "forced"},
 	}
@@ -52,7 +54,8 @@ func TestParseSink(t *testing.T) {
 			t.Errorf("%s: target %q leaks %q", c.url, target, c.secret)
 		}
 	}
-	for _, bad := range []string{"", "ftp://x/y", "telegram://nocolon@1", "telegram://1:2@", "https://ntfy.sh/", "notaurl"} {
+	for _, bad := range []string{"", "ftp://x/y", "telegram://nocolon@1", "telegram://1:2@", "https://ntfy.sh/", "notaurl",
+		"pushover://short@uQiRzpo4DXghDmr9QzzfQu27cmVRsG", "pushover://azGDORePK8gMaC0QOYAMyEEuzJnyUi", "pushover://@"} {
 		if _, err := NewSink(bad, "api"); err == nil {
 			t.Errorf("%q accepted", bad)
 		}
@@ -122,6 +125,8 @@ func TestSinksFormat(t *testing.T) {
 	srv, all := receiver(t, nil)
 	telegramAPI = srv.URL
 	defer func() { telegramAPI = "https://api.telegram.org" }()
+	pushoverAPI = srv.URL + "/1/messages.json"
+	defer func() { pushoverAPI = "https://api.pushover.net/1/messages.json" }()
 	img := jpegBytes(t)
 	m := Message{Kind: KindCompleted, Level: LevelOK, Title: "lora: completed", Body: "Step 20/20.\nKept on s3.",
 		URL: "https://pod-8675.proxy.runpod.net/studio/#/runs/j1", JobID: "j1", JobName: "lora", At: time.Now()}
@@ -130,6 +135,7 @@ func TestSinksFormat(t *testing.T) {
 		"discord+" + srv.URL + "/api/webhooks/1/tok",
 		"telegram://123:secret@-42",
 		"webhook+" + srv.URL + "/hook",
+		"pushover://azGDORePK8gMaC0QOYAMyEEuzJnyUi@uQiRzpo4DXghDmr9QzzfQu27cmVRsG/phone",
 	}
 	ctx := context.Background()
 	for _, u := range sinks {
@@ -144,7 +150,7 @@ func TestSinksFormat(t *testing.T) {
 		}
 	}
 	g := all()
-	if len(g) != 8 {
+	if len(g) != 10 {
 		t.Fatalf("%d requests", len(g))
 	}
 	// ntfy: text body, then PUT with the attachment and the text as ?message=
@@ -188,6 +194,15 @@ func TestSinksFormat(t *testing.T) {
 	}
 	if b, _ := base64.StdEncoding.DecodeString(w["image_jpeg_base64"].(string)); !bytes.Equal(b, img) {
 		t.Fatal("webhook image")
+	}
+	// pushover: the link in its url field, the image as the attachment
+	p = parts(t, g[8])
+	if g[8].path != "/1/messages.json" || string(p["token"]) != "azGDORePK8gMaC0QOYAMyEEuzJnyUi" || string(p["device"]) != "phone" ||
+		string(p["title"]) != "lora: completed" || string(p["message"]) != m.Body || string(p["url"]) != m.URL || p["attachment"] != nil {
+		t.Fatalf("pushover: %s %v", g[8].path, p)
+	}
+	if p = parts(t, g[9]); !bytes.Equal(p["attachment"], img) {
+		t.Fatalf("pushover image: %v", p)
 	}
 }
 

@@ -278,13 +278,92 @@ const KIND_LABEL: Record<string, string> = {
   sync_failed: 'Sync failed',
   lifecycle: 'When done',
 };
-const SINK_LABEL: Record<string, string> = { ntfy: 'ntfy', discord: 'Discord', telegram: 'Telegram', webhook: 'Webhook' };
+const SINK_LABEL: Record<string, string> = { ntfy: 'ntfy', discord: 'Discord', telegram: 'Telegram', pushover: 'Pushover', webhook: 'Webhook' };
+
+// How to get each kind of destination URL; picking one also sets the
+// input's placeholder.
+const ext = (url: string, label: string) => (
+  <a className="link" href={url} target="_blank" rel="noreferrer">
+    {label}
+  </a>
+);
+const SINK_GUIDES: { id: string; label: string; placeholder: string; steps: ReactNode[] }[] = [
+  {
+    id: 'ntfy',
+    label: 'ntfy',
+    placeholder: 'https://ntfy.sh/your-topic',
+    steps: [
+      <>Install the ntfy app on your phone, or open {ext('https://ntfy.sh/app', 'ntfy.sh/app')} in a browser.</>,
+      <>Subscribe to a topic with a name nobody could guess, like <span className="mono">aitk-7f3k9q</span>. Anyone who knows the name can read it.</>,
+      <>
+        Add <span className="mono">https://ntfy.sh/&lt;topic&gt;</span>. A server of your own: <span className="mono">ntfy+https://&lt;host&gt;/&lt;topic&gt;</span>, with an access token{' '}
+        <span className="mono">https://:&lt;token&gt;@&lt;host&gt;/&lt;topic&gt;</span>.
+      </>,
+    ],
+  },
+  {
+    id: 'discord',
+    label: 'Discord',
+    placeholder: 'https://discord.com/api/webhooks/…',
+    steps: [
+      <>In Discord, open the channel's settings, then Integrations › Webhooks › New Webhook.</>,
+      <>Click Copy Webhook URL and add it here.</>,
+    ],
+  },
+  {
+    id: 'telegram',
+    label: 'Telegram',
+    placeholder: 'telegram://<bot token>@<chat id>',
+    steps: [
+      <>
+        Message {ext('https://t.me/BotFather', '@BotFather')}, send <span className="mono">/newbot</span> and copy the token it gives you (<span className="mono">123456:ABC…</span>).
+      </>,
+      <>Send your new bot any message, or add it to a group.</>,
+      <>
+        Open <span className="mono">https://api.telegram.org/bot&lt;token&gt;/getUpdates</span> and copy the number after <span className="mono">"chat":{'{'}"id":</span>. A group's id starts with -.
+      </>,
+      <>
+        Add <span className="mono">telegram://&lt;token&gt;@&lt;chat id&gt;</span>.
+      </>,
+    ],
+  },
+  {
+    id: 'pushover',
+    label: 'Pushover',
+    placeholder: 'pushover://<api token>@<user key>',
+    steps: [
+      <>Install the Pushover app and sign in. Your User Key is at the top of {ext('https://pushover.net', 'pushover.net')}.</>,
+      <>
+        {ext('https://pushover.net/apps/build', 'Create an application')} (any name, e.g. AI Toolkit) and copy its API Token.
+      </>,
+      <>
+        Add <span className="mono">pushover://&lt;api token&gt;@&lt;user key&gt;</span>. Add <span className="mono">/&lt;device&gt;</span> to the end to reach one device only. Failed runs arrive at high priority.
+      </>,
+    ],
+  },
+  {
+    id: 'webhook',
+    label: 'Webhook',
+    placeholder: 'https://example.com/hook',
+    steps: [
+      <>
+        Any other <span className="mono">https://</span> URL gets a POST with JSON: <span className="mono">kind, level, title, body, url, job_id, job_name, at, server</span>, and{' '}
+        <span className="mono">image_jpeg_base64</span> when there is a sample grid.
+      </>,
+      <>
+        Start the URL with <span className="mono">webhook+</span> to get JSON from a URL that looks like ntfy or Discord.
+      </>,
+    ],
+  },
+];
+
 
 export function NotificationsSection() {
   const toast = useToast();
   const confirm = useConfirm();
   const [cfg, setCfg] = useState<NotifyConfig | null>(null);
   const [url, setUrl] = useState('');
+  const [guide, setGuide] = useState(SINK_GUIDES[0]);
   const [tests, setTests] = useState<Record<string, NotifyTest | 'busy'>>({});
   const [links, setLinks] = useState({ studio: '', pub: '', every: '15' });
   const load = useCallback(() => api.get<NotifyConfig>('/v1/notify').then(setCfg, toast.error), [toast]);
@@ -398,16 +477,28 @@ export function NotificationsSection() {
           )}
           <form onSubmit={add} className="stack" style={{ gap: 8, marginTop: 12 }}>
             <div className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
-              <input type="text" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://ntfy.sh/your-topic" aria-label="Destination URL" spellCheck={false} />
+              <input type="text" value={url} onChange={e => setUrl(e.target.value)} placeholder={guide.placeholder} aria-label="Destination URL" spellCheck={false} />
               <button className="btn btn-primary" type="submit" disabled={!url.trim()}>
                 <Plus size={14} /> Add
               </button>
             </div>
-            <div className="field-hint">
-              ntfy <span className="mono">https://ntfy.sh/topic</span> · Discord <span className="mono">https://discord.com/api/webhooks/…</span> · Telegram{' '}
-              <span className="mono">telegram://token@chat</span> · any other <span className="mono">https://</span> URL gets JSON.
-            </div>
           </form>
+          <div className="sink-guide">
+            <div className="field-label">How to set one up</div>
+            <div className="seg seg-text" role="radiogroup" aria-label="Destination type">
+              {SINK_GUIDES.map(g => (
+                <button key={g.id} type="button" role="radio" aria-checked={guide.id === g.id} className={guide.id === g.id ? 'on' : ''} onClick={() => setGuide(g)}>
+                  {g.label}
+                </button>
+              ))}
+            </div>
+            <ol className="sink-steps">
+              {guide.steps.map((s, i) => (
+                <li key={i}>{s}</li>
+              ))}
+            </ol>
+            <div className="field-hint">The URL holds its secret, so the server keeps it and shows it shortened.</div>
+          </div>
         </div>
 
         <div className="card">

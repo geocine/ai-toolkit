@@ -300,7 +300,7 @@ var Ops = []Op{
 		Params: []Param{opt("events", "NotifyKind[] | null", "body", "kinds to send; null sends every kind"), opt("public_url", "string", "body", "this server's public URL (links)"),
 			opt("studio_url", "string", "body", "studio base for tap-through links"), opt("sample_every_s", "number", "body", "min seconds between sample notifications per job")}},
 	{Group: "notify", Name: "addSink", Method: "POST", Path: "/v1/notify/sinks", Result: "NotifySink",
-		Doc:    "Add a sink: https://ntfy.sh/<topic> (ntfy+https://host/topic self-hosted), a Discord webhook URL, telegram://<bot token>@<chat id>, or any https URL (JSON webhook). Write-only.",
+		Doc:    "Add a sink: https://ntfy.sh/<topic> (ntfy+https://host/topic self-hosted), a Discord webhook URL, telegram://<bot token>@<chat id>, pushover://<api token>@<user key>[/<device>], or any https URL (JSON webhook). Write-only.",
 		Params: []Param{p("url", "string", "body", "")}},
 	{Group: "notify", Name: "deleteSink", Method: "DELETE", Path: "/v1/notify/sinks/{id}", Result: "null", Doc: "Remove a sink.",
 		Params: []Param{p("id", "string", "path", "")}},
@@ -493,7 +493,7 @@ type Lifecycle = {
   results: { job_id: string; job_name: string; safe: boolean; via: string; detail: string }[]; updated_at: string;
 };
 type NotifyKind = "started" | "resumed" | "sample" | "checkpoint" | "completed" | "failed" | "interrupted" | "lease_lost" | "sync_failed" | "lifecycle";
-type NotifySink = { id: string; kind: "ntfy" | "discord" | "telegram" | "webhook"; target: string; source: "env" | "api"; created_at: string };
+type NotifySink = { id: string; kind: "ntfy" | "discord" | "telegram" | "pushover" | "webhook"; target: string; source: "env" | "api"; created_at: string };
 type NotifyConfig = { sinks: NotifySink[]; events: NotifyKind[] | null; kinds: NotifyKind[]; public_url: string; studio_url: string; sample_every_s: number };
 type NotifyResult = { sink: string; kind: string; target: string; ok: boolean; detail: string };
 type Health = { ok: boolean; version: string; upstream_version: string; started_at: string };

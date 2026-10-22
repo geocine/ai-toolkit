@@ -408,6 +408,7 @@ Sinks (URLs hold their secret: write-only, shown redacted):
 | `https://ntfy.sh/<topic>`; self-hosted `ntfy+https://<host>/<topic>`; auth `https://:<token>@host/topic` or `user:pass@` | ntfy publish: title, click link, priority, tags; the image as an attachment |
 | `https://discord.com/api/webhooks/<id>/<token>` | an embed (title links to the run) with the image attached |
 | `telegram://<bot token>@<chat id>` | `sendMessage`, or `sendPhoto` with a caption |
+| `pushover://<api token>@<user key>`, optionally `/<device>` | a message with the link as its URL and the image attached; failures at high priority |
 | any other `https://...` (`webhook+` forces it) | JSON `{kind, level, title, body, url, job_id, job_name, at, server, image_jpeg_base64?}` |
 
 Links open the run in the studio (`<studio>/#/runs/<id>`) or, without one, in
@@ -418,7 +419,7 @@ the studio is `AITK_STUDIO_URL`, else `<public>/studio/` when this server
 serves it. Delivery is queued per sink and never blocks the server: 5
 attempts with backoff (honoring `Retry-After`) on network errors, 429 and 5xx.
 
-`NotifySink = {id, kind: ntfy|discord|telegram|webhook, target, source: env|api, created_at}`
+`NotifySink = {id, kind: ntfy|discord|telegram|pushover|webhook, target, source: env|api, created_at}`
 - `GET /v1/notify` → `{sinks: [NotifySink], events: [kind] | null, kinds: [kind], public_url, studio_url, sample_every_s}`
 - `PATCH /v1/notify {events?: [kind] | null, public_url?, studio_url?, sample_every_s?}` → same
 - `POST /v1/notify/sinks {url}` → 201 NotifySink (400 for an unknown URL form, 409 when already there)

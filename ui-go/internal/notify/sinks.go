@@ -11,7 +11,9 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,6 +26,7 @@ const (
 	SinkNtfy     = "ntfy"
 	SinkDiscord  = "discord"
 	SinkTelegram = "telegram"
+	SinkPushover = "pushover"
 	SinkWebhook  = "webhook"
 )
 
@@ -32,12 +35,18 @@ type parsed struct {
 	kind   string
 	target string // redacted, for display
 	u      *url.URL
-	// telegram
-	token, chat string
+	// telegram (token, chat) and pushover (token, user, device)
+	token, chat, user, device string
 }
 
 // telegramAPI is the Bot API base (tests point it at an httptest server).
 var telegramAPI = "https://api.telegram.org"
+
+// pushoverAPI is the message endpoint (tests point it at an httptest server).
+var pushoverAPI = "https://api.pushover.net/1/messages.json"
+
+// pushoverKey matches Pushover's API tokens and user/group keys.
+var pushoverKey = regexp.MustCompile(`^[A-Za-z0-9]{30}$`)
 
 var discordHosts = map[string]bool{"discord.com": true, "discordapp.com": true, "canary.discord.com": true,
 	"ptb.discord.com": true}
@@ -48,6 +57,7 @@ var discordHosts = map[string]bool{"discord.com": true, "discordapp.com": true, 
 //	                                             https://:tk_token@host/topic or user:pass@ for auth)
 //	https://discord.com/api/webhooks/<id>/<tok>  Discord webhook
 //	telegram://<bot token>@<chat id>             Telegram bot (sendMessage / sendPhoto)
+//	pushover://<api token>@<user key>[/<device>] Pushover (image as attachment)
 //	any other http(s) URL                        JSON webhook (webhook+https:// forces it)
 //
 // A "<kind>+" scheme prefix (ntfy+, discord+, webhook+) forces the kind.
@@ -67,6 +77,18 @@ func parseSink(raw string) (*parsed, error) {
 		}
 		return &parsed{kind: SinkTelegram, target: "telegram chat " + chat, token: token, chat: chat}, nil
 	}
+	if rest, ok := strings.CutPrefix(raw, "pushover://"); ok {
+		token, rest, _ := strings.Cut(rest, "@")
+		user, device, _ := strings.Cut(strings.TrimSuffix(rest, "/"), "/")
+		if !pushoverKey.MatchString(token) || !pushoverKey.MatchString(user) {
+			return nil, errors.New("pushover sink must be pushover://<api token>@<user key>, both 30 letters and digits")
+		}
+		target := "pushover user …" + tail(user, 4)
+		if device != "" {
+			target += " (" + device + ")"
+		}
+		return &parsed{kind: SinkPushover, target: target, token: token, user: user, device: device}, nil
+	}
 	forced := ""
 	for _, k := range []string{SinkNtfy, SinkDiscord, SinkWebhook} {
 		if rest, ok := strings.CutPrefix(raw, k+"+"); ok {
@@ -79,7 +101,7 @@ func parseSink(raw string) (*parsed, error) {
 		return nil, fmt.Errorf("not a URL: %v", err)
 	}
 	if u.Scheme != "http" && u.Scheme != "https" || u.Host == "" {
-		return nil, errors.New("sink URL must be http(s)://..., or telegram://<bot token>@<chat id>")
+		return nil, errors.New("sink URL must be http(s)://..., telegram://<bot token>@<chat id> or pushover://<api token>@<user key>")
 	}
 	host := strings.ToLower(u.Hostname())
 	kind := forced
@@ -232,6 +254,8 @@ func deliverOnce(ctx context.Context, s Sink, m Message) error {
 		return sendDiscord(ctx, p, m)
 	case SinkTelegram:
 		return sendTelegram(ctx, p, m)
+	case SinkPushover:
+		return sendPushover(ctx, p, m)
 	}
 	return sendWebhook(ctx, p, m)
 }
@@ -342,6 +366,57 @@ func sendTelegram(ctx context.Context, p *parsed, m Message) error {
 	if errors.As(err, &he) {
 		// the URL holds the bot token: keep it out of error text
 		he.body = strings.ReplaceAll(he.body, p.token, "<token>")
+	}
+	return err
+}
+
+// maxPushoverImage is Pushover's attachment limit; a bigger image is left off.
+const maxPushoverImage = 5 << 20
+
+// sendPushover posts a message with the link as Pushover's URL field and the
+// image as its attachment. Failures send at high priority, which sounds
+// through quiet hours.
+func sendPushover(ctx context.Context, p *parsed, m Message) error {
+	f := map[string]string{"token": p.token, "user": p.user, "title": clip(m.Title, 250),
+		"timestamp": strconv.FormatInt(m.At.Unix(), 10)}
+	msg := m.Body
+	if strings.HasPrefix(m.URL, "http://") || strings.HasPrefix(m.URL, "https://") {
+		f["url"], f["url_title"] = clip(m.URL, 512), "Open"
+	} else {
+		msg = text(m)
+	}
+	if strings.TrimSpace(msg) == "" {
+		msg = m.Title // Pushover rejects an empty message
+	}
+	f["message"] = clip(msg, 1024)
+	if m.Level == LevelError {
+		f["priority"] = "1"
+	}
+	if p.device != "" {
+		f["device"] = p.device
+	}
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	for k, v := range f {
+		mw.WriteField(k, v)
+	}
+	if len(m.Image) > 0 && len(m.Image) <= maxPushoverImage {
+		h := textproto.MIMEHeader{}
+		h.Set("Content-Disposition", `form-data; name="attachment"; filename="sample.jpg"`)
+		h.Set("Content-Type", "image/jpeg")
+		pw, _ := mw.CreatePart(h)
+		pw.Write(m.Image)
+	}
+	mw.Close()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, pushoverAPI, &buf)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	err = do(req)
+	var he *httpError
+	if errors.As(err, &he) {
+		he.body = strings.NewReplacer(p.token, "<token>", p.user, "<user>").Replace(he.body)
 	}
 	return err
 }
