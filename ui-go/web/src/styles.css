@@ -210,9 +210,13 @@ h3 {
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  position: sticky;
+  /* fixed, not sticky: a sticky one wobbles under fractional display scaling */
+  position: fixed;
   top: 0;
+  left: 0;
+  width: 220px;
   height: 100vh;
+  overflow-y: auto;
   padding: 12px 10px;
   gap: 4px;
 }
@@ -344,6 +348,7 @@ h3 {
 }
 
 .main {
+  grid-column: 2;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -1498,6 +1503,9 @@ input[type='range'] {
 @media (max-width: 767px) {
   .shell {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .main {
+    grid-column: auto;
   }
   .sidebar {
     display: none;
