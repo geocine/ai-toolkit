@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { KeyRound, Plus, Save, Trash2 } from 'lucide-react';
 import { api, fmtAgo, fmtTime } from '../api';
 import type { ApiKey, Items, Settings } from '../types';
-import { CopyButton, Empty, Field, Loading, Modal, Mono, Section, Spinner, usePoll, useConfirm, useToast } from '../ui';
+import { Callout, CopyButton, Empty, Field, Loading, Modal, Mono, Section, Spinner, usePoll, useConfirm, useToast } from '../ui';
 
 export function SettingsPage() {
   return (
@@ -10,7 +10,7 @@ export function SettingsPage() {
       <div className="page-head">
         <div>
           <h1 className="page-title">Settings</h1>
-          <div className="page-sub">Server folders, job defaults and API keys.</div>
+          <div className="page-sub">Server folders, job defaults and API keys</div>
         </div>
       </div>
       <ServerSettings />
@@ -66,7 +66,7 @@ function ServerSettings() {
   );
   return (
     <Section title="Server">
-      <form className="card" onSubmit={save}>
+      <form className="card" onSubmit={save} style={{ padding: 20 }}>
         <div className="form-grid">
           <Field label="Training folder">{text('training_folder')}</Field>
           <Field label="Datasets folder">{text('datasets_folder')}</Field>
@@ -81,13 +81,13 @@ function ServerSettings() {
             <input type="number" min={0} value={String(form.max_auto_resumes_default ?? '')} onChange={e => setForm({ ...form, max_auto_resumes_default: e.target.value })} />
           </Field>
         </div>
-        <label className="check" style={{ marginTop: 14 }}>
+        <label className="check" style={{ marginTop: 18 }}>
           <input type="checkbox" checked={!!form.auto_resume_default} onChange={e => setForm({ ...form, auto_resume_default: e.target.checked })} />
           Auto-resume interrupted jobs by default
         </label>
         <div className="form-actions">
           <button className="btn btn-primary" disabled={saving}>
-            {saving ? <Spinner size={12} /> : <Save size={12} />} Save
+            {saving ? <Spinner size={14} /> : <Save size={14} />} Save settings
           </button>
         </div>
       </form>
@@ -133,16 +133,16 @@ function Keys() {
 
   return (
     <Section title="API keys">
-      <form className="row-wrap" onSubmit={create} style={{ marginBottom: 12 }}>
-        <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Key name, e.g. studio-laptop" style={{ maxWidth: 280 }} />
-        <button className="btn btn-primary" disabled={creating || !name.trim()}>
-          {creating ? <Spinner size={12} /> : <Plus size={12} />} Create key
+      <form className="row" onSubmit={create} style={{ marginBottom: 12, maxWidth: 440 }}>
+        <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Key name, e.g. studio-laptop" aria-label="Key name" />
+        <button className="btn" disabled={creating || !name.trim()}>
+          {creating ? <Spinner size={14} /> : <Plus size={14} />} Create key
         </button>
       </form>
       {!keys ? (
         <Loading />
       ) : keys.length === 0 ? (
-        <Empty icon={<KeyRound size={28} />} title="No API keys">
+        <Empty icon={<KeyRound size={18} />} title="No API keys">
           Give each app or agent its own key so it can be revoked on its own. Once a key exists, the server always requires a token.
         </Empty>
       ) : (
@@ -152,25 +152,25 @@ function Keys() {
               <tr>
                 <th>Name</th>
                 <th>Prefix</th>
-                <th>Created</th>
+                <th className="hide-sm">Created</th>
                 <th>Last used</th>
-                <th />
+                <th className="actions" />
               </tr>
             </thead>
             <tbody>
               {keys.map(k => (
                 <tr key={k.id}>
-                  <td style={{ fontWeight: 700 }}>{k.name}</td>
+                  <td className="cell-title">{k.name}</td>
                   <td>
                     <Mono>{k.prefix}…</Mono>
                   </td>
-                  <td className="small muted nowrap" title={fmtTime(k.created_at)}>
+                  <td className="small muted nowrap hide-sm" title={fmtTime(k.created_at)}>
                     {fmtAgo(k.created_at)}
                   </td>
-                  <td className="small muted nowrap">{k.last_used_at ? fmtAgo(k.last_used_at) : 'never'}</td>
+                  <td className="small muted nowrap">{k.last_used_at ? fmtAgo(k.last_used_at) : 'Never'}</td>
                   <td className="actions">
-                    <button className="btn btn-sm btn-ghost-danger" onClick={() => revoke(k)}>
-                      <Trash2 size={12} /> Revoke
+                    <button className="btn btn-sm btn-destructive" onClick={() => revoke(k)}>
+                      <Trash2 size={14} /> Revoke
                     </button>
                   </td>
                 </tr>
@@ -182,7 +182,7 @@ function Keys() {
       {secret && (
         <Modal title={`Key "${secret.name}"`} onClose={() => setSecret(null)}>
           <div className="modal-body stack">
-            <div className="warn-text small">Copy it now: it is not shown again.</div>
+            <Callout tone="warn">Copy it now: it is not shown again.</Callout>
             <div className="secret">
               <span className="grow">{secret.key}</span>
               <CopyButton text={secret.key} />

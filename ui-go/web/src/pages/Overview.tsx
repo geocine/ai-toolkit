@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { Cpu, HardDrive, MonitorCog, Pause, Play } from 'lucide-react';
+import { ArrowRight, Cpu, HardDrive, Layers, ListChecks, MonitorCog, Pause, Play } from 'lucide-react';
 import { api, fmtBytes } from '../api';
 import { href } from '../router';
 import type { Items, Job, Queue, SystemInfo } from '../types';
-import { Bar, Empty, Loading, Section, StateBadge, usePoll, useToast } from '../ui';
+import { Bar, Empty, Loading, Section, StateBadge, sentence, usePoll, useToast } from '../ui';
 import { JobRow, JobTableHead } from './Jobs';
 
 const ACTIVE = new Set(['queued', 'starting', 'running', 'stopping']);
@@ -35,12 +35,22 @@ export function Overview() {
     }
   };
 
+  const gb = (mb: number) => (mb / 1024).toFixed(1);
+
   return (
     <>
       <div className="page-head">
         <div>
           <h1 className="page-title">Overview</h1>
-          <div className="page-sub mono">{sys?.toolkit_root}</div>
+          <div className="page-sub ellipsis">
+            {sys ? (
+              <>
+                Machine, queues and jobs for <span className="mono">{sys.toolkit_root}</span>
+              </>
+            ) : (
+              'Machine, queues and jobs on this server'
+            )}
+          </div>
         </div>
       </div>
 
@@ -51,8 +61,8 @@ export function Overview() {
           <div className="grid grid-3">
             {sys.gpus.length === 0 && (
               <div className="card">
-                <div className="stat-label row">
-                  <MonitorCog size={12} /> GPU
+                <div className="stat-label">
+                  <MonitorCog size={14} /> GPU
                 </div>
                 <div className="muted small" style={{ marginTop: 8 }}>
                   {sys.has_nvidia_smi ? 'No GPUs reported' : 'nvidia-smi not available'}
@@ -61,67 +71,73 @@ export function Overview() {
             )}
             {sys.gpus.map(g => (
               <div className="card" key={g.index}>
-                <div className="stat-label row">
-                  <MonitorCog size={12} /> GPU {g.index}
+                <div className="stat-label">
+                  <MonitorCog size={14} /> GPU {g.index}
                 </div>
-                <div className="ellipsis" style={{ marginTop: 6, fontWeight: 700 }} title={g.name}>
+                <div className="stat-name ellipsis" title={g.name}>
                   {g.name ?? 'GPU'}
                 </div>
-                <div className="stat-row">
-                  <span className="muted">Load</span>
-                  <span className="mono">{g.utilization.gpu}%</span>
+                <div className="metric">
+                  <div className="metric-row">
+                    <span>Load</span>
+                    <span>{g.utilization.gpu}%</span>
+                  </div>
+                  <Bar value={g.utilization.gpu} max={100} neutral />
                 </div>
-                <Bar value={g.utilization.gpu} max={100} />
-                <div className="stat-row">
-                  <span className="muted">VRAM</span>
-                  <span className="mono">
-                    {(g.memory.used / 1024).toFixed(1)} / {(g.memory.total / 1024).toFixed(1)} GB
-                  </span>
+                <div className="metric">
+                  <div className="metric-row">
+                    <span>VRAM</span>
+                    <span>
+                      {gb(g.memory.used)} / {gb(g.memory.total)} GB
+                    </span>
+                  </div>
+                  <Bar value={g.memory.used} max={g.memory.total} neutral />
                 </div>
-                <Bar value={g.memory.used} max={g.memory.total} />
-                <div className="stat-row">
-                  <span className="muted">Temp · Power</span>
-                  <span className="mono">
-                    {g.temperature}°C · {Math.round(g.power.draw)}/{Math.round(g.power.limit)} W
+                <div className="metric metric-row">
+                  <span>Temp · power</span>
+                  <span>
+                    {g.temperature}°C · {Math.round(g.power.draw)} / {Math.round(g.power.limit)} W
                   </span>
                 </div>
               </div>
             ))}
             <div className="card">
-              <div className="stat-label row">
-                <Cpu size={12} /> CPU
+              <div className="stat-label">
+                <Cpu size={14} /> CPU
               </div>
-              <div className="ellipsis" style={{ marginTop: 6, fontWeight: 700 }} title={sys.cpu.name}>
+              <div className="stat-name ellipsis" title={sys.cpu.name}>
                 {sys.cpu.name || 'CPU'}
               </div>
-              <div className="stat-row">
-                <span className="muted">Load · {sys.cpu.cores} cores</span>
-                <span className="mono">{Math.round(sys.cpu.currentLoad)}%</span>
+              <div className="metric">
+                <div className="metric-row">
+                  <span>Load · {sys.cpu.cores} cores</span>
+                  <span>{Math.round(sys.cpu.currentLoad)}%</span>
+                </div>
+                <Bar value={sys.cpu.currentLoad} max={100} neutral />
               </div>
-              <Bar value={sys.cpu.currentLoad} max={100} />
-              <div className="stat-row">
-                <span className="muted">Memory</span>
-                <span className="mono">
-                  {((sys.cpu.totalMemory - sys.cpu.availableMemory) / 1024).toFixed(1)} / {(sys.cpu.totalMemory / 1024).toFixed(1)} GB
-                </span>
+              <div className="metric">
+                <div className="metric-row">
+                  <span>Memory</span>
+                  <span>
+                    {gb(sys.cpu.totalMemory - sys.cpu.availableMemory)} / {gb(sys.cpu.totalMemory)} GB
+                  </span>
+                </div>
+                <Bar value={sys.cpu.totalMemory - sys.cpu.availableMemory} max={sys.cpu.totalMemory} neutral />
               </div>
-              <Bar value={sys.cpu.totalMemory - sys.cpu.availableMemory} max={sys.cpu.totalMemory} />
             </div>
             <div className="card">
-              <div className="stat-label row">
-                <HardDrive size={12} /> Disks
+              <div className="stat-label">
+                <HardDrive size={14} /> Disks
               </div>
-              <div className="stack" style={{ marginTop: 8, gap: 10 }}>
-                {sys.disks.map(d => (
-                  <div key={d.name}>
-                    <div className="stat-row" style={{ marginTop: 0 }}>
-                      <span className="muted">{d.name}</span>
-                      <span className="mono">{fmtBytes(d.free)} free</span>
-                    </div>
-                    <Bar value={d.total - d.free} max={d.total} label={d.path} />
+              {sys.disks.map(d => (
+                <div className="metric metric-tight" key={d.name}>
+                  <div className="metric-row">
+                    <span title={d.path}>{sentence(d.name)}</span>
+                    <span>{fmtBytes(d.free)} free</span>
                   </div>
-                ))}
-              </div>
+                  <Bar value={d.total - d.free} max={d.total} label={d.path} neutral />
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -131,7 +147,9 @@ export function Overview() {
         {!queues ? (
           <Loading />
         ) : queues.length === 0 ? (
-          <Empty title="No queues yet">A GPU queue is created the first time a job is started on it.</Empty>
+          <Empty icon={<Layers size={18} />} title="No queues yet">
+            A GPU queue is created the first time a job is started on it.
+          </Empty>
         ) : (
           <div className="table-wrap">
             <table>
@@ -140,8 +158,8 @@ export function Overview() {
                   <th>GPUs</th>
                   <th>State</th>
                   <th>Current job</th>
-                  <th>Waiting</th>
-                  <th />
+                  <th className="hide-sm">Waiting</th>
+                  <th className="actions" />
                 </tr>
               </thead>
               <tbody>
@@ -149,15 +167,23 @@ export function Overview() {
                   const cur = jobs?.find(j => j.id === q.current_job_id);
                   return (
                     <tr key={q.gpu_ids}>
-                      <td className="mono">{q.gpu_ids}</td>
+                      <td className="cell-title nowrap">GPU {q.gpu_ids}</td>
                       <td>
                         <StateBadge state={q.running ? 'running' : 'stopped'} />
                       </td>
-                      <td>{cur ? <a href={href('jobs', cur.id)}>{cur.name}</a> : <span className="dim">—</span>}</td>
-                      <td className="mono">{q.queued}</td>
+                      <td>
+                        {cur ? (
+                          <a className="link" href={href('jobs', cur.id)}>
+                            {cur.name}
+                          </a>
+                        ) : (
+                          <span className="dim">—</span>
+                        )}
+                      </td>
+                      <td className="hide-sm">{q.queued}</td>
                       <td className="actions">
-                        <button className="btn btn-sm" onClick={() => toggleQueue(q)}>
-                          {q.running ? <Pause size={12} /> : <Play size={12} />} {q.running ? 'Stop' : 'Start'}
+                        <button className="btn btn-sm" onClick={() => toggleQueue(q)} title={q.running ? 'Stop queue' : 'Start queue'}>
+                          {q.running ? <Pause size={14} /> : <Play size={14} />} <span className="hide-sm">{q.running ? 'Stop queue' : 'Start queue'}</span>
                         </button>
                       </td>
                     </tr>
@@ -169,11 +195,20 @@ export function Overview() {
         )}
       </Section>
 
-      <Section title="Active jobs" actions={<a className="btn btn-sm" href={href('jobs')}>All jobs</a>}>
+      <Section
+        title="Active jobs"
+        actions={
+          <a className="btn btn-sm btn-ghost" href={href('jobs')}>
+            All jobs <ArrowRight size={14} />
+          </a>
+        }
+      >
         {!jobs ? (
           <Loading />
         ) : active.length === 0 ? (
-          <Empty title="Nothing is training">Queued and running jobs show up here.</Empty>
+          <Empty icon={<ListChecks size={18} />} title="Nothing is training">
+            Queued and running jobs show up here.
+          </Empty>
         ) : (
           <JobTable jobs={active} />
         )}
@@ -191,7 +226,7 @@ export function Overview() {
 function JobTable({ jobs }: { jobs: Job[] }) {
   return (
     <div className="table-wrap">
-      <table>
+      <table className="fixed">
         <JobTableHead />
         <tbody>
           {jobs.map(j => (

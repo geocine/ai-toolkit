@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, Cloud, DownloadCloud, Plus, RefreshCw, Trash2, XCircle } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Cloud, DownloadCloud, Plus, RefreshCw, Trash2, UploadCloud, Waypoints, XCircle } from 'lucide-react';
 import { api, fmtAgo, fmtBytes, fmtTime } from '../api';
 import { go, href } from '../router';
 import type { Items, Job, PortableJob, Remote, RemoteKind, Upload } from '../types';
-import { Bar, Empty, Field, Loading, Modal, Mono, Section, Spinner, StateBadge, usePoll, useConfirm, useToast } from '../ui';
+import { Bar, Callout, Empty, Field, Loading, Modal, Mono, Section, Spinner, StateBadge, usePoll, useConfirm, useToast } from '../ui';
 
 export function Remotes() {
   const toast = useToast();
@@ -52,19 +52,30 @@ export function Remotes() {
       <div className="page-head">
         <div>
           <h1 className="page-title">Remotes</h1>
-          <div className="page-sub">Storage outside this machine: checkpoint uploads and portable jobs.</div>
+          <div className="page-sub">Storage outside this machine for checkpoint uploads and portable jobs</div>
         </div>
-        <button className="btn btn-primary" onClick={() => setCreating(true)}>
-          <Plus size={12} /> Add remote
-        </button>
+        <div className="page-actions">
+          <button className="btn btn-primary" onClick={() => setCreating(true)}>
+            <Plus size={14} /> Add remote
+          </button>
+        </div>
       </div>
 
       <Section title="Configured">
         {!remotes ? (
           <Loading />
         ) : remotes.length === 0 ? (
-          <Empty icon={<Cloud size={28} />} title="No remotes">
-            Add Cloudflare R2 / S3, a private Hugging Face repo or a shared folder, or set AITK_R2_* / AITK_HF_REPO in the server's environment.
+          <Empty
+            icon={<Cloud size={18} />}
+            title="No remotes"
+            action={
+              <button className="btn btn-sm" onClick={() => setCreating(true)}>
+                <Plus size={14} /> Add remote
+              </button>
+            }
+          >
+            Add S3-compatible storage (Cloudflare R2, AWS S3, MinIO, B2...), a private Hugging Face repo or a shared folder, or set{' '}
+            <span className="mono">AITK_S3_*</span> / <span className="mono">AITK_HF_REPO</span> in the server's environment.
           </Empty>
         ) : (
           <div className="table-wrap">
@@ -73,9 +84,9 @@ export function Remotes() {
                 <tr>
                   <th>Name</th>
                   <th>Kind</th>
-                  <th>Target</th>
+                  <th className="hide-sm">Target</th>
                   <th>Check</th>
-                  <th />
+                  <th className="actions" />
                 </tr>
               </thead>
               <tbody>
@@ -83,31 +94,33 @@ export function Remotes() {
                   const t = tests[r.id];
                   return (
                     <tr key={r.id}>
-                      <td style={{ fontWeight: 700 }}>{r.name}</td>
+                      <td className="cell-title">{r.name}</td>
                       <td>
-                        <span className="badge">{r.kind}</span>
+                        <span className="tag">{KIND_LABEL[r.kind] ?? r.kind}</span>
                       </td>
-                      <td className="mono small ellipsis" style={{ maxWidth: 360 }}>
-                        {target(r)}
+                      <td className="hide-sm">
+                        <div className="mono ellipsis muted" style={{ maxWidth: 360 }} title={target(r)}>
+                          {target(r)}
+                        </div>
                       </td>
                       <td className="small">
                         {t === 'busy' ? (
-                          <Spinner size={12} />
+                          <Spinner size={14} />
                         ) : t ? (
-                          <span className={t.ok ? 'ok-text row' : 'danger-text row'} title={t.detail}>
-                            {t.ok ? <CheckCircle2 size={12} /> : <XCircle size={12} />} {t.ok ? 'ok' : t.detail}
+                          <span className={t.ok ? 'ok-text row' : 'danger-text row'} style={{ gap: 6 }} title={t.detail}>
+                            {t.ok ? <CheckCircle2 size={14} /> : <XCircle size={14} />} <span className="ellipsis" style={{ maxWidth: 260 }}>{t.ok ? 'Reachable' : t.detail}</span>
                           </span>
                         ) : (
                           <span className="dim">—</span>
                         )}
                       </td>
                       <td className="actions">
-                        <div className="row" style={{ justifyContent: 'flex-end' }}>
+                        <div className="row end" style={{ gap: 4 }}>
                           <button className="btn btn-sm" onClick={() => test(r)}>
                             Test
                           </button>
-                          <button className="icon-btn" onClick={() => del(r)} aria-label="Remove" title="Remove">
-                            <Trash2 size={12} />
+                          <button className="icon-btn danger" onClick={() => del(r)} aria-label="Remove" title="Remove">
+                            <Trash2 size={14} />
                           </button>
                         </div>
                       </td>
@@ -124,7 +137,7 @@ export function Remotes() {
         <Section
           title="Portable jobs"
           actions={
-            <select value={browse} onChange={e => setBrowse(e.target.value)} style={{ width: 200 }}>
+            <select className="sm" value={browse} onChange={e => setBrowse(e.target.value)} style={{ width: 180 }} aria-label="Remote">
               {remotes.map(r => (
                 <option key={r.id} value={r.id}>
                   {r.name}
@@ -141,7 +154,9 @@ export function Remotes() {
         {!uploads ? (
           <Loading />
         ) : uploads.length === 0 ? (
-          <Empty title="No uploads">Checkpoint uploads (manual or a job's auto-upload policy) show up here.</Empty>
+          <Empty icon={<UploadCloud size={18} />} title="No uploads">
+            Checkpoint uploads, manual or from a job's auto-upload policy, show up here.
+          </Empty>
         ) : (
           <div className="table-wrap">
             <table>
@@ -150,21 +165,21 @@ export function Remotes() {
                   <th>File</th>
                   <th>Remote</th>
                   <th>State</th>
-                  <th style={{ minWidth: 140 }}>Progress</th>
-                  <th>Updated</th>
-                  <th />
+                  <th>Progress</th>
+                  <th className="hide-sm">Updated</th>
+                  <th className="actions" />
                 </tr>
               </thead>
               <tbody>
                 {uploads.map(u => (
                   <tr key={u.id}>
                     <td>
-                      <div className="mono small ellipsis" style={{ maxWidth: 380 }} title={u.path}>
+                      <div className="mono ellipsis" style={{ maxWidth: 380 }} title={u.path}>
                         {u.path.split(/[\\/]/).pop()}
                       </div>
                       {u.error && <div className="danger-text small">{u.error}</div>}
                       {u.url && (
-                        <div className="dim small mono ellipsis" style={{ maxWidth: 380 }} title={u.url}>
+                        <div className="dim mono ellipsis" style={{ maxWidth: 380, fontSize: 12 }} title={u.url}>
                           {u.url}
                         </div>
                       )}
@@ -174,12 +189,14 @@ export function Remotes() {
                       <StateBadge state={u.state === 'failed' ? 'failed' : u.state === 'running' ? 'running' : u.state === 'done' ? 'completed' : 'queued'} />
                     </td>
                     <td>
-                      <div className="mono small">
-                        {fmtBytes(u.bytes_done)} / {fmtBytes(u.bytes)}
+                      <div className="cell-progress">
+                        <Bar value={u.bytes_done} max={u.bytes} />
+                        <span className="num">
+                          {fmtBytes(u.bytes_done)} / {fmtBytes(u.bytes)}
+                        </span>
                       </div>
-                      <Bar value={u.bytes_done} max={u.bytes} />
                     </td>
-                    <td className="small muted nowrap">{fmtAgo(u.updated_at)}</td>
+                    <td className="small muted nowrap hide-sm">{fmtAgo(u.updated_at)}</td>
                     <td className="actions">
                       {(u.state === 'failed' || u.state === 'done') && (
                         <button
@@ -191,7 +208,7 @@ export function Remotes() {
                             }, toast.error)
                           }
                         >
-                          <RefreshCw size={12} /> {u.state === 'failed' ? 'Retry' : 'Upload again'}
+                          <RefreshCw size={14} /> {u.state === 'failed' ? 'Retry' : 'Upload again'}
                         </button>
                       )}
                     </td>
@@ -215,6 +232,8 @@ export function Remotes() {
     </>
   );
 }
+
+const KIND_LABEL: Record<string, string> = { s3: 'S3', hf: 'Hugging Face', fs: 'Folder' };
 
 const target = (r: Remote) => {
   const c = r.config ?? {};
@@ -282,9 +301,14 @@ function PortableJobs({ remote }: { remote: string }) {
     }
   };
 
-  if (error) return <div className="danger-text small">{error}</div>;
+  if (error) return <Callout tone="danger">{error}</Callout>;
   if (!items) return <Loading />;
-  if (items.length === 0) return <Empty title="No portable jobs on this remote">Jobs with this remote as their sync remote appear here.</Empty>;
+  if (items.length === 0)
+    return (
+      <Empty icon={<Waypoints size={18} />} title="No portable jobs on this remote">
+        Jobs with this remote as their sync remote appear here.
+      </Empty>
+    );
   return (
     <div className="table-wrap">
       <table>
@@ -293,9 +317,9 @@ function PortableJobs({ remote }: { remote: string }) {
             <th>Job</th>
             <th>State</th>
             <th>Step</th>
-            <th>Lease</th>
-            <th>Updated</th>
-            <th />
+            <th className="hide-sm">Lease</th>
+            <th className="hide-sm">Updated</th>
+            <th className="actions" />
           </tr>
         </thead>
         <tbody>
@@ -304,31 +328,31 @@ function PortableJobs({ remote }: { remote: string }) {
             return (
               <tr key={pj.name}>
                 <td>
-                  <div style={{ fontWeight: 700 }}>{pj.name}</div>
-                  <div className="dim small">{pj.datasets.join(', ')}</div>
+                  <div className="cell-title">{pj.name}</div>
+                  <div className="cell-sub">{pj.datasets.join(', ')}</div>
                 </td>
                 <td>
                   <StateBadge state={pj.state} />
                 </td>
-                <td className="mono">{pj.step}</td>
-                <td className="small">
+                <td>{pj.step}</td>
+                <td className="small hide-sm">
                   {held ? (
                     <>
                       <Mono>{pj.lease!.node_label}</Mono> <span className="muted">until {fmtTime(pj.lease!.expires_at)}</span>
                     </>
                   ) : (
-                    <span className="muted">free</span>
+                    <span className="muted">Free</span>
                   )}
                 </td>
-                <td className="small muted nowrap">{fmtAgo(pj.updated_at)}</td>
+                <td className="small muted nowrap hide-sm">{fmtAgo(pj.updated_at)}</td>
                 <td className="actions">
                   {local.has(pj.name) ? (
-                    <a className="btn btn-sm" href={href('jobs', local.get(pj.name)!)}>
-                      On this server
+                    <a className="btn btn-sm btn-ghost" href={href('jobs', local.get(pj.name)!)}>
+                      On this server <ArrowRight size={14} />
                     </a>
                   ) : (
                     <button className="btn btn-sm" onClick={() => doImport(pj)} disabled={!!importing}>
-                      {importing === pj.name ? <Spinner size={12} /> : <DownloadCloud size={12} />} Import & start
+                      {importing === pj.name ? <Spinner size={14} /> : <DownloadCloud size={14} />} Import and start
                     </button>
                   )}
                 </td>
@@ -344,7 +368,7 @@ function PortableJobs({ remote }: { remote: string }) {
 function CreateRemote({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const toast = useToast();
   const [kind, setKind] = useState<RemoteKind>('s3');
-  const [name, setName] = useState('r2');
+  const [name, setName] = useState('s3');
   const [f, setF] = useState<Record<string, string>>({ region: 'auto', repo_type: 'model' });
   const [pathStyle, setPathStyle] = useState(false);
   const [priv, setPriv] = useState(true);
@@ -390,10 +414,10 @@ function CreateRemote({ onClose, onCreated }: { onClose: () => void; onCreated: 
                 onChange={e => {
                   const k = e.target.value as RemoteKind;
                   setKind(k);
-                  setName(k === 's3' ? 'r2' : k === 'hf' ? 'hf' : 'shared');
+                  setName(k === 's3' ? 's3' : k === 'hf' ? 'hf' : 'shared');
                 }}
               >
-                <option value="s3">Cloudflare R2 / S3</option>
+                <option value="s3">S3-compatible storage</option>
                 <option value="hf">Hugging Face repo</option>
                 <option value="fs">Shared folder</option>
               </select>
@@ -401,7 +425,7 @@ function CreateRemote({ onClose, onCreated }: { onClose: () => void; onCreated: 
           </div>
           {kind === 's3' && (
             <>
-              <Field label="Endpoint" hint="https://<account>.r2.cloudflarestorage.com">
+              <Field label="Endpoint" hint="https://<account>.r2.cloudflarestorage.com or https://s3.<region>.amazonaws.com">
                 <input type="text" value={f.endpoint ?? ''} onChange={set('endpoint')} required />
               </Field>
               <div className="form-grid">
@@ -436,8 +460,8 @@ function CreateRemote({ onClose, onCreated }: { onClose: () => void; onCreated: 
                 </Field>
                 <Field label="Repo type">
                   <select value={f.repo_type} onChange={set('repo_type')}>
-                    <option value="model">model</option>
-                    <option value="dataset">dataset</option>
+                    <option value="model">Model</option>
+                    <option value="dataset">Dataset</option>
                   </select>
                 </Field>
                 <Field label="Path in repo">
@@ -457,14 +481,14 @@ function CreateRemote({ onClose, onCreated }: { onClose: () => void; onCreated: 
               <input type="text" value={f.path ?? ''} onChange={set('path')} required />
             </Field>
           )}
-          <div className="dim small">Credentials are stored on the server and never shown again.</div>
+          <div className="dim xs">Credentials are stored on the server and never shown again.</div>
         </div>
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onClose}>
             Cancel
           </button>
           <button className="btn btn-primary" disabled={busy}>
-            {busy ? <Spinner size={12} /> : <Plus size={12} />} Add
+            {busy ? <Spinner size={14} /> : <Plus size={14} />} Add remote
           </button>
         </div>
       </form>

@@ -1,6 +1,6 @@
-// Small shared components, styled by styles.css (zinc design system).
+// Small shared components, styled by styles.css (see ../DESIGN.md).
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, CheckCircle2, Copy, Info, Loader2, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Copy, Inbox, Info, Loader2, Monitor, Moon, Sun, X } from 'lucide-react';
 import { ApiError } from './api';
 import type { JobState } from './types';
 
@@ -35,8 +35,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           <div key={t.id} className={`toast toast-${t.kind}`}>
             {t.kind === 'error' ? <AlertTriangle size={14} /> : t.kind === 'success' ? <CheckCircle2 size={14} /> : <Info size={14} />}
             <span>{t.text}</span>
-            <button className="icon-btn ghost" onClick={() => setToasts(x => x.filter(y => y.id !== t.id))} aria-label="Dismiss">
-              <X size={12} />
+            <button className="icon-btn sm" onClick={() => setToasts(x => x.filter(y => y.id !== t.id))} aria-label="Dismiss">
+              <X size={14} />
             </button>
           </div>
         ))}
@@ -89,8 +89,8 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
       <div className={wide ? 'modal modal-wide' : 'modal'} role="dialog" aria-label={title}>
         <div className="modal-head">
           <h3>{title}</h3>
-          <button className="icon-btn ghost" onClick={onClose} aria-label="Close">
-            <X size={14} />
+          <button className="icon-btn" onClick={onClose} aria-label="Close">
+            <X size={16} />
           </button>
         </div>
         {children}
@@ -99,34 +99,91 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
   );
 }
 
+// ---- theme ----
+
+export type Theme = 'system' | 'light' | 'dark';
+const THEME_KEY = 'aitk-theme';
+
+const readTheme = (): Theme => {
+  try {
+    const v = localStorage.getItem(THEME_KEY);
+    return v === 'light' || v === 'dark' ? v : 'system';
+  } catch {
+    return 'system';
+  }
+};
+
+const applyTheme = (t: Theme) => {
+  const root = document.documentElement;
+  if (t === 'system') delete root.dataset.theme;
+  else root.dataset.theme = t;
+};
+
+export function useTheme(): [Theme, (t: Theme) => void] {
+  const [theme, setTheme] = useState<Theme>(readTheme);
+  useEffect(() => applyTheme(theme), [theme]);
+  const set = useCallback((t: Theme) => {
+    setTheme(t);
+    try {
+      if (t === 'system') localStorage.removeItem(THEME_KEY);
+      else localStorage.setItem(THEME_KEY, t);
+    } catch {
+      // private mode or blocked storage: the choice lasts for this page only
+    }
+  }, []);
+  return [theme, set];
+}
+
+const THEMES: { id: Theme; label: string; icon: ReactNode }[] = [
+  { id: 'system', label: 'System theme', icon: <Monitor size={13} /> },
+  { id: 'light', label: 'Light theme', icon: <Sun size={13} /> },
+  { id: 'dark', label: 'Dark theme', icon: <Moon size={13} /> },
+];
+
+export function ThemeToggle() {
+  const [theme, setTheme] = useTheme();
+  return (
+    <div className="seg" role="radiogroup" aria-label="Theme">
+      {THEMES.map(t => (
+        <button key={t.id} type="button" role="radio" aria-checked={theme === t.id} className={theme === t.id ? 'on' : ''} onClick={() => setTheme(t.id)} title={t.label} aria-label={t.label}>
+          {t.icon}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ---- bits ----
 
 const stateClass: Record<string, string> = {
-  running: 'ok',
-  starting: 'ok',
-  completed: 'done',
-  queued: 'warn',
-  stopping: 'warn',
-  interrupted: 'warn',
-  failed: 'bad',
-  stopped: 'muted',
-  draft: 'muted',
-  done: 'done',
-  error: 'bad',
+  running: 'running',
+  starting: 'running',
+  completed: 'completed',
+  done: 'completed',
+  queued: 'queued',
+  stopping: 'interrupted',
+  interrupted: 'interrupted',
+  failed: 'failed',
+  error: 'failed',
+  stopped: 'stopped',
+  draft: 'draft',
 };
 
-export const StateBadge = ({ state }: { state: JobState | string }) => (
-  <span className={`badge badge-${stateClass[state] ?? 'muted'}`}>
-    {(state === 'running' || state === 'starting') && <span className="pulse" />}
-    {state}
+export const sentence = (s: string) => (s ? s[0].toUpperCase() + s.slice(1).replace(/_/g, ' ') : s);
+
+/** A job or upload state: an 8px dot and a label, or a soft badge in page headers. */
+export const StateBadge = ({ state, badge }: { state: JobState | string; badge?: boolean }) => (
+  <span className={`${badge ? 'badge' : 'status'} s-${stateClass[state] ?? 'draft'}`}>
+    <span className="dot" />
+    {sentence(state)}
   </span>
 );
 
-export const Bar = ({ value, max, label }: { value: number; max: number; label?: string }) => {
+export const Bar = ({ value, max, label, neutral }: { value: number; max: number; label?: string; neutral?: boolean }) => {
   const pct = max > 0 ? Math.max(0, Math.min(100, (value / max) * 100)) : 0;
   return (
-    <div className="bar" title={label ?? `${pct.toFixed(0)}%`}>
-      <div className="bar-fill" style={{ width: `${pct}%` }} />
+    <div className={neutral ? 'progress neutral' : 'progress'} title={label ?? `${pct.toFixed(0)}%`} role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
+      <div className="progress-fill" style={{ width: `${pct}%` }} />
     </div>
   );
 };
@@ -139,11 +196,19 @@ export const Loading = ({ what }: { what?: string }) => (
   </div>
 );
 
-export const Empty = ({ icon, title, children }: { icon?: ReactNode; title: string; children?: ReactNode }) => (
+export const Empty = ({ icon, title, children, action }: { icon?: ReactNode; title: string; children?: ReactNode; action?: ReactNode }) => (
   <div className="empty">
-    {icon}
+    <div className="empty-icon">{icon ?? <Inbox size={18} />}</div>
     <div className="empty-title">{title}</div>
     {children && <div className="empty-body">{children}</div>}
+    {action && <div className="empty-action">{action}</div>}
+  </div>
+);
+
+export const Callout = ({ tone = 'info', children }: { tone?: 'info' | 'warn' | 'danger'; children: ReactNode }) => (
+  <div className={`callout ${tone}`} role={tone === 'info' ? undefined : 'alert'}>
+    {tone === 'info' ? <Info size={14} /> : <AlertTriangle size={14} />}
+    <div className="grow">{children}</div>
   </div>
 );
 
@@ -171,16 +236,16 @@ export const Mono = ({ children, title }: { children: ReactNode; title?: string 
   </span>
 );
 
-export function CopyButton({ text }: { text: string }) {
+export function CopyButton({ text, bordered }: { text: string; bordered?: boolean }) {
   const toast = useToast();
   return (
     <button
-      className="icon-btn"
+      className={bordered ? 'icon-btn bordered' : 'icon-btn'}
       onClick={() => navigator.clipboard?.writeText(text).then(() => toast.success('Copied'), () => toast.info(text))}
       aria-label="Copy"
       title="Copy"
     >
-      <Copy size={12} />
+      <Copy size={14} />
     </button>
   );
 }

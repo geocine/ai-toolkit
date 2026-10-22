@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 type Point = { step: number; value: number };
 
@@ -24,9 +24,18 @@ const niceTicks = (min: number, max: number, count: number) => {
 const fmt = (v: number) => (Math.abs(v) >= 1000 || (Math.abs(v) < 0.001 && v !== 0) ? v.toExponential(1) : Number(v.toPrecision(3)).toString());
 
 export function LossChart({ points, smoothing, log }: { points: Point[]; smoothing: number; log: boolean }) {
-  const W = 800;
-  const H = 280;
-  const pad = { l: 52, r: 12, t: 12, b: 26 };
+  // draw at the real pixel size so strokes and labels are never stretched
+  const box = useRef<HTMLDivElement>(null);
+  const [W, setW] = useState(800);
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) => setW(Math.max(200, Math.round(e.contentRect.width))));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const H = 300;
+  const pad = { l: 48, r: 8, t: 8, b: 24 };
   const tf = (v: number) => (log ? Math.log10(Math.max(v, 1e-12)) : v);
 
   const view = useMemo(() => {
@@ -54,33 +63,34 @@ export function LossChart({ points, smoothing, log }: { points: Point[]; smoothi
     return {
       raw: path(pts),
       smooth: path(smooth),
-      xTicks: niceTicks(x0, x1, 6).map(v => ({ v, x: sx(v) })),
+      xTicks: niceTicks(x0, x1, Math.max(3, Math.round(W / 140))).map(v => ({ v, x: sx(v) })),
       yTicks: niceTicks(y0, y1, 5).map(v => ({ v, y: sy(v) })),
       last: smooth[smooth.length - 1],
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [points, smoothing, log]);
+  }, [points, smoothing, log, W]);
 
-  if (!view) return null;
   return (
-    <svg className="chart" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label="Loss over steps">
+    <div className="chart-wrap" ref={box}>
+      {view && (
+    <svg className="chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Loss over steps">
       {view.yTicks.map(t => (
         <g key={'y' + t.v}>
           <line className="grid-line" x1={pad.l} x2={W - pad.r} y1={t.y} y2={t.y} />
-          <text className="tick" x={pad.l - 6} y={t.y + 3} textAnchor="end">
+          <text className="tick" x={pad.l - 10} y={t.y + 4} textAnchor="end">
             {log ? fmt(Math.pow(10, t.v)) : fmt(t.v)}
           </text>
         </g>
       ))}
       {view.xTicks.map(t => (
-        <text key={'x' + t.v} className="tick" x={t.x} y={H - 8} textAnchor="middle">
+        <text key={'x' + t.v} className="tick" x={t.x} y={H - 4} textAnchor="middle">
           {Math.round(t.v)}
         </text>
       ))}
-      <line className="axis" x1={pad.l} x2={pad.l} y1={pad.t} y2={H - pad.b} />
-      <line className="axis" x1={pad.l} x2={W - pad.r} y1={H - pad.b} y2={H - pad.b} />
-      <path className="raw" d={view.raw} vectorEffect="non-scaling-stroke" />
-      <path className="smooth" d={view.smooth} vectorEffect="non-scaling-stroke" />
+      <path className="raw" d={view.raw} />
+      <path className="smooth" d={view.smooth} />
     </svg>
+      )}
+    </div>
   );
 }

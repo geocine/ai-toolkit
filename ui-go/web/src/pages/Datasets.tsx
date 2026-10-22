@@ -33,16 +33,26 @@ export function Datasets() {
       <div className="page-head">
         <div>
           <h1 className="page-title">Datasets</h1>
-          <div className="page-sub">{items ? plural(items.length, 'dataset') : ''}</div>
+          <div className="page-sub">{items ? `${plural(items.length, 'dataset')} of images and captions` : 'Images and captions to train on'}</div>
         </div>
-        <button className="btn btn-primary" onClick={() => setCreating(true)}>
-          <Plus size={12} /> New dataset
-        </button>
+        <div className="page-actions">
+          <button className="btn btn-primary" onClick={() => setCreating(true)}>
+            <Plus size={14} /> New dataset
+          </button>
+        </div>
       </div>
       {!items ? (
         <Loading what="datasets" />
       ) : items.length === 0 ? (
-        <Empty icon={<Database size={28} />} title="No datasets">
+        <Empty
+          icon={<Database size={18} />}
+          title="No datasets"
+          action={
+            <button className="btn btn-sm" onClick={() => setCreating(true)}>
+              <Plus size={14} /> New dataset
+            </button>
+          }
+        >
           Create one, then upload images and captions (or a zip).
         </Empty>
       ) : (
@@ -53,21 +63,21 @@ export function Datasets() {
                 <th>Name</th>
                 <th>Images</th>
                 <th>Captions</th>
-                <th>Size</th>
-                <th>Modified</th>
+                <th className="hide-sm">Size</th>
+                <th className="hide-sm">Modified</th>
               </tr>
             </thead>
             <tbody>
               {items.map(d => (
                 <tr key={d.name} className="clickable" onClick={() => go('datasets', d.name)}>
-                  <td style={{ fontWeight: 700 }}>{d.name}</td>
-                  <td className="mono">{d.images}</td>
-                  <td className="mono">
+                  <td className="cell-title">{d.name}</td>
+                  <td>{d.images}</td>
+                  <td className="nowrap">
                     {d.captions}
-                    {d.images > 0 && d.captions < d.images && <span className="warn-text"> · {d.images - d.captions} missing</span>}
+                    {d.images > 0 && d.captions < d.images && <span className="warn-text small"> · {d.images - d.captions} missing</span>}
                   </td>
-                  <td className="mono nowrap">{fmtBytes(d.size)}</td>
-                  <td className="small muted nowrap">{fmtAgo(d.modified)}</td>
+                  <td className="small muted nowrap hide-sm">{fmtBytes(d.size)}</td>
+                  <td className="small muted nowrap hide-sm">{fmtAgo(d.modified)}</td>
                 </tr>
               ))}
             </tbody>
@@ -87,7 +97,7 @@ export function Datasets() {
                 Cancel
               </button>
               <button className="btn btn-primary" disabled={busy || !name.trim()}>
-                {busy ? <Spinner size={12} /> : <Plus size={12} />} Create
+                {busy ? <Spinner size={14} /> : <Plus size={14} />} Create
               </button>
             </div>
           </form>
