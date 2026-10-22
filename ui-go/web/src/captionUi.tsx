@@ -259,3 +259,95 @@ export function CaptionRun({ job, onChange }: { job: Job; onChange: () => void }
     </div>
   );
 }
+
+
+// ---- caption check (GET /v1/datasets/{name}/captions/check, POST .../captions/fix) ----
+
+type CaptionFlag = 'missing' | 'no_trigger' | 'trigger_case' | 'truncated' | 'hedging' | 'preamble' | 'duplicate';
+type CaptionCheck = { items: { file: string; caption: string | null; flags: CaptionFlag[] }[]; total: number; flagged: number; counts: Partial<Record<CaptionFlag, number>> };
+
+const FLAG_LABEL: Record<CaptionFlag, string> = {
+  missing: 'missing',
+  no_trigger: 'without the trigger',
+  trigger_case: 'misspelled trigger',
+  truncated: 'cut off',
+  hedging: 'unsure',
+  preamble: 'preamble',
+  duplicate: 'duplicate',
+};
+
+/**
+ * Checks the dataset's captions for the trigger word and reports what to look
+ * at; onFilter narrows the grid to the flagged files (null: show all).
+ */
+export function CaptionCheckBar({ dataset, version, onFilter, onFixed }: { dataset: string; version: string; onFilter: (files: Set<string> | null) => void; onFixed: () => void }) {
+  const toast = useToast();
+  const key = `aitk.console.trigger.${dataset}`;
+  const [trigger, setTrigger] = useState(() => {
+    try {
+      return localStorage.getItem(key) ?? '';
+    } catch {
+      return '';
+    }
+  });
+  const [res, setRes] = useState<CaptionCheck | null>(null);
+  const [filtered, setFiltered] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const base = `/v1/datasets/${encodeURIComponent(dataset)}/captions`;
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(key, trigger);
+    } catch {
+      /* storage blocked */
+    }
+    const t = setTimeout(() => api.get<CaptionCheck>(`${base}/check?trigger=${encodeURIComponent(trigger.trim())}`).then(setRes, () => {}), 300);
+    return () => clearTimeout(t);
+  }, [base, key, trigger, version]);
+
+  const flaggedFiles = useMemo(() => new Set((res?.items ?? []).filter(i => i.flags.length).map(i => i.file)), [res]);
+  useEffect(() => onFilter(filtered ? flaggedFiles : null), [filtered, flaggedFiles]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const triggerIssues = (res?.counts.no_trigger ?? 0) + (res?.counts.trigger_case ?? 0);
+  const fix = async () => {
+    setBusy(true);
+    try {
+      const r = await api.post<{ changes: unknown[] }>(`${base}/fix`, { ops: [{ op: 'fix_trigger_case' }, { op: 'ensure_trigger' }], trigger: trigger.trim(), apply: true });
+      toast.success(`Fixed ${r.changes.length} caption${r.changes.length === 1 ? '' : 's'}`);
+      onFixed();
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="caption-check">
+      <input type="text" className="caption-check-trigger" value={trigger} onChange={e => setTrigger(e.target.value)} placeholder="Trigger word" aria-label="Trigger word" spellCheck={false} />
+      {res && (
+        <span className="small muted">
+          {res.flagged === 0
+            ? 'Captions look fine.'
+            : (Object.entries(res.counts) as [CaptionFlag, number][]).map(([f, n], i) => (
+                <span key={f}>
+                  {i > 0 && ' · '}
+                  {n} {FLAG_LABEL[f]}
+                </span>
+              ))}
+        </span>
+      )}
+      <span className="grow" />
+      {res && res.flagged > 0 && (
+        <button className="btn btn-sm" onClick={() => setFiltered(f => !f)}>
+          {filtered ? 'Show all' : `Show ${res.flagged} flagged`}
+        </button>
+      )}
+      {triggerIssues > 0 && (
+        <button className="btn btn-sm" onClick={fix} disabled={busy} title="[Trigger] and wrong-case trigger words become exact; captions without one get [trigger] first">
+          {busy ? <Spinner /> : null} Fix the trigger in {triggerIssues}
+        </button>
+      )}
+    </div>
+  );
+}

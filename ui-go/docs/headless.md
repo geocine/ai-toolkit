@@ -126,6 +126,15 @@ with step 0 and no trainer progress yet).
 - `PUT /v1/datasets/{name}/files/{file...}` body = the file's bytes → item (creates or replaces it; may contain `/`; hidden names refused)
 - `POST /v1/datasets/{name}/import {url, file?, caption?}` → `{added, files: [..], skipped: [..]}`: the server downloads an http(s) URL; a zip is unpacked like `/archive`, an image/video is saved as `file` (default: from Content-Disposition or the URL, the extension sniffed from the bytes when missing) with `caption` written beside it
 - `POST /v1/datasets/{name}/caption {captioner?, model?, prompt?, recaption?, overrides?, gpu_ids?}` → 201 Job (type `caption`, ref the dataset folder) plus `warnings`, already queued:
+- `GET /v1/datasets/{name}/captions/check?trigger=` → `{items: [{file, caption, flags}], total, flagged, counts}`:
+  flags are `missing`, `no_trigger` (no `[trigger]` and no trigger word: the trainer
+  prepends the word itself), `trigger_case` (`[Trigger]`, or `Jihan` for `jihan`: matched
+  exactly, so not replaced), `truncated` (ends on a dangling word or comma: raise
+  `caption.max_new_tokens`), `hedging`, `preamble`, `duplicate`
+- `POST /v1/datasets/{name}/captions/fix {ops, trigger?, files?, apply?}` → `{changes: [{file, before, after}], applied}`:
+  ops run in order: `ensure_trigger {text?}` (puts `[trigger]` first where no trigger is),
+  `fix_trigger_case`, `replace {find, with, regex?}`, `fill_missing {caption}`, `strip`.
+  Without `apply: true` it only previews.
   one of upstream's captioner models writes a `.txt` next to each file as it goes, skipping files
   that have one unless `recaption`. The config is upstream's default caption job with the
   captioner selected the way its dataset page does (`handleCaptionerTypeChange`); `overrides`

@@ -137,6 +137,13 @@ var Ops = []Op{
 			opt("caption", "string", "body", "caption to write next to a single image")}},
 	{Group: "datasets", Name: "delete", Method: "DELETE", Path: "/v1/datasets/{name}", Result: "null", Doc: "Delete a dataset.",
 		Params: []Param{p("name", "string", "path", "")}},
+	{Group: "datasets", Name: "checkCaptions", Method: "GET", Path: "/v1/datasets/{name}/captions/check", Result: "CaptionCheck",
+		Doc:    "Every caption with what is wrong with it: missing, no_trigger (the trainer prepends the trigger), trigger_case ([Trigger], or Jihan for jihan: not matched exactly), truncated (ends mid-sentence: raise caption.max_new_tokens), hedging, preamble, duplicate. Run before training.",
+		Params: []Param{p("name", "string", "path", ""), opt("trigger", "string", "query", "the run's trigger word")}},
+	{Group: "datasets", Name: "fixCaptions", Method: "POST", Path: "/v1/datasets/{name}/captions/fix", Result: "CaptionFix",
+		Doc: "Bulk-edit captions. Ops run in order on every caption (or only files): ensure_trigger {text?} puts [trigger] (or text) first when no trigger is there, fix_trigger_case, replace {find, with, regex?}, fill_missing {caption}, strip (preambles, extra spaces). Returns before/after; writes only with apply: true, so call it once to preview.",
+		Params: []Param{p("name", "string", "path", ""), p("ops", "CaptionFixOp[]", "body", ""), opt("trigger", "string", "body", "the run's trigger word"),
+			opt("files", "string[]", "body", "only these files (e.g. the flagged ones)"), opt("apply", "boolean", "body", "write the changes (default false: preview)")}},
 	{Group: "datasets", Name: "caption", Method: "POST", Path: "/v1/datasets/{name}/caption", Result: "Job & { warnings: string[] }",
 		Doc: "Caption the dataset's files with one of upstream's captioner models (templates.captioners): creates a job of type caption and queues it. Captions land next to each file as it goes (.txt); files that already have one are skipped unless recaption. Follow it with jobs.get or datasets.get (caption_job). 409 while one is running for the dataset.",
 		Params: []Param{p("name", "string", "path", ""), opt("captioner", "string", "body", "name from templates.captioners (default: upstream's default, Qwen3OmniCaptioner)"),
@@ -452,6 +459,10 @@ type Dataset = { name: string; path: string; images: number; captions: number; s
 type DatasetItem = { file: string; caption: string | null; size: number; width?: number; height?: number };
 type DatasetDetail = Dataset & { items: DatasetItem[]; next_cursor: string | null; caption_job: Job | null };
 type CaptionOption = { value: unknown; label: string };
+type CaptionFlag = "missing" | "no_trigger" | "trigger_case" | "truncated" | "hedging" | "preamble" | "duplicate";
+type CaptionCheck = { items: { file: string; caption: string | null; flags: CaptionFlag[] }[]; total: number; flagged: number; counts: Partial<Record<CaptionFlag, number>>; trigger: string };
+type CaptionFixOp = { op: "ensure_trigger" | "fix_trigger_case" | "replace" | "fill_missing" | "strip"; text?: string; find?: string; with?: string; regex?: boolean; caption?: string };
+type CaptionFix = { changes: { file: string; before: string | null; after: string }[]; applied: boolean };
 type Captioner = { name: string; label: string; group: string; defaults: Record<string, unknown>; model_options: CaptionOption[]; model2_options: CaptionOption[]; caption_prompts: Record<string, string>; additional_sections: string[]; supports_loras: boolean; cloud_loras: unknown[]; no_compile: boolean; min_new_tokens: number | null; multi_line_prompts: boolean; python_accepted: boolean };
 type CaptionCatalog = { captioners: Captioner[]; default_config: JobConfig; options: Record<string, CaptionOption[]> };
 type FileRoot = "datasets" | "training" | "data" | "models";

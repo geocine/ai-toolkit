@@ -245,6 +245,9 @@ export interface Dataset { name: string; path: string; images: number; captions:
 export interface DatasetItem { file: string; caption: string | null; size: number; width?: number; height?: number }
 export interface DatasetDetail extends Dataset { items: DatasetItem[]; next_cursor: string | null; caption_job: Job | null }
 export interface CaptionOption { value: unknown; label: string }
+export type CaptionFlag = 'missing' | 'no_trigger' | 'trigger_case' | 'truncated' | 'hedging' | 'preamble' | 'duplicate';
+export interface CaptionCheck { items: { file: string; caption: string | null; flags: CaptionFlag[] }[]; total: number; flagged: number; counts: Partial<Record<CaptionFlag, number>>; trigger: string }
+export interface CaptionFix { changes: { file: string; before: string | null; after: string }[]; applied: boolean }
 export interface Captioner {
   name: string; label: string; group: string; defaults: Record<string, unknown>;
   model_options: CaptionOption[]; caption_prompts: Record<string, string>; additional_sections: string[];
