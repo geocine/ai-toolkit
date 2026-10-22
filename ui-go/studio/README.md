@@ -45,6 +45,13 @@ npm run dev        # http://localhost:5174
 npm run build      # static files in dist/ — host anywhere (any static host, a bucket, file server)
 ```
 
+The server itself serves a build at `/studio/` when `ui-go/studio/dist` exists
+(the Docker image builds it), so one URL works from a phone:
+`https://<pod>-8675.proxy.runpod.net/studio/`, with that same URL as the
+server's base URL (prefilled) and no CORS setup. The build carries a web app
+manifest and an app-shell service worker (`public/sw.js`, which never caches
+the API), so "Add to Home Screen" installs it.
+
 In development, add a server with the base URL `/aitk`: the dev server
 proxies it to `AITK_API` (default `http://127.0.0.1:8675`), so no CORS setup is
 needed.
