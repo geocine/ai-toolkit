@@ -1654,3 +1654,232 @@ table.fixed .cell-title {
   scrollbar-width: thin;
   scrollbar-color: var(--border-strong) transparent;
 }
+
+/* ---- run bundles ---- */
+
+button.link {
+  border: 0;
+  padding: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+button.link.mono {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.seg.seg-text button {
+  width: auto;
+  height: 26px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+.seg.seg-text button.on {
+  color: var(--text);
+}
+.field .seg {
+  align-self: flex-start;
+}
+
+.tabs.tabs-tight {
+  margin: -4px 0 16px;
+}
+
+.import .drop {
+  margin-bottom: 0;
+  flex-direction: column;
+  padding: 24px 16px;
+}
+.import .drop span {
+  max-width: 300px;
+}
+
+.transfer,
+.task-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.transfer {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg);
+}
+td .task-progress {
+  min-width: 160px;
+}
+
+.bundle-brief {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg);
+  color: var(--text);
+}
+.import .bundle-brief + .form-grid,
+.import .transfer + .bundle-brief {
+  margin-top: 0;
+}
+.import .transfer {
+  margin-bottom: 16px;
+}
+.import-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  color: var(--text);
+}
+.import-form .check {
+  grid-column: 1 / -1;
+  height: auto;
+}
+input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.pick-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.pick {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 0;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--ease);
+}
+.pick + .pick {
+  border-top: 1px solid var(--border);
+}
+.pick:hover {
+  background: var(--surface-2);
+}
+
+.export .form-grid {
+  color: var(--text);
+}
+.export b {
+  color: var(--text);
+  font-weight: 500;
+}
+.export-push {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  color: var(--text);
+}
+
+@media (max-width: 767px) {
+  .import-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---- when done, notifications ---- */
+
+.life-notice {
+  --c: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  margin-bottom: 20px;
+  border: 1px solid color-mix(in srgb, var(--c) 28%, var(--border));
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--c) var(--soft), var(--surface));
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  transition: background-color var(--ease);
+}
+.life-notice:hover {
+  background: color-mix(in srgb, var(--c) calc(var(--soft) + 6%), var(--surface));
+}
+.life-notice > svg:first-child {
+  color: var(--c);
+  flex: none;
+}
+.life-notice.warn {
+  --c: var(--warn);
+}
+.life-notice.compact {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+}
+.countdown {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.countdown-time {
+  font-size: 32px;
+  line-height: 40px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.life-line {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 14px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.life-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
+}
+.life-grid > .check {
+  align-self: center;
+}
+.sink-list {
+  display: flex;
+  flex-direction: column;
+}
+.sink-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+}
+.sink-row + .sink-row {
+  border-top: 1px solid var(--border);
+}
+.kinds {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr));
+  gap: 8px 16px;
+}
+@media (max-width: 767px) {
+  .sink-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .countdown .row-wrap .btn {
+    flex: 1 1 auto;
+  }
+}

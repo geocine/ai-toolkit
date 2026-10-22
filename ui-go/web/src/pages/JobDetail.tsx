@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Camera, ChevronRight, Download, FileX, Hash, History, Image as ImageIcon, Octagon, Package, Play, RefreshCw, Save, Square, Trash2, UploadCloud } from 'lucide-react';
-import { api, fileUrl, fmtAgo, fmtBytes, fmtTime, imgUrl, plural, qs, streamEvents, type AitkEvent } from '../api';
+import { Activity, Camera, ChevronRight, Download, FileArchive, FileX, Hash, History, Image as ImageIcon, Octagon, Package, Play, RefreshCw, Save, Square, Trash2, UploadCloud } from 'lucide-react';
+import { api, fmtAgo, fmtBytes, fmtTime, imgUrl, plural, qs, signedDownload, streamEvents, trainingFilePath, type AitkEvent } from '../api';
+import { ExportDialog } from '../bundleUi';
 import { LossChart } from '../LossChart';
 import { go, href } from '../router';
 import type { Attempt, Checkpoint, Items, Job, LogChunk, LossSeries, Remote, Sample, SyncStatus } from '../types';
@@ -32,6 +33,7 @@ export function JobDetail({ id }: { id: string }) {
   const [tab, setTab] = useState<Tab>('overview');
   const [live, setLive] = useState(false);
   const [busy, setBusy] = useState('');
+  const [exporting, setExporting] = useState(false);
   // bumped by events so tabs refetch only what changed
   const [ver, setVer] = useState({ checkpoints: 0, samples: 0, attempts: 0, sync: 0 });
   const [log, setLog] = useState({ text: '', end: 0, loaded: false });
@@ -203,6 +205,9 @@ export function JobDetail({ id }: { id: string }) {
               <Octagon size={14} /> Kill
             </button>
           )}
+          <button className="btn" onClick={() => setExporting(true)}>
+            <FileArchive size={14} /> Export
+          </button>
           {!active && (
             <button className="btn btn-destructive" onClick={del}>
               <Trash2 size={14} /> Delete
@@ -244,9 +249,13 @@ export function JobDetail({ id }: { id: string }) {
       {tab === 'checkpoints' && <CheckpointsTab job={job} ver={ver.checkpoints} />}
       {tab === 'attempts' && <AttemptsTab job={job} ver={ver.attempts} />}
       {tab === 'config' && <ConfigTab job={job} />}
+      {exporting && <ExportDialog job={job} onClose={() => setExporting(false)} />}
     </>
   );
 }
+
+/** A checkpoint through a signed link: streamed to disk by the browser, never held in memory. */
+const downloadCheckpoint = (job: Job, name: string) => signedDownload(trainingFilePath(`${job.name}/${name}`));
 
 // ---------------------------------------------------------------- overview
 
@@ -338,9 +347,9 @@ function OverviewTab({ job, onChange, syncVer }: { job: Job; onChange: (j: Job) 
           <dt>Checkpoint</dt>
           <dd>
             {job.latest_checkpoint ? (
-              <a className="mono" href={fileUrl(job.latest_checkpoint.path)} download>
+              <button className="link mono" onClick={() => downloadCheckpoint(job, job.latest_checkpoint!.name).catch(toast.error)}>
                 {job.latest_checkpoint.name}
-              </a>
+              </button>
             ) : (
               <span className="dim">None yet</span>
             )}
@@ -731,9 +740,9 @@ function CheckpointsTab({ job, ver }: { job: Job; ver: number }) {
                         ))}
                       </select>
                     )}
-                    <a className="btn btn-sm" href={fileUrl(c.path)} download>
+                    <button className="btn btn-sm" onClick={() => downloadCheckpoint(job, c.name).catch(toast.error)}>
                       <Download size={14} /> Download
-                    </a>
+                    </button>
                   </div>
                 </td>
               </tr>

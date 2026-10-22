@@ -58,6 +58,7 @@ export async function call<T>(s: Server, method: string, path: string, body?: un
 
 export const get = <T,>(s: Server, path: string) => call<T>(s, 'GET', path);
 export const post = <T,>(s: Server, path: string, body?: unknown) => call<T>(s, 'POST', path, body ?? {});
+export const del = <T,>(s: Server, path: string) => call<T>(s, 'DELETE', path);
 
 /** Multipart upload with progress (fetch has no upload progress). */
 export function upload<T>(s: Server, path: string, files: File[], onProgress: (done: number, total: number) => void): Promise<T> {
@@ -83,18 +84,69 @@ export function upload<T>(s: Server, path: string, files: File[], onProgress: (d
   });
 }
 
-/** Downloads with the bearer token (plain links cannot send it). */
-export async function download(s: Server, path: string, filename: string): Promise<void> {
-  const res = await fetch(url(s, path), { headers: headers(s) });
-  if (!res.ok) return fail(res);
-  const blob = await res.blob();
+export interface SignedLink { url: string; path: string; expires_at: string }
+
+/**
+ * Downloads through a signed link (POST /v1/links): the browser fetches the
+ * file itself and streams it to disk, so multi-GB checkpoints and bundles
+ * never sit in memory. `path` is a server path with its query, e.g.
+ * /v1/files/content?root=training&path=...&download=1.
+ */
+export async function signedDownload(s: Server, path: string): Promise<void> {
+  const link = await post<SignedLink>(s, '/v1/links', { path });
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
+  // base + the relative path works through the dev proxy and behind path prefixes
+  a.href = url(s, link.path);
+  a.rel = 'noopener';
+  a.download = '';
   document.body.appendChild(a);
   a.click();
   a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 30_000);
+}
+
+/** A checkpoint (or any file in the training folder) as an attachment. */
+export const trainingFilePath = (rel: string) => `/v1/files/content?root=training&path=${encodeURIComponent(rel)}&download=1`;
+
+/** PUT of raw bytes with upload progress, for chunked uploads. */
+export function putBytes<T>(
+  s: Server,
+  path: string,
+  body: Blob,
+  headers: Record<string, string>,
+  onProgress: (loaded: number) => void,
+  signal?: AbortSignal,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', url(s, path));
+    if (s.token) xhr.setRequestHeader('Authorization', `Bearer ${s.token}`);
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+    xhr.upload.onprogress = e => onProgress(e.loaded);
+    const onAbort = () => xhr.abort();
+    signal?.addEventListener('abort', onAbort);
+    const done = () => signal?.removeEventListener('abort', onAbort);
+    xhr.onabort = () => {
+      done();
+      reject(new DOMException('aborted', 'AbortError'));
+    };
+    xhr.onerror = () => {
+      done();
+      reject(new ApiError(0, 'network', 'upload interrupted: network error'));
+    };
+    xhr.onload = () => {
+      done();
+      let b: any = null;
+      try {
+        b = JSON.parse(xhr.responseText);
+      } catch {
+        /* empty */
+      }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(b as T);
+      else reject(new ApiError(xhr.status, b?.error?.code ?? 'http_' + xhr.status, b?.error?.message ?? xhr.statusText));
+    };
+    xhr.send(body);
+  });
 }
 
 /** Public media URL (the server serves /api/img without a token, for <img>). */
@@ -200,3 +252,20 @@ export interface Health { ok: boolean; version: string; upstream_version: string
 export interface SystemInfo { gpus: { index: number; name: string; memory?: { total: number; used: number } }[]; toolkit_root: string }
 export interface LossSeries { keys: string[]; key: string; points: { step: number; value: number }[] }
 export interface Items<T> { items: T[] }
+
+// run bundles (docs/headless.md, Run bundles; docs/bundle-format.md)
+export type TaskState = 'queued' | 'running' | 'done' | 'failed';
+export type TaskPhase = '' | 'downloading' | 'reading' | 'restoring' | 'building' | 'uploading';
+export interface BundleTask {
+  id: string; kind: 'import' | 'push'; state: TaskState; phase: TaskPhase; bytes: number; bytes_done: number;
+  job_id: string | null; job_name: string | null; dataset: string | null; source: string; ref: string | null;
+  remote: string | null; key: string | null; url: string | null; upload_id: string | null;
+  skipped: string[] | null; warnings: string[] | null; error: { code: string; message: string } | null;
+  created_at: string; updated_at: string;
+}
+export interface BundleUpload { id: string; filename: string; size: number; received: number; complete: boolean; chunk_size: number; created_at: string; updated_at: string; expires_at: string }
+export interface BundleSummary {
+  format: number; name: string; step: number; total_steps: number | null; size: number; sha256?: string; created_at: string;
+  images: number; datasets: string[] | null; base_model?: string; arch?: string; checkpoints: string[] | null; optimizer: boolean; server_version: string;
+}
+export interface LibraryBundle { id: string; key: string; size: number; modified: string; summary: BundleSummary | null }

@@ -5,7 +5,8 @@ export type Route =
   | { page: 'runs' }
   | { page: 'run'; id: string }
   | { page: 'new' }
-  | { page: 'presets' }
+  | { page: 'presets'; tab?: 'data' }
+  | { page: 'lifecycle' }
   | { page: 'servers' };
 
 export function parse(hash: string): Route {
@@ -16,7 +17,9 @@ export function parse(hash: string): Route {
     case 'new':
       return { page: 'new' };
     case 'presets':
-      return { page: 'presets' };
+      return parts[1] === 'data' ? { page: 'presets', tab: 'data' } : { page: 'presets' };
+    case 'lifecycle':
+      return { page: 'lifecycle' };
     case 'servers':
       return { page: 'servers' };
   }
@@ -24,7 +27,9 @@ export function parse(hash: string): Route {
 }
 
 export function href(r: Route): string {
-  return r.page === 'run' ? `#/runs/${encodeURIComponent(r.id)}` : `#/${r.page}`;
+  if (r.page === 'run') return `#/runs/${encodeURIComponent(r.id)}`;
+  if (r.page === 'presets' && r.tab) return `#/presets/${r.tab}`;
+  return `#/${r.page}`;
 }
 
 export function go(r: Route) {

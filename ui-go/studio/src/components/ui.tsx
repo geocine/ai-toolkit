@@ -1,4 +1,4 @@
-import { CircleAlert, Info, Server as ServerIcon, TriangleAlert } from 'lucide-react';
+import { CircleAlert, CircleCheck, Info, Server as ServerIcon, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { JobState, Server } from '../lib/api';
 import { href } from '../lib/route';
@@ -64,7 +64,7 @@ export function NeedServer({ title }: { title?: string }) {
 }
 
 export function Callout({ kind = 'info', children }: { kind?: 'info' | 'warn' | 'danger' | 'ok'; children: ReactNode }) {
-  const Icon = kind === 'danger' ? CircleAlert : kind === 'warn' ? TriangleAlert : Info;
+  const Icon = kind === 'danger' ? CircleAlert : kind === 'warn' ? TriangleAlert : kind === 'ok' ? CircleCheck : Info;
   return (
     <div className={`callout callout-${kind}`} role={kind === 'danger' ? 'alert' : undefined}>
       <Icon className="callout-icon" aria-hidden />
@@ -136,11 +136,11 @@ export function useLoad<T>(server: Server | null, fn: (s: Server) => Promise<T>,
   return { data, error, loading, reload, setData };
 }
 
-export function Progress({ value, max }: { value: number; max: number | null }) {
+export function Progress({ value, max, indeterminate }: { value: number; max: number | null; indeterminate?: boolean }) {
   const pct = max ? Math.min(100, (value / max) * 100) : 0;
   return (
-    <div className="progress" role="progressbar" aria-valuenow={value} aria-valuemax={max ?? undefined}>
-      <div className="progress-fill" style={{ width: `${pct}%` }} />
+    <div className={indeterminate ? 'progress is-indeterminate' : 'progress'} role="progressbar" aria-valuenow={indeterminate ? undefined : value} aria-valuemax={max ?? undefined}>
+      <div className="progress-fill" style={indeterminate ? undefined : { width: `${pct}%` }} />
     </div>
   );
 }
