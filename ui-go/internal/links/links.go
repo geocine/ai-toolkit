@@ -78,7 +78,7 @@ func Reset() {
 
 // targets are what a link may point at: downloads only.
 var (
-	exactTargets  = []string{"/v1/files/content"}
+	exactTargets  = []string{"/v1/files/content", "/v1/bundles/content"}
 	prefixTargets = []string{"/api/img/", "/api/files/", "/api/audio/art/"}
 	bundleTarget  = regexp.MustCompile(`^/v1/jobs/[^/]+/bundle$`)
 )
@@ -102,7 +102,7 @@ func Allowed(escapedPath string) bool {
 var ErrPath = errors.New("path must be a server path such as /v1/files/content?root=training&path=...")
 
 // ErrTarget: the path is not something a link can point at.
-var ErrTarget = errors.New("links can only point at GET /v1/files/content, GET /v1/jobs/{id}/bundle and the /api/img|files|audio/art media routes")
+var ErrTarget = errors.New("links can only point at GET /v1/files/content, GET /v1/jobs/{id}/bundle, GET /v1/bundles/content and the /api/img|files|audio/art media routes")
 
 func mac(k []byte, escapedPath string, q url.Values) string {
 	h := hmac.New(sha256.New, k)

@@ -1,9 +1,9 @@
-import { ArrowRight, Archive, FileArchive, Pause, Play, Trash2, Upload, X } from 'lucide-react';
+import { ArrowRight, Archive, Download, FileArchive, Pause, Play, Trash2, Upload, X } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import { Confirm } from '../components/Dialog';
 import { LoadDialog, TaskProgress, type LoadSource } from '../components/LoadDialog';
 import { Empty, ErrorNote, Progress, Section, StatePill, useLoad } from '../components/ui';
-import { del, get, type BundleTask, type BundleUpload, type Items, type LibraryBundle, type Remote, type Server } from '../lib/api';
+import { del, get, signedDownload, type BundleTask, type BundleUpload, type Items, type LibraryBundle, type Remote, type Server } from '../lib/api';
 import {
   dropTransfer,
   infoFromSummary,
@@ -40,6 +40,7 @@ export function DataPresets({ server }: { server: Server }) {
   const transfers = useTransfers(server.id);
   const [load, setLoad] = useState<LoadSource | null>(null);
   const [remove, setRemove] = useState<LibraryBundle | null>(null);
+  const [downloadError, setDownloadError] = useState<unknown>(null);
   const [removing, setRemoving] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [over, setOver] = useState(false);
@@ -227,6 +228,7 @@ export function DataPresets({ server }: { server: Server }) {
         {remote && library.data && !items.length && (
           <Empty icon={<Archive />}>Nothing in {remote} yet. Open a run, choose Export, then Save to library.</Empty>
         )}
+        <ErrorNote error={downloadError} />
         {items.length > 0 && (
           <ul className="bundle-grid">
             {items.map(b => (
@@ -235,6 +237,9 @@ export function DataPresets({ server }: { server: Server }) {
                 b={b}
                 onLoad={() => setLoad({ remote, key: b.key, label: remote, size: b.size, info: infoFromSummary(b.summary, b.id) })}
                 onDelete={() => setRemove(b)}
+                onDownload={() =>
+                  signedDownload(server, `/v1/bundles/content?remote=${encodeURIComponent(remote)}&id=${encodeURIComponent(b.id)}`).catch(setDownloadError)
+                }
               />
             ))}
           </ul>
@@ -269,7 +274,7 @@ export function DataPresets({ server }: { server: Server }) {
   );
 }
 
-function BundleCard({ b, onLoad, onDelete }: { b: LibraryBundle; onLoad: () => void; onDelete: () => void }) {
+function BundleCard({ b, onLoad, onDelete, onDownload }: { b: LibraryBundle; onLoad: () => void; onDelete: () => void; onDownload: () => void }) {
   const s = b.summary;
   const kind = resumability(s);
   return (
@@ -318,6 +323,10 @@ function BundleCard({ b, onLoad, onDelete }: { b: LibraryBundle; onLoad: () => v
       <div className="bundle-actions">
         <button className="btn btn-primary btn-sm" onClick={onLoad}>
           Load onto server
+        </button>
+        <button className="btn btn-ghost btn-sm" onClick={onDownload} aria-label={`Download ${s?.name ?? b.id}`}>
+          <Download />
+          Download
         </button>
         <button className="btn btn-ghost btn-sm btn-danger" onClick={onDelete} aria-label={`Delete ${s?.name ?? b.id}`}>
           <Trash2 />

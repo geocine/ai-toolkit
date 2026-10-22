@@ -62,7 +62,7 @@ database). `url` is absolute (`AITK_PUBLIC_URL`, else the request's
 A `GET`/`HEAD` of exactly that URL is served without a bearer token until
 `expires_at`; any change to the path or query, another method, or an expired
 link answers 401. Links may only point at downloads:
-`/v1/files/content?...` (add `download=1` for an attachment), `/v1/jobs/{id}/bundle?...`
+`/v1/files/content?...` (add `download=1` for an attachment), `/v1/jobs/{id}/bundle?...`, `/v1/bundles/content?...`
 and the media routes `/api/img|files|audio/art/...`. `ttl_s` defaults to 3600
 (60 to 604800). Browsers use them for multi-GB downloads (`<a href>`, no blob
 in memory); agents use them to hand files to people. Links cannot be revoked
@@ -349,14 +349,19 @@ Chunked uploads (for browsers behind proxies with body limits)
 Library (a remote's `bundles/` folder)
 - `POST /v1/jobs/{id}/bundle/push {remote, bundle?, overwrite?, checkpoints?, optimizer?, samples?, caches?}`
   → 202 BundleTask (`kind: push`): builds the zip in the staging folder,
-  uploads it to `bundles/<bundle>.zip` (default id `<name>_step<step>`; 409 when
-  it exists unless `overwrite`) and writes the summary `bundles/<bundle>.json`.
+  uploads it to `bundles/<bundle>.zip` (default id `<name>_step<step>`) and
+  writes the summary `bundles/<bundle>.json`. An existing id without
+  `overwrite` answers 409 when `bundle` is given; with the default id it is
+  only known once the bundle is built, so the task fails with code `conflict`.
   `GET /v1/bundles/pushes?job_id=`, `GET /v1/bundles/pushes/{id}`.
 - `GET /v1/bundles?remote=` → `{items: [LibraryBundle]}` newest first:
   `LibraryBundle = {id, key, size, modified, summary: BundleSummary | null}`
   (null for a zip put there without a summary),
   `BundleSummary = {format, name, step, total_steps, size, sha256, created_at, images, datasets: [names], base_model, arch, checkpoints: [..], optimizer, server_version}`.
   Import one with `{remote, key}`.
+- `GET /v1/bundles/content?remote=&id=` → the zip (fetched from the remote into
+  the staging folder, then served with Range support); sign it with
+  `POST /v1/links` for a browser download.
 - `DELETE /v1/bundles/{id}?remote=` → 204 (the zip and its summary)
 
 Staging files (uploads, downloads, zips being built) live in
