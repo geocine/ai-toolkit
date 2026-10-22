@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { ArrowRight, CheckCircle2, Cloud, DownloadCloud, Plus, RefreshCw, Trash2, UploadCloud, Waypoints, XCircle } from 'lucide-react';
 import { api, fmtAgo, fmtBytes, fmtTime } from '../api';
+import { ImportDialog, LibraryTable, type ImportStart } from '../bundleUi';
+import { useTasks } from '../bundles';
 import { go, href } from '../router';
 import type { Items, Job, PortableJob, Remote, RemoteKind, Upload } from '../types';
 import { Bar, Callout, Empty, Field, Loading, Modal, Mono, Section, Spinner, StateBadge, usePoll, useConfirm, useToast } from '../ui';
@@ -13,6 +15,8 @@ export function Remotes() {
   const [creating, setCreating] = useState(false);
   const [tests, setTests] = useState<Record<string, { ok: boolean; detail: string } | 'busy'>>({});
   const [browse, setBrowse] = useState<string>('');
+  const [importing, setImporting] = useState<ImportStart | null>(null);
+  const imports = useTasks('import');
 
   const refresh = usePoll(async signal => {
     const [r, u] = await Promise.all([api.get<Items<Remote>>('/v1/remotes', signal), api.get<Items<Upload>>('/v1/uploads', signal)]);
@@ -149,6 +153,24 @@ export function Remotes() {
           {browse && <PortableJobs remote={browse} />}
         </Section>
       )}
+
+      {remotes && remotes.length > 0 && (
+        <Section
+          title="Bundles"
+          actions={
+            <select className="sm" value={browse} onChange={e => setBrowse(e.target.value)} style={{ width: 180 }} aria-label="Remote">
+              {remotes.map(r => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
+          }
+        >
+          {browse && <LibraryTable remote={remotes.find(r => r.id === browse)?.name ?? browse} onImport={setImporting} />}
+        </Section>
+      )}
+      {importing && <ImportDialog start={importing} tasks={imports} onClose={() => setImporting(null)} />}
 
       <Section title="Uploads">
         {!uploads ? (

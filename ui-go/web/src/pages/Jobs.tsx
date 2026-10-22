@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
-import { ListChecks, Search } from 'lucide-react';
+import { FileArchive, ListChecks, Search } from 'lucide-react';
 import { api, fmtAgo, plural } from '../api';
+import { ImportActivity, ImportDialog, type ImportStart } from '../bundleUi';
+import { useTasks } from '../bundles';
 import { go, href } from '../router';
 import type { Items, Job } from '../types';
 import { Bar, Empty, Loading, StateBadge, sentence, usePoll } from '../ui';
@@ -63,6 +65,8 @@ export function Jobs() {
   const [jobs, setJobs] = useState<Job[] | null>(null);
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>('all');
   const [query, setQuery] = useState('');
+  const [importing, setImporting] = useState<ImportStart | null>(null);
+  const imports = useTasks('import');
 
   usePoll(async signal => {
     setJobs((await api.get<Items<Job>>('/v1/jobs', signal)).items);
@@ -95,8 +99,13 @@ export function Jobs() {
               </option>
             ))}
           </select>
+          <button className="btn btn-primary" onClick={() => setImporting({})}>
+            <FileArchive size={14} /> Import bundle
+          </button>
         </div>
       </div>
+      <ImportActivity tasks={imports} onLoad={setImporting} />
+      {importing && <ImportDialog key={JSON.stringify(importing.source ?? null)} start={importing} tasks={imports} onClose={() => setImporting(null)} />}
       {!jobs ? (
         <Loading what="jobs" />
       ) : shown.length === 0 ? (

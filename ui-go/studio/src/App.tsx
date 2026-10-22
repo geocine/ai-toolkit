@@ -1,10 +1,13 @@
-import { Layers, List, Menu, Monitor, Moon, Plus, Server as ServerIcon, Sun, X } from 'lucide-react';
+import { Layers, List, Menu, Monitor, Moon, Plus, Server as ServerIcon, Sun, Timer, X } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
+import { LifeBanner } from './components/LifeBanner';
 import { useLoad } from './components/ui';
 import { get, type Health, type Server } from './lib/api';
 import { StudioProvider, useStudio } from './lib/context';
+import { LifecycleProvider } from './lib/lifecycle';
 import { href, useRoute, type Route } from './lib/route';
 import { useTheme, type Theme } from './lib/theme';
+import { Lifecycle } from './pages/Lifecycle';
 import { NewRun } from './pages/NewRun';
 import { Presets } from './pages/Presets';
 import { RunView } from './pages/RunView';
@@ -15,6 +18,7 @@ const nav: { label: string; icon: ReactNode; route: Route; match: Route['page'][
   { label: 'Runs', icon: <List />, route: { page: 'runs' }, match: ['runs', 'run'] },
   { label: 'New run', icon: <Plus />, route: { page: 'new' }, match: ['new'] },
   { label: 'Presets', icon: <Layers />, route: { page: 'presets' }, match: ['presets'] },
+  { label: 'When done', icon: <Timer />, route: { page: 'lifecycle' }, match: ['lifecycle'] },
   { label: 'Servers', icon: <ServerIcon />, route: { page: 'servers' }, match: ['servers'] },
 ];
 
@@ -76,6 +80,7 @@ function Shell() {
   const [menu, setMenu] = useState(false);
   useEffect(() => setMenu(false), [route]);
   return (
+    <LifecycleProvider server={active}>
     <div className="app">
       <aside className={menu ? 'sidebar is-open' : 'sidebar'}>
         <div className="sidebar-top">
@@ -136,14 +141,17 @@ function Shell() {
       {menu && <div className="scrim" onClick={() => setMenu(false)} aria-hidden />}
       <main className="main">
         <div className="page" key={route.page + (route.page === 'run' ? route.id : '')}>
+          {route.page !== 'lifecycle' && <LifeBanner />}
           {route.page === 'runs' && <Runs />}
           {route.page === 'run' && <RunView id={route.id} />}
           {route.page === 'new' && <NewRun />}
-          {route.page === 'presets' && <Presets />}
+          {route.page === 'presets' && <Presets tab={route.tab ?? 'settings'} />}
+          {route.page === 'lifecycle' && <Lifecycle />}
           {route.page === 'servers' && <Servers />}
         </div>
       </main>
     </div>
+    </LifecycleProvider>
   );
 }
 

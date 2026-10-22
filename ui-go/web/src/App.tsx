@@ -7,6 +7,7 @@ import { api, onUnauthorized, setToken } from './api';
 import { href, useRoute } from './router';
 import type { Health } from './types';
 import { ConfirmProvider, Spinner, ThemeToggle, ToastProvider } from './ui';
+import { LifecycleProvider, LifeNotice } from './lifecycle';
 import { Login } from './pages/Login';
 import { Overview } from './pages/Overview';
 import { Jobs } from './pages/Jobs';
@@ -42,13 +43,15 @@ export function App() {
         ) : auth === 'out' ? (
           <Login health={health} onIn={() => setAuth('in')} />
         ) : (
-          <Shell
-            health={health}
-            onLogout={() => {
-              setToken('');
-              setAuth('out');
-            }}
-          />
+          <LifecycleProvider>
+            <Shell
+              health={health}
+              onLogout={() => {
+                setToken('');
+                setAuth('out');
+              }}
+            />
+          </LifecycleProvider>
         )}
       </ConfirmProvider>
     </ToastProvider>
@@ -98,6 +101,7 @@ function Shell({ health, onLogout }: { health: Health | null; onLogout: () => vo
           {n.label}
         </a>
       ))}
+      <LifeNotice compact />
     </nav>
   );
   const foot = (

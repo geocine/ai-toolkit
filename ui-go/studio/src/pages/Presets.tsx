@@ -1,8 +1,10 @@
 import { ChevronDown, Download, FileUp, Lightbulb } from 'lucide-react';
 import { useRef, useState } from 'react';
-import { ErrorNote, PageHeader } from '../components/ui';
+import { ErrorNote, NeedServer, PageHeader } from '../components/ui';
 import { useStudio } from '../lib/context';
 import { presetFromText, presetToYAML, type Preset } from '../lib/presets';
+import { href } from '../lib/route';
+import { DataPresets } from './DataPresets';
 
 function saveText(name: string, text: string) {
   const a = document.createElement('a');
@@ -31,7 +33,38 @@ export function PresetNotes({ preset }: { preset: Preset }) {
 // `code` only; notes are our own text
 const md = (s: string) => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!).replace(/`([^`]+)`/g, '<code>$1</code>');
 
-export function Presets() {
+function PresetTabs({ tab }: { tab: 'settings' | 'data' }) {
+  return (
+    <nav className="tabs" aria-label="Preset kinds">
+      <a className={tab === 'settings' ? 'tab is-active' : 'tab'} href={href({ page: 'presets' })} aria-current={tab === 'settings' ? 'page' : undefined}>
+        Settings
+      </a>
+      <a className={tab === 'data' ? 'tab is-active' : 'tab'} href={href({ page: 'presets', tab: 'data' })} aria-current={tab === 'data' ? 'page' : undefined}>
+        Data
+      </a>
+    </nav>
+  );
+}
+
+export function Presets({ tab = 'settings' }: { tab?: 'settings' | 'data' }) {
+  const { active } = useStudio();
+  if (tab === 'data') {
+    if (!active) return <NeedServer title="Presets" />;
+    return (
+      <>
+        <PageHeader
+          title="Presets"
+          description="A data preset is a whole run in one zip: the dataset with its caches, checkpoints, optimizer state and samples. Load one onto any server and training continues where it stopped."
+        />
+        <PresetTabs tab="data" />
+        <DataPresets key={active.id} server={active} />
+      </>
+    );
+  }
+  return <SettingsPresets />;
+}
+
+function SettingsPresets() {
   const { presets, setImported } = useStudio();
   const [error, setError] = useState<unknown>(null);
   const file = useRef<HTMLInputElement>(null);
@@ -74,6 +107,7 @@ export function Presets() {
           </>
         }
       />
+      <PresetTabs tab="settings" />
       <ErrorNote error={error} />
       <div className="preset-list">
         {presets.map(p => {

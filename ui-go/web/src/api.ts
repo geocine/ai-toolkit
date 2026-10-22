@@ -136,6 +136,71 @@ export function upload<T>(
   });
 }
 
+// ---- signed links and raw uploads ----
+
+/**
+ * Downloads through a signed link (POST /v1/links): the browser streams the
+ * file straight to disk, so multi-GB checkpoints and bundles never sit in
+ * memory, and no token is needed on the GET.
+ */
+export async function signedDownload(path: string): Promise<void> {
+  const link = await request<{ url: string; path: string; expires_at: string }>('POST', '/v1/links', { path });
+  const a = document.createElement('a');
+  a.href = link.path; // relative: same origin, also through the dev proxy
+  a.rel = 'noopener';
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+/** A file under the training folder as an attachment (checkpoints). */
+export const trainingFilePath = (rel: string) => `/v1/files/content${qs({ root: 'training', path: rel, download: 1 })}`;
+
+/** PUT of raw bytes with upload progress, for chunked uploads. */
+export function putBytes<T>(path: string, body: Blob, headers: Record<string, string>, onProgress: (loaded: number) => void, signal?: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', path);
+    const t = token();
+    if (t) xhr.setRequestHeader('Authorization', `Bearer ${t}`);
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+    xhr.upload.onprogress = e => onProgress(e.loaded);
+    const onAbort = () => xhr.abort();
+    signal?.addEventListener('abort', onAbort);
+    const done = () => signal?.removeEventListener('abort', onAbort);
+    xhr.onabort = () => {
+      done();
+      reject(new DOMException('aborted', 'AbortError'));
+    };
+    xhr.onerror = () => {
+      done();
+      reject(new ApiError(0, 'network', 'upload interrupted: network error'));
+    };
+    xhr.onload = () => {
+      done();
+      let b: any = null;
+      try {
+        b = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+      } catch {
+        // keep null
+      }
+      if (xhr.status === 401) unauthorizedListeners.forEach(fn => fn());
+      if (xhr.status >= 200 && xhr.status < 300) resolve(b as T);
+      else reject(new ApiError(xhr.status, b?.error?.code ?? 'http_' + xhr.status, b?.error?.message ?? xhr.statusText));
+    };
+    xhr.send(body);
+  });
+}
+
+/** Content-Length of a GET, via HEAD (bundles are stored, so their size is known up front). */
+export async function headSize(path: string, signal?: AbortSignal): Promise<number | null> {
+  const res = await fetch(path, { method: 'HEAD', headers: authHeaders(), signal });
+  const n = Number(res.headers.get('Content-Length'));
+  return res.ok && n > 0 ? n : null;
+}
+
 // ---- media URLs (public upstream routes, like the upstream UI uses) ----
 
 const splitPath = (p: string) => {

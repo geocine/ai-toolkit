@@ -4,6 +4,7 @@ import { api, fmtBytes } from '../api';
 import { href } from '../router';
 import type { Items, Job, Queue, SystemInfo } from '../types';
 import { Bar, Empty, Loading, Section, StateBadge, sentence, usePoll, useToast } from '../ui';
+import { LifeNotice } from '../lifecycle';
 import { JobRow, JobTableHead } from './Jobs';
 
 const ACTIVE = new Set(['queued', 'starting', 'running', 'stopping']);
@@ -53,6 +54,7 @@ export function Overview() {
           </div>
         </div>
       </div>
+      <LifeNotice />
 
       <Section title="Machine">
         {!sys ? (

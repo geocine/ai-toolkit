@@ -1,14 +1,16 @@
-import { ArrowLeft, Camera, Download, OctagonX, Play, Save, Square, Upload as UploadIcon, X } from 'lucide-react';
+import { ArrowLeft, Camera, Download, FileArchive, OctagonX, Play, Save, Square, Upload as UploadIcon, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { ExportDialog } from '../components/ExportDialog';
 import { LossChart } from '../components/LossChart';
 import { ErrorNote, NeedServer, Progress, Section, StatePill, useLoad } from '../components/ui';
 import {
-  download,
   get,
   mediaUrl,
   post,
+  signedDownload,
   streamEvents,
+  trainingFilePath,
   type Checkpoint,
   type Items,
   type Job,
@@ -38,6 +40,7 @@ export function RunView({ id }: { id: string }) {
   const [log, setLog] = useState('');
   const [error, setError] = useState<unknown>(null);
   const [view, setView] = useState<Sample | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   // live updates: progress and state into the job, files and loss as they land
   useEffect(() => {
@@ -194,6 +197,10 @@ export function RunView({ id }: { id: string }) {
             {liveLabel}
           </span>
           <div className="run-actions">
+            <button className="btn" onClick={() => setExporting(true)}>
+              <FileArchive />
+              Export
+            </button>
             {ACTIVE.includes(j.state) ? (
               <>
                 {j.state === 'running' && (
@@ -300,6 +307,8 @@ export function RunView({ id }: { id: string }) {
         <LogTail text={log} />
       </Section>
 
+      {exporting && <ExportDialog server={server} job={j} onClose={() => setExporting(false)} />}
+
       {/* portalled so it sits above the shell's stacking contexts */}
       {view &&
         createPortal(
@@ -336,7 +345,8 @@ function Checkpoints({ job, items, remotes, uploads, onUpload }: { job: Job; ite
     setBusy(c.name);
     setError(null);
     try {
-      await download(server, `/v1/files/content?root=training&path=${encodeURIComponent(job.name + '/' + c.name)}`, c.name);
+      // a signed link: the browser streams the file to disk, nothing in memory
+      await signedDownload(server, trainingFilePath(job.name + '/' + c.name));
     } catch (e) {
       setError(e);
     } finally {
@@ -405,7 +415,7 @@ function Checkpoints({ job, items, remotes, uploads, onUpload }: { job: Job; ite
                       )}
                       <button className="btn btn-sm" disabled={busy === c.name} onClick={() => dl(c)}>
                         <Download />
-                        {busy === c.name ? 'Downloading…' : 'Download'}
+                        {busy === c.name ? 'Preparing…' : 'Download'}
                       </button>
                       {remotes.length > 0 && (
                         <button className="btn btn-sm" disabled={!remote} onClick={() => push(c)}>

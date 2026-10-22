@@ -112,3 +112,66 @@ export type SystemInfo = {
   disks: { name: string; path: string; free: number; total: number }[];
   toolkit_root: string;
 };
+
+// run bundles (docs/headless.md, Run bundles)
+export type TaskState = 'queued' | 'running' | 'done' | 'failed';
+export type BundleTask = {
+  id: string;
+  kind: 'import' | 'push';
+  state: TaskState;
+  phase: '' | 'downloading' | 'reading' | 'restoring' | 'building' | 'uploading';
+  bytes: number;
+  bytes_done: number;
+  job_id: string | null;
+  job_name: string | null;
+  dataset: string | null;
+  source: string;
+  ref: string | null;
+  remote: string | null;
+  key: string | null;
+  url: string | null;
+  upload_id: string | null;
+  skipped: string[] | null;
+  warnings: string[] | null;
+  error: { code: string; message: string } | null;
+  created_at: string;
+  updated_at: string;
+};
+export type BundleUpload = { id: string; filename: string; size: number; received: number; complete: boolean; chunk_size: number; created_at: string; updated_at: string; expires_at: string };
+export type BundleSummary = {
+  format: number;
+  name: string;
+  step: number;
+  total_steps: number | null;
+  size: number;
+  sha256?: string;
+  created_at: string;
+  images: number;
+  datasets: string[] | null;
+  base_model?: string;
+  arch?: string;
+  checkpoints: string[] | null;
+  optimizer: boolean;
+  server_version: string;
+};
+export type LibraryBundle = { id: string; key: string; size: number; modified: string; summary: BundleSummary | null };
+
+// unattended runs (docs/headless.md, Unattended runs)
+export type LifeMode = 'keep' | 'stop' | 'destroy';
+export type Lifecycle = {
+  mode: LifeMode;
+  on: 'completed' | 'any';
+  delay_s: number;
+  dry_run: boolean;
+  state: 'off' | 'waiting' | 'countdown' | 'verifying' | 'acting' | 'held' | 'cancelled' | 'done' | 'failed';
+  deadline: string | null;
+  reason: string;
+  provider: 'runpod' | 'vast' | 'command' | 'exit';
+  job_id: string | null;
+  job_name: string | null;
+  results: { job_id: string; job_name: string; safe: boolean; via: string; detail: string }[] | null;
+  updated_at: string;
+};
+export type NotifySink = { id: string; kind: 'ntfy' | 'discord' | 'telegram' | 'webhook'; target: string; source: 'env' | 'api'; created_at: string };
+export type NotifyConfig = { sinks: NotifySink[]; events: string[] | null; kinds: string[]; public_url: string; studio_url: string; sample_every_s: number };
+export type NotifyTest = { sink: string; kind: string; target: string; ok: boolean; detail: string };

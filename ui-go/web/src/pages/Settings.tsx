@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { KeyRound, Plus, Save, Trash2 } from 'lucide-react';
 import { api, fmtAgo, fmtTime } from '../api';
 import type { ApiKey, Items, Settings } from '../types';
+import { NotificationsSection, WhenDoneSection } from '../lifecycle';
 import { Callout, CopyButton, Empty, Field, Loading, Modal, Mono, Section, Spinner, usePoll, useConfirm, useToast } from '../ui';
 
 export function SettingsPage() {
@@ -10,9 +11,11 @@ export function SettingsPage() {
       <div className="page-head">
         <div>
           <h1 className="page-title">Settings</h1>
-          <div className="page-sub">Server folders, job defaults and API keys</div>
+          <div className="page-sub">What happens when training is done, notifications, folders, job defaults and API keys</div>
         </div>
       </div>
+      <WhenDoneSection />
+      <NotificationsSection />
       <ServerSettings />
       <Keys />
     </>
