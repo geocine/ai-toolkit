@@ -160,8 +160,12 @@ func stream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// job.log goes only to the stream whose tailer read it: published to
+	// every subscriber, each open stream of the job repeated every chunk
+	var logs chan Event // nil (never ready) unless this stream wants the log
 	if f.JobID != "" && (len(f.Types) == 0 || f.Types[JobLog]) {
-		go tailLog(ctx, f.JobID)
+		logs = make(chan Event, 16)
+		go tailLog(ctx, f.JobID, logs)
 	}
 
 	ping := time.NewTicker(pingEvery)
@@ -170,6 +174,11 @@ func stream(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-ctx.Done():
 			return
+		case e := <-logs:
+			if writeEvent(w, e) != nil {
+				return
+			}
+			flusher.Flush()
 		case e := <-live:
 			if e.ID != 0 && e.ID <= last {
 				continue // already replayed
@@ -209,10 +218,10 @@ const (
 	logMaxChunk = 64 << 10
 )
 
-// tailLog publishes job.log events for new bytes in the job's log.txt while
-// the stream is open (from the current end; history is GET /v1/jobs/{id}/log).
-// Every stream of the job receives them, which is harmless: they are live-only.
-func tailLog(ctx context.Context, jobID string) {
+// tailLog sends job.log events for new bytes in the job's log.txt to out
+// while the stream is open (from the current end; history is
+// GET /v1/jobs/{id}/log).
+func tailLog(ctx context.Context, jobID string, out chan<- Event) {
 	job, err := store.GetJob(ctx, jobID)
 	if err != nil || job == nil {
 		return
@@ -258,7 +267,16 @@ func tailLog(ctx context.Context, jobID string) {
 		if len(buf) == 0 {
 			continue
 		}
-		Emit(ctx, JobLog, jobID, map[string]any{"offset": offset, "text": string(buf)})
+		raw, err := json.Marshal(map[string]any{"offset": offset, "text": string(buf)})
+		if err != nil {
+			continue
+		}
+		e := Event{Type: JobLog, JobID: &jobID, At: time.Now().UTC().Truncate(time.Millisecond), Data: raw}
+		select {
+		case out <- e:
+		case <-ctx.Done():
+			return
+		}
 		offset += int64(len(buf))
 	}
 }
