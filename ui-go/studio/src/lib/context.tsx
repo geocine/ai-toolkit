@@ -12,6 +12,10 @@ interface Studio {
   presets: Preset[];
   imported: Preset[];
   setImported: (p: Preset[] | ((p: Preset[]) => Preset[])) => void;
+  /** Stores an edited preset: a built-in one as an override of the shipped version. */
+  savePreset: (p: Preset) => void;
+  /** Drops the override of a built-in preset. */
+  resetPreset: (id: string) => void;
 }
 
 const Ctx = createContext<Studio | null>(null);
@@ -20,10 +24,21 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const [servers, setServers] = useStored<Server[]>('aitk.studio.servers', []);
   const [activeId, setActiveId] = useStored<string>('aitk.studio.active', '');
   const [imported, setImported] = useStored<Preset[]>('aitk.studio.presets', []);
+  const [edits, setEdits] = useStored<Record<string, Preset>>('aitk.studio.presetEdits', {});
   const value = useMemo<Studio>(() => {
     const active = servers.find(s => s.id === activeId) ?? servers[0] ?? null;
-    return { servers, setServers, active, setActiveId, presets: [...builtInPresets, ...imported], imported, setImported };
-  }, [servers, activeId, imported, setServers, setActiveId, setImported]);
+    const presets = [...builtInPresets.map(b => edits[b.id] ?? b), ...imported];
+    const savePreset = (p: Preset) => {
+      if (p.builtIn) setEdits(e => ({ ...e, [p.id]: { ...p, edited: true } }));
+      else setImported(list => list.map(x => (x.id === p.id ? p : x)));
+    };
+    const resetPreset = (id: string) =>
+      setEdits(e => {
+        const { [id]: _, ...rest } = e;
+        return rest;
+      });
+    return { servers, setServers, active, setActiveId, presets, imported, setImported, savePreset, resetPreset };
+  }, [servers, activeId, imported, edits, setServers, setActiveId, setImported, setEdits]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
