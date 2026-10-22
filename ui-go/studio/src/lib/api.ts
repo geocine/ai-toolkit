@@ -240,6 +240,7 @@ export interface Job {
   step: number; total_steps: number | null; speed: string; created_at: string; updated_at: string;
   config: JobConfig; policy: { auto_resume: boolean; sync_remote: string | null; auto_upload_remote: string | null; keep_checkpoints?: number | null };
   attempts: number; last_attempt: Attempt | null; latest_checkpoint: Checkpoint | null;
+  chosen?: { step: number | null; file: string; strength?: number; note?: string; at: number } | null;
 }
 export interface Dataset { name: string; path: string; images: number; captions: number; size: number; modified: string }
 export interface DatasetItem { file: string; caption: string | null; size: number; width?: number; height?: number }

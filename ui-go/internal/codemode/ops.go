@@ -71,6 +71,11 @@ var Ops = []Op{
 			opt("config", "JobConfig", "body", ""), opt("policy", "JobPolicy", "body", "")}},
 	{Group: "jobs", Name: "delete", Method: "DELETE", Path: "/v1/jobs/{id}", Result: "null", Doc: "Delete a job that is not running.",
 		Params: []Param{p("id", "string", "path", "job id"), opt("files", "boolean", "query", "true also deletes its output folder (checkpoints, samples); default false keeps it")}},
+	{Group: "jobs", Name: "choose", Method: "PUT", Path: "/v1/jobs/{id}/chosen", Result: "Job",
+		Doc:    "Mark the checkpoint picked as the run's result (job.chosen): by step or file name, with the LoRA strength it works best at and a note. A step kept only on a remote is fine.",
+		Params: []Param{p("id", "string", "path", "job id"), opt("step", "number", "body", ""), opt("file", "string", "body", "checkpoint file name"), opt("strength", "number", "body", "e.g. 0.9"), opt("note", "string", "body", "")}},
+	{Group: "jobs", Name: "unchoose", Method: "DELETE", Path: "/v1/jobs/{id}/chosen", Result: "Job", Doc: "Clear the run's chosen checkpoint.",
+		Params: []Param{p("id", "string", "path", "job id")}},
 	{Group: "jobs", Name: "preflight", Method: "POST", Path: "/v1/jobs/preflight", Result: "Preflight",
 		Doc: "What would go wrong or be wasted if a config ran now, before paying for the GPU: ignored keys, missing datasets, images the trainer skips, uncaptioned or trigger-less captions, low disk, a missing local model, an unreachable sync remote, checkpoints that will not be kept, when done with nowhere to keep the results. ok is false when anything blocks. Run it on a config or a created job before jobs.start.",
 		Params: []Param{opt("config", "JobConfig", "body", "a config to check"), opt("job_id", "string", "body", "a created job (its config and policy)"),
@@ -466,12 +471,13 @@ type JobConfig = { job: string; config: { name: string; process: Record<string, 
 type JobPolicy = { auto_resume?: boolean | null; max_auto_resumes?: number | null; auto_upload_remote?: string | null; sync_remote?: string | null; /** older checkpoints the sync remote keeps besides the newest; -1 keeps all (pick the best step later) */ keep_checkpoints?: number | null };
 type Attempt = { n: number; started_at: string; ended_at: string | null; end_state: string | null; end_reason: string | null; start_step: number; end_step: number | null; auto: boolean; pid: number | null };
 type Checkpoint = { name: string; path: string; step: number | null; size: number; modified: string; sha256?: string };
-type Sample = { name: string; path: string; step: number | null; index: number | null; modified: string };
+type Sample = { name: string; path: string; step: number | null; index: number | null; modified: string; prompt?: string; seed?: number };
+type Chosen = { step: number | null; file: string; strength?: number; note?: string; at: number };
 type Job = {
   id: string; name: string; type: string; ref: string | null; gpu_ids: string;
   state: JobState; status: string; info: string; step: number; total_steps: number | null; speed: string;
   queue_position: number; pid: number | null; created_at: string; updated_at: string;
-  config: JobConfig; policy: JobPolicy; attempts: number; last_attempt: Attempt | null; latest_checkpoint: Checkpoint | null;
+  config: JobConfig; policy: JobPolicy; attempts: number; last_attempt: Attempt | null; latest_checkpoint: Checkpoint | null; chosen: Chosen | null;
 };
 type LogChunk = { offset: number; next_offset: number; size: number; text: string };
 type LossSeries = { keys: string[]; key: string; points: { step: number; value: number; wall_time: number }[] };

@@ -94,6 +94,8 @@ with step 0 and no trainer progress yet).
 - `POST /v1/jobs {name, gpu_ids, config, type?, ref?, policy?}` → 201 Job (`draft`)
 - `GET /v1/jobs/{id}` → Job
 - `PATCH /v1/jobs/{id} {name?, gpu_ids?, config?, policy?}` → Job (409 while queued/running)
+- `PUT /v1/jobs/{id}/chosen {step | file, strength?, note?}` → Job (`chosen: {step, file, strength, note, at}`);
+  `DELETE` clears it: the checkpoint picked as the run's result
 - `POST /v1/jobs/preflight {config | job_id}` → `{ok, checks: [{level: block|warn|info, message, fix?}]}`: what
   would go wrong or be wasted before a GPU is paid for: keys the trainer ignores, a missing dataset
   folder, images it skips (it reads jpg, jpeg, png, webp), uncaptioned, trigger-less or cut-off
@@ -114,7 +116,8 @@ with step 0 and no trainer progress yet).
 - `GET /v1/jobs/{id}/loss?key=&after_step=&limit=&stride=` → `{keys: [..], key, points: [{step, value, wall_time}]}`
 - `GET /v1/jobs/{id}/checkpoints?hash=true` → `{items: [Checkpoint]}`;
   `Checkpoint = {name, path, step, size, modified, sha256?}` (`step` null for the final file)
-- `GET /v1/jobs/{id}/samples` → `{items: [{name, path, step, index, modified}]}`
+- `GET /v1/jobs/{id}/samples` → `{items: [{name, path, step, index, modified, prompt?, seed?}]}` (`prompt` and
+  `seed` from the config's sample section, the trigger filled in)
 - `GET /v1/jobs/{id}/bundle?...` and `POST /v1/jobs/{id}/bundle/push`: see Run bundles
 
 ### Queues

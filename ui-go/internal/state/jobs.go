@@ -3,6 +3,7 @@ package state
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"log"
 	"strconv"
 	"time"
@@ -143,8 +144,45 @@ func DeleteJobState(ctx context.Context, jobID string) error {
 	if _, err := DB.ExecContext(ctx, `DELETE FROM job_attempts WHERE job_id = ?`, jobID); err != nil {
 		return err
 	}
+	if _, err := DB.ExecContext(ctx, `DELETE FROM settings WHERE key = ?`, chosenKey(jobID)); err != nil {
+		return err
+	}
 	_, err := DB.ExecContext(ctx, `DELETE FROM job_policies WHERE job_id = ?`, jobID)
 	return err
+}
+
+// Chosen is the checkpoint the user (or an agent) picked as the run's result.
+type Chosen struct {
+	Step     *int    `json:"step"`
+	File     string  `json:"file"`
+	Strength float64 `json:"strength,omitempty"`
+	Note     string  `json:"note,omitempty"`
+	At       int64   `json:"at"`
+}
+
+func chosenKey(jobID string) string { return "job.chosen." + jobID }
+
+// GetChosen returns the job's chosen checkpoint, or nil.
+func GetChosen(ctx context.Context, jobID string) (*Chosen, error) {
+	v, ok, err := Setting(ctx, chosenKey(jobID))
+	if err != nil || !ok || v == "" {
+		return nil, err
+	}
+	var c Chosen
+	if err := json.Unmarshal([]byte(v), &c); err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+// SetChosen stores (or, with nil, clears) the job's chosen checkpoint.
+func SetChosen(ctx context.Context, jobID string, c *Chosen) error {
+	if c == nil {
+		_, err := DB.ExecContext(ctx, `DELETE FROM settings WHERE key = ?`, chosenKey(jobID))
+		return err
+	}
+	b, _ := json.Marshal(c)
+	return SetSetting(ctx, chosenKey(jobID), string(b))
 }
 
 // Policy is a job's headless behavior. Nil fields fall back to the defaults.

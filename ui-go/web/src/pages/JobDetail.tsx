@@ -251,7 +251,7 @@ export function JobDetail({ id }: { id: string }) {
       {tab === 'log' && <LogTab job={job} log={log} setLog={setLog} />}
       {tab === 'loss' && <LossTab job={job} live={lossLive} />}
       {tab === 'samples' && <SamplesTab job={job} ver={ver.samples} />}
-      {tab === 'checkpoints' && <CheckpointsTab job={job} ver={ver.checkpoints} />}
+      {tab === 'checkpoints' && <CheckpointsTab job={job} ver={ver.checkpoints} onChange={setJob} />}
       {tab === 'attempts' && <AttemptsTab job={job} ver={ver.attempts} />}
       {tab === 'config' && <ConfigTab job={job} />}
       {exporting && <ExportDialog job={job} onClose={() => setExporting(false)} />}
@@ -692,7 +692,7 @@ function SamplesTab({ job, ver }: { job: Job; ver: number }) {
           <div className="sample-step">{g.step === null ? 'Unknown step' : `Step ${g.step}`}</div>
           <div className="grid grid-media">
             {g.items.map(s => (
-              <button key={s.name} className="sample-thumb" onClick={() => setOpen(s)} title={`Sample ${s.index ?? '—'}`} aria-label={`Open step ${s.step ?? '—'} sample ${s.index ?? '—'}`}>
+              <button key={s.name} className="sample-thumb" onClick={() => setOpen(s)} title={s.prompt ?? `Sample ${s.index ?? '—'}`} aria-label={`Open step ${s.step ?? '—'} sample ${s.index ?? '—'}`}>
                 {isVideo(s.name) ? <video src={imgUrl(s.path)} muted /> : <img src={imgUrl(s.path, true)} loading="lazy" alt={s.name} />}
               </button>
             ))}
@@ -700,22 +700,54 @@ function SamplesTab({ job, ver }: { job: Job; ver: number }) {
         </div>
       ))}
       {open && (
-        <Modal title={`Step ${open.step ?? '—'} · sample ${open.index ?? '—'}`} onClose={() => setOpen(null)} wide>
-          <div className="modal-body">
-            {isVideo(open.name) ? <video className="lightbox" src={imgUrl(open.path)} controls autoPlay /> : <img className="lightbox" src={imgUrl(open.path)} alt={open.name} />}
-            <div className="mono dim" style={{ marginTop: 10, fontSize: 12 }}>
-              {open.name}
-            </div>
-          </div>
-        </Modal>
+        <SampleLightbox open={open} items={items} onOpen={setOpen} onClose={() => setOpen(null)} isVideo={isVideo} />
       )}
     </>
   );
 }
 
+// One sample large, stepping through the same prompt across steps (arrows,
+// or the left and right keys) to see how it changed while training.
+function SampleLightbox({ open, items, onOpen, onClose, isVideo }: { open: Sample; items: Sample[]; onOpen: (s: Sample) => void; onClose: () => void; isVideo: (n: string) => boolean }) {
+  const same = useMemo(
+    () => items.filter(s => (s.index ?? null) === (open.index ?? null)).sort((a, b) => (a.step ?? Infinity) - (b.step ?? Infinity)),
+    [items, open.index],
+  );
+  const at = same.findIndex(s => s.name === open.name);
+  const prev = at > 0 ? same[at - 1] : null;
+  const next = at >= 0 && at < same.length - 1 ? same[at + 1] : null;
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft' && prev) onOpen(prev);
+      if (e.key === 'ArrowRight' && next) onOpen(next);
+    };
+    window.addEventListener('keydown', on);
+    return () => window.removeEventListener('keydown', on);
+  }, [prev, next, onOpen]);
+  return (
+    <Modal title={`Step ${open.step ?? '—'} · sample ${open.index ?? '—'}`} onClose={onClose} wide>
+      <div className="modal-body">
+        {isVideo(open.name) ? <video className="lightbox" src={imgUrl(open.path)} controls autoPlay /> : <img className="lightbox" src={imgUrl(open.path)} alt={open.name} />}
+        <div className="row" style={{ marginTop: 10, gap: 8 }}>
+          <button className="btn btn-sm" disabled={!prev} onClick={() => prev && onOpen(prev)}>
+            ← Step {prev?.step ?? '—'}
+          </button>
+          <span className="grow small" style={{ textAlign: 'center' }}>
+            {open.prompt ?? <span className="mono dim">{open.name}</span>}
+            {open.seed !== undefined && <span className="muted"> · seed {open.seed}</span>}
+          </span>
+          <button className="btn btn-sm" disabled={!next} onClick={() => next && onOpen(next)}>
+            Step {next?.step ?? '—'} →
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ---------------------------------------------------------------- checkpoints
 
-function CheckpointsTab({ job, ver }: { job: Job; ver: number }) {
+function CheckpointsTab({ job, ver, onChange }: { job: Job; ver: number; onChange: (j: Job) => void }) {
   const toast = useToast();
   const [items, setItems] = useState<Checkpoint[] | null>(null);
   const [hashing, setHashing] = useState(false);
@@ -736,6 +768,16 @@ function CheckpointsTab({ job, ver }: { job: Job; ver: number }) {
       toast.error(e);
     } finally {
       setHashing(false);
+    }
+  };
+  // the checkpoint picked as the run's result (PUT /v1/jobs/{id}/chosen)
+  const choose = async (c: Checkpoint | null) => {
+    try {
+      const path = `/v1/jobs/${encodeURIComponent(job.id)}/chosen`;
+      onChange(c ? await api.put<Job>(path, { file: c.name }) : await api.del<Job>(path));
+      toast.success(c ? `Chose ${c.step === null ? 'the final save' : `step ${c.step}`}` : 'Choice cleared');
+    } catch (e) {
+      toast.error(e);
     }
   };
   const uploadTo = async (c: Checkpoint, remote: string) => {
@@ -777,7 +819,10 @@ function CheckpointsTab({ job, ver }: { job: Job; ver: number }) {
             {[...items].reverse().map(c => (
               <tr key={c.name}>
                 <td>
-                  <div className="mono">{c.name}</div>
+                  <div className="row" style={{ gap: 8 }}>
+                    <span className="mono">{c.name}</span>
+                    {job.chosen?.file === c.name && <span className="badge s-completed">Chosen</span>}
+                  </div>
                   {c.sha256 && (
                     <div className="mono dim ellipsis" style={{ maxWidth: 420, fontSize: 12 }}>
                       {c.sha256}
@@ -800,6 +845,15 @@ function CheckpointsTab({ job, ver }: { job: Job; ver: number }) {
                           </option>
                         ))}
                       </select>
+                    )}
+                    {job.chosen?.file === c.name ? (
+                      <button className="btn btn-sm" onClick={() => choose(null)} title="Clear the choice">
+                        Unchoose
+                      </button>
+                    ) : (
+                      <button className="btn btn-sm" onClick={() => choose(c)} title="Mark this checkpoint as the run's result">
+                        Choose
+                      </button>
                     )}
                     <button className="btn btn-sm" onClick={() => downloadCheckpoint(job, c.name).catch(toast.error)}>
                       <Download size={14} /> Download

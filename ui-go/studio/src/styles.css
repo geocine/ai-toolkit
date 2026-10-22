@@ -1890,6 +1890,11 @@ a.runs-row:hover {
   display: none;
 }
 
+.chosen-badge {
+  margin-left: 8px;
+  font-family: var(--font-sans, inherit);
+}
+
 .preflight-info {
   margin: 0 0 12px;
   padding-left: 18px;

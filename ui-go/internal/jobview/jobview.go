@@ -49,6 +49,8 @@ type Job struct {
 	Attempts         int                   `json:"attempts"`
 	LastAttempt      *state.Attempt        `json:"last_attempt"`
 	LatestCheckpoint *artifacts.Checkpoint `json:"latest_checkpoint"`
+	// the checkpoint picked as the run's result (jobs.choose)
+	Chosen *state.Chosen `json:"chosen"`
 }
 
 // Folder is the job's folder under the training root.
@@ -105,6 +107,9 @@ func View(ctx context.Context, j *store.Job) (*Job, error) {
 			latest := cps[len(cps)-1]
 			v.LatestCheckpoint = &latest
 		}
+	}
+	if v.Chosen, err = state.GetChosen(ctx, j.ID); err != nil {
+		return nil, err
 	}
 	return v, nil
 }
