@@ -1097,6 +1097,26 @@ input[type='checkbox'] {
   margin: 0;
 }
 
+.preset-editor {
+  display: grid;
+  gap: 16px;
+}
+
+.preset-editor .row {
+  flex-wrap: wrap;
+}
+
+textarea.config-editor {
+  min-height: 320px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  tab-size: 2;
+  white-space: pre;
+  overflow-wrap: normal;
+  overflow-x: auto;
+}
+
 .facts {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -2419,7 +2439,8 @@ a.runs-row:hover {
   color: var(--danger);
 }
 
-.field input[aria-invalid='true'] {
+.field input[aria-invalid='true'],
+.field textarea[aria-invalid='true'] {
   border-color: var(--danger);
 }
 
