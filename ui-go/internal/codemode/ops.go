@@ -448,6 +448,8 @@ const bundleWaitTS = `    /** Poll importStatus / pushStatus until the task is d
 const globalsTS = `
 /** Wait without blocking the server (counts toward the run's time limit). */
 declare function sleep(ms: number): Promise<void>;
+/** A deep copy through JSON (plain data such as job configs). */
+declare function structuredClone<T>(value: T): T;
 /** Captured and returned as logs (1 MiB cap). */
 declare const console: { log(...a: unknown[]): void; info(...a: unknown[]): void; warn(...a: unknown[]): void; error(...a: unknown[]): void };
 /** Thrown by aitk calls that fail: code is the /v1 error code (not_found, conflict, ...), status the HTTP status. */

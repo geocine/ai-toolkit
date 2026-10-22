@@ -39,3 +39,10 @@ func TestCallerCapsAndTextChecks(t *testing.T) {
 		t.Fatalf("writeText with a number: %+v, wrote %v", res.Error, wrote)
 	}
 }
+
+func TestStructuredClone(t *testing.T) {
+	res := Run(context.Background(), `const a = { x: [1, { y: 2 }] }; const b = structuredClone(a); b.x[1].y = 3; return [a.x[1].y, b.x[1].y]`, Options{Call: HandlerCaller(http.NotFoundHandler(), "", "")})
+	if res.Error != nil || string(res.Result) != "[2,3]" {
+		t.Fatalf("%s %+v", res.Result, res.Error)
+	}
+}
