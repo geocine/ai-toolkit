@@ -39,17 +39,25 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!activeServer) return;
     let cancelled = false;
-    const t = setTimeout(async () => {
+    const run = async () => {
       const c = await syncPresets(activeServer, local.current);
       if (cancelled) return;
       if (c.imported) setImported(c.imported);
       if (c.edits) setEdits(c.edits);
       if (c.deleted) setDeleted(c.deleted);
       if (c.resets) setResets(c.resets);
-    }, 800);
+    };
+    // soon after a change here; every 30 s and on coming back to the tab for
+    // what agents changed on the server
+    const t = setTimeout(run, 800);
+    const every = setInterval(() => document.visibilityState === 'visible' && run(), 30_000);
+    const onVisible = () => document.visibilityState === 'visible' && run();
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
       cancelled = true;
       clearTimeout(t);
+      clearInterval(every);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, [activeServer?.id, activeServer?.base, activeServer?.token, imported, edits, deleted, resets]); // eslint-disable-line react-hooks/exhaustive-deps
 
