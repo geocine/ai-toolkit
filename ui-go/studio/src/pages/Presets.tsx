@@ -1,8 +1,8 @@
-import { ChevronDown, Download, FileUp, Lightbulb } from 'lucide-react';
+import { ChevronDown, Copy, Download, FileUp, Lightbulb, Pencil } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { ErrorNote, NeedServer, PageHeader } from '../components/ui';
 import { useStudio } from '../lib/context';
-import { presetFromText, presetToYAML, type Preset } from '../lib/presets';
+import { duplicatePreset, editPreset, presetConfigYAML, presetFromText, presetToYAML, type Preset } from '../lib/presets';
 import { href } from '../lib/route';
 import { DataPresets } from './DataPresets';
 
@@ -32,6 +32,61 @@ export function PresetNotes({ preset }: { preset: Preset }) {
 
 // `code` only; notes are our own text
 const md = (s: string) => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!).replace(/`([^`]+)`/g, '<code>$1</code>');
+
+function PresetEditor({ preset, onSave, onCancel }: { preset: Preset; onSave: (p: Preset) => void; onCancel: () => void }) {
+  const [name, setName] = useState(preset.name);
+  const [text, setText] = useState(() => presetConfigYAML(preset));
+  const [error, setError] = useState<string | null>(null);
+  const save = () => {
+    try {
+      onSave(editPreset(preset, name, text));
+    } catch (e) {
+      // yaml's messages carry a code frame after the first line
+      setError((e instanceof Error ? e.message : String(e)).split('\n')[0].replace(/:$/, ''));
+    }
+  };
+  return (
+    <div className="preset-editor">
+      <label className="field">
+        <span>Name</span>
+        <input value={name} onChange={e => setName(e.target.value)} />
+      </label>
+      <label className="field">
+        <span>Config</span>
+        <textarea
+          className="config-editor"
+          rows={24}
+          spellCheck={false}
+          value={text}
+          aria-invalid={error ? true : undefined}
+          onChange={e => {
+            setText(e.target.value);
+            setError(null);
+          }}
+          onKeyDown={e => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+              e.preventDefault();
+              save();
+            }
+          }}
+        />
+        {error ? (
+          <small className="field-error">{error}</small>
+        ) : (
+          <small>The full ai-toolkit job config. Steps, rank, prompts and the other run settings become New run's defaults; New run fills in the name, trigger and dataset. Everything else trains as written.</small>
+        )}
+      </label>
+      <div className="row">
+        <button className="btn btn-primary" onClick={save}>
+          Save
+        </button>
+        <button className="btn" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function PresetTabs({ tab }: { tab: 'settings' | 'data' }) {
   return (
@@ -69,6 +124,14 @@ function SettingsPresets() {
   const [error, setError] = useState<unknown>(null);
   const file = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState<string | null>(presets[0]?.id ?? null);
+  const [editing, setEditing] = useState<string | null>(null);
+
+  const copy = (p: Preset, edit: boolean) => {
+    const c = duplicatePreset(p);
+    setImported(list => [...list, c]);
+    setOpen(c.id);
+    setEditing(edit ? c.id : null);
+  };
 
   const onFiles = async (files: FileList | null) => {
     setError(null);
@@ -88,7 +151,7 @@ function SettingsPresets() {
     <>
       <PageHeader
         title="Presets"
-        description="A preset is a full ai-toolkit job config plus the handful of knobs you change per run. Import any ai-toolkit YAML or JSON; the two settings traps found in your Krea files are checked on everything imported."
+        description="A preset is a full ai-toolkit job config plus the handful of knobs you change per run. Import any ai-toolkit YAML or JSON, or edit one here; the two settings traps found in your Krea files are checked on every import and save."
         actions={
           <>
             <input
@@ -118,12 +181,24 @@ function SettingsPresets() {
               <button className="preset-head" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : p.id)}>
                 <span className="preset-title">
                   <span className="preset-name">{p.name}</span>
-                  <span className={p.builtIn ? 'badge tone-quiet' : 'badge tone-accent'}>{p.builtIn ? 'Built-in' : 'Imported'}</span>
+                  <span className={p.builtIn ? 'badge tone-quiet' : 'badge tone-accent'}>{p.builtIn ? 'Built-in' : 'Custom'}</span>
                 </span>
                 <span className="preset-desc">{p.description}</span>
                 <ChevronDown className="preset-chevron" aria-hidden />
               </button>
-              {isOpen && (
+              {isOpen && editing === p.id && (
+                <div className="preset-body">
+                  <PresetEditor
+                    preset={p}
+                    onSave={next => {
+                      setImported(list => list.map(x => (x.id === p.id ? next : x)));
+                      setEditing(null);
+                    }}
+                    onCancel={() => setEditing(null)}
+                  />
+                </div>
+              )}
+              {isOpen && editing !== p.id && (
                 <div className="preset-body">
                   <dl className="facts">
                     <div className="fact-wide">
@@ -158,6 +233,23 @@ function SettingsPresets() {
                   </dl>
                   <PresetNotes preset={p} />
                   <div className="row">
+                    {p.builtIn ? (
+                      <button className="btn" onClick={() => copy(p, true)}>
+                        <Pencil />
+                        Edit a copy
+                      </button>
+                    ) : (
+                      <>
+                        <button className="btn" onClick={() => setEditing(p.id)}>
+                          <Pencil />
+                          Edit config
+                        </button>
+                        <button className="btn" onClick={() => copy(p, false)}>
+                          <Copy />
+                          Duplicate
+                        </button>
+                      </>
+                    )}
                     <button className="btn" onClick={() => saveText(`${p.name.replace(/[^\w.-]+/g, '_')}.yml`, presetToYAML(p))}>
                       <Download />
                       Export YAML

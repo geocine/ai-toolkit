@@ -295,16 +295,18 @@ export function validate(k: Knobs): string[] {
 
 // ---- import / export ----
 
-export function presetFromText(text: string, filename: string): Preset {
-  const parsed = filename.endsWith('.json') ? JSON.parse(text) : YAML.parse(text);
+/**
+ * Parses an ai-toolkit job config (YAML, or JSON when `json`) and fixes the
+ * two traps from the user's Krea files, with a note per fix.
+ */
+export function parseConfig(text: string, json = false): { cfg: JobConfig; notes: Preset['notes'] } {
+  const parsed = json ? JSON.parse(text) : YAML.parse(text);
   const cfg: JobConfig = parsed?.config?.process ? parsed : parsed?.job_config?.config?.process ? parsed.job_config : null;
   if (!cfg || !Array.isArray(cfg.config.process) || !cfg.config.process[0]) {
     throw new Error('Not an ai-toolkit job config: expected config.process[0].');
   }
-  const k = readKnobs(cfg);
   const p = proc(cfg);
   const notes: Preset['notes'] = [];
-  // the same two traps as in the user's files, checked on anything imported
   const misplaced = ['loss_type', 'do_differential_guidance', 'differential_guidance_scale'].filter(key => key in p && !(key in (p.train ?? {})));
   if (misplaced.length) {
     p.train = { ...(p.train ?? {}) };
@@ -322,15 +324,57 @@ export function presetFromText(text: string, filename: string): Preset {
     delete t.ma_decay;
     notes.push({ title: 'EMA fixed', body: 'Loose `use_ema` / `ema_decay` were rewritten as `train.ema_config`, the only place the trainer reads EMA from.' });
   }
+  return { cfg, notes };
+}
+
+const describe = (cfg: JobConfig) => {
+  const p = proc(cfg);
+  return `${p.model?.arch ?? 'unknown arch'} · ${p.network?.type ?? 'lora'} · ${p.model?.name_or_path ?? ''}`;
+};
+
+const knobDefaults = (cfg: JobConfig): Preset['defaults'] => {
+  const { name: _n, trigger: _t, ...k } = readKnobs(cfg);
+  return k;
+};
+
+export function presetFromText(text: string, filename: string): Preset {
+  const { cfg, notes } = parseConfig(text, filename.endsWith('.json'));
   return {
     id: 'imported-' + Math.random().toString(36).slice(2, 8),
-    name: (filename.replace(/\.(ya?ml|json)$/i, '') || k.name || 'Imported') + ' (imported)',
-    description: `${p.model?.arch ?? 'unknown arch'} · ${p.network?.type ?? 'lora'} · ${p.model?.name_or_path ?? ''}`,
+    name: (filename.replace(/\.(ya?ml|json)$/i, '') || cfg.config.name || 'Imported') + ' (imported)',
+    description: describe(cfg),
     builtIn: false,
     base: cfg,
-    defaults: { ...k },
+    defaults: knobDefaults(cfg),
     notes,
   };
+}
+
+/** An editable copy; the built-in one stays as it ships. */
+export function duplicatePreset(p: Preset): Preset {
+  return { ...clone(p), id: 'custom-' + Math.random().toString(36).slice(2, 8), name: `${p.name} (copy)`, builtIn: false };
+}
+
+/**
+ * The preset with its config replaced by edited YAML. The run knobs are read
+ * again from the new config; the notes are the fixes this save made.
+ */
+export function editPreset(p: Preset, name: string, text: string): Preset {
+  const { cfg, notes } = parseConfig(text);
+  return {
+    ...p,
+    name: name.trim() || p.name,
+    // a written description (the built-in's, on a copy) stays; a generated one follows the config
+    description: p.description === describe(p.base) ? describe(cfg) : p.description,
+    base: cfg,
+    defaults: { ...knobDefaults(cfg), subject: p.defaults.subject },
+    notes,
+  };
+}
+
+/** The preset's own config, as edited (no run knobs applied). */
+export function presetConfigYAML(p: Preset): string {
+  return YAML.stringify(p.base, { lineWidth: 0 });
 }
 
 export function presetToYAML(preset: Preset, k?: Knobs): string {
