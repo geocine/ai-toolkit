@@ -24,9 +24,12 @@ export function DatasetDetail({ name }: { name: string }) {
   const zipInput = useRef<HTMLInputElement>(null);
   const base = `/v1/datasets/${encodeURIComponent(name)}`;
 
+  // a refresh keeps as many items as are shown (pages loaded with "Load more")
+  const shown = useRef(PAGE);
+  shown.current = Math.max(PAGE, items.length);
   const load = useCallback(async () => {
     try {
-      const d = await api.get<Detail>(`${base}?limit=${PAGE}`);
+      const d = await api.get<Detail>(`${base}?limit=${shown.current}`);
       setDs(d);
       setItems(d.items);
       setCursor(d.next_cursor);

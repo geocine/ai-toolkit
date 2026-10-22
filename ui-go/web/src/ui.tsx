@@ -222,13 +222,22 @@ export const Section = ({ title, actions, children }: { title: string; actions?:
   </section>
 );
 
-export const Field = ({ label, children, hint }: { label: string; children: ReactNode; hint?: ReactNode }) => (
-  <label className="field">
-    <span className="field-label">{label}</span>
-    {children}
-    {hint && <span className="field-hint">{hint}</span>}
-  </label>
-);
+// group: the children are several controls (a segmented control): a <label>
+// would hand every click on it to the first button
+export const Field = ({ label, children, hint, group }: { label: string; children: ReactNode; hint?: ReactNode; group?: boolean }) =>
+  group ? (
+    <div className="field" role="group" aria-label={label}>
+      <span className="field-label">{label}</span>
+      {children}
+      {hint && <span className="field-hint">{hint}</span>}
+    </div>
+  ) : (
+    <label className="field">
+      <span className="field-label">{label}</span>
+      {children}
+      {hint && <span className="field-hint">{hint}</span>}
+    </label>
+  );
 
 export const Mono = ({ children, title }: { children: ReactNode; title?: string }) => (
   <span className="mono" title={title}>

@@ -183,6 +183,17 @@ func ImportOnBoot(ctx context.Context) {
 	}
 }
 
+// cutOff reports whether a remote job's state means its server went away
+// mid-run: what AITK_IMPORT_ON_BOOT=all picks up. A run the user stopped, or
+// one that failed on its own, is imported only when named.
+func cutOff(st string) bool {
+	switch st {
+	case jobstate.Queued, jobstate.Starting, jobstate.Running, jobstate.Stopping, jobstate.Interrupted:
+		return true
+	}
+	return false
+}
+
 // importPass imports what it can and returns how many candidates are left.
 func importPass(ctx context.Context, rem string, names []string, force bool) int {
 	jobs, err := portable.ListRemoteJobs(ctx, rem)
@@ -196,8 +207,8 @@ func importPass(ctx context.Context, rem string, names []string, force bool) int
 		if names != nil && !slices.Contains(names, rj.Name) {
 			continue
 		}
-		if names == nil && (rj.State == jobstate.Completed || rj.State == jobstate.Draft) {
-			continue // "all" means unfinished work
+		if names == nil && !cutOff(rj.State) {
+			continue // "all" means work that was cut off, not runs that finished, failed or were stopped
 		}
 		local, err := store.FindFirstJob(ctx, store.JobQuery{Where: `"name" = ?`, Args: []any{rj.Name}})
 		if err != nil {
