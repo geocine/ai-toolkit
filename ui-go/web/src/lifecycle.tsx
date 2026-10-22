@@ -437,7 +437,7 @@ export function NotificationsSection() {
         )
       }
     >
-      <div className="grid grid-2">
+      <div className="grid grid-2 notify-grid">
         <div className="card">
           <div className="card-head">
             <h3 className="card-title">Destinations</h3>
@@ -485,9 +485,9 @@ export function NotificationsSection() {
           </form>
           <div className="sink-guide">
             <div className="field-label">How to set one up</div>
-            <div className="seg seg-text" role="radiogroup" aria-label="Destination type">
+            <div className="tabs sink-tabs" role="tablist" aria-label="Destination type">
               {SINK_GUIDES.map(g => (
-                <button key={g.id} type="button" role="radio" aria-checked={guide.id === g.id} className={guide.id === g.id ? 'on' : ''} onClick={() => setGuide(g)}>
+                <button key={g.id} type="button" role="tab" aria-selected={guide.id === g.id} className={guide.id === g.id ? 'tab active' : 'tab'} onClick={() => setGuide(g)}>
                   {g.label}
                 </button>
               ))}
