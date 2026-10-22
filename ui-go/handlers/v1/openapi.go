@@ -75,6 +75,7 @@ var ops = []op{
 	{"POST", "/v1/uploads/{id}/retry", "remotes", "Queue a failed or finished upload again", nil, "", 200, "Upload"},
 
 	{"GET", "/v1/bundles", "bundles", "Run bundles in a remote's library, newest first", []string{"remote:string"}, "", 200, "items:LibraryBundle"},
+	{"GET", "/v1/bundles/content", "bundles", "Download a bundle zip from a remote's library (Range, as an attachment)", []string{"remote:string", "id:string"}, "", 200, "binary"},
 	{"DELETE", "/v1/bundles/{id}", "bundles", "Delete a bundle and its summary from a remote's library", []string{"remote:string"}, "", 204, ""},
 	{"POST", "/v1/bundles/imports", "bundles", "Import a bundle (JSON source: url, remote+key or upload_id; or the zip itself as the body) in the background", nil, "BundleImport", 202, "BundleTask"},
 	{"GET", "/v1/bundles/imports", "bundles", "Bundle imports, newest first", []string{"job_id:string"}, "", 200, "items:BundleTask"},
