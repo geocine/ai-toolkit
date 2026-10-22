@@ -694,3 +694,31 @@ func TestJobKeepsCheckpoints(t *testing.T) {
 		t.Fatalf("policy %+v", p)
 	}
 }
+
+// Importing a finished run to look at it leaves no lease behind, so another
+// server can import it at once.
+func TestImportFinishedRunLeavesNoLease(t *testing.T) {
+	ctx := context.Background()
+	shared := t.TempDir()
+	a := newNode(t, shared)
+	j := setupJob(t, a, "shared")
+	if _, err := store.UpdateJob(ctx, j.ID, store.Fields{"status": "completed", "info": "Training completed"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SyncJob(ctx, j.ID, ReasonFinal); err != nil {
+		t.Fatal(err)
+	}
+	b := newNode(t, shared)
+	b.use()
+	if _, err := Import(ctx, ImportRequest{Remote: "shared", Name: jobName}); err != nil {
+		t.Fatal(err)
+	}
+	if l := manifestOn(t, shared).Lease; l != nil {
+		t.Fatalf("lease after viewing import: %+v", l)
+	}
+	c := newNode(t, shared)
+	c.use()
+	if _, err := Import(ctx, ImportRequest{Remote: "shared", Name: jobName}); err != nil {
+		t.Fatalf("second server: %v", err)
+	}
+}
