@@ -33,6 +33,8 @@ export interface Preset {
   promptSets?: Partial<Record<Subject, string[]>>;
   captionTemplates?: Partial<Record<Subject, string>>;
   notes: { title: string; body: string }[];
+  /** A built-in preset the user has edited (the shipped one is kept for reset). */
+  edited?: boolean;
 }
 
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
@@ -350,9 +352,9 @@ export function presetFromText(text: string, filename: string): Preset {
   };
 }
 
-/** An editable copy; the built-in one stays as it ships. */
+/** A separate copy to change on its own. */
 export function duplicatePreset(p: Preset): Preset {
-  return { ...clone(p), id: 'custom-' + Math.random().toString(36).slice(2, 8), name: `${p.name} (copy)`, builtIn: false };
+  return { ...clone(p), id: 'custom-' + Math.random().toString(36).slice(2, 8), name: `${p.name} (copy)`, builtIn: false, edited: undefined };
 }
 
 /**
@@ -368,7 +370,8 @@ export function editPreset(p: Preset, name: string, text: string): Preset {
     description: p.description === describe(p.base) ? describe(cfg) : p.description,
     base: cfg,
     defaults: { ...knobDefaults(cfg), subject: p.defaults.subject },
-    notes,
+    // a built-in one keeps the notes it ships with
+    notes: [...(builtInPresets.find(b => b.id === p.id)?.notes ?? []), ...notes],
   };
 }
 
