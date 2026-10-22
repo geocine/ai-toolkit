@@ -318,7 +318,8 @@ export const fmtBytes = (n: number | null | undefined) => {
 export const fmtAgo = (iso: string | null | undefined) => {
   if (!iso) return '—';
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (s < 0) return 'in ' + fmtDuration(-s);
+  // a few seconds ahead is clock skew between server and browser
+  if (s < -5) return 'in ' + fmtDuration(-s);
   if (s < 5) return 'just now';
   return fmtDuration(s) + ' ago';
 };
