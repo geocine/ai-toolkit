@@ -27,7 +27,14 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const [edits, setEdits] = useStored<Record<string, Preset>>('aitk.studio.presetEdits', {});
   const value = useMemo<Studio>(() => {
     const active = servers.find(s => s.id === activeId) ?? servers[0] ?? null;
-    const presets = [...builtInPresets.map(b => edits[b.id] ?? b), ...imported];
+    // an edited built-in shows the notes it ships with, then the ones its edits got
+    const presets = [
+      ...builtInPresets.map(b => {
+        const e = edits[b.id];
+        return e ? { ...e, notes: [...b.notes, ...e.notes.filter(n => !b.notes.some(s => s.title === n.title))] } : b;
+      }),
+      ...imported,
+    ];
     const savePreset = (p: Preset) => {
       if (p.builtIn) setEdits(e => ({ ...e, [p.id]: { ...p, edited: true } }));
       else setImported(list => list.map(x => (x.id === p.id ? p : x)));
