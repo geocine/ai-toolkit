@@ -15,10 +15,10 @@ another provider picks the job up and continues from the last checkpoint.
 ```bash
 docker run -d --gpus all -p 8675:8675 \
   -e AI_TOOLKIT_AUTH=<long random token> \
-  -e AITK_R2_ENDPOINT=https://<account>.r2.cloudflarestorage.com \
-  -e AITK_R2_BUCKET=<bucket> \
-  -e AITK_R2_ACCESS_KEY_ID=<key id> -e AITK_R2_SECRET_ACCESS_KEY=<secret> \
-  -e AITK_SYNC_REMOTE=r2 -e AITK_AUTO_RESUME=1 -e AITK_IMPORT_ON_BOOT=all \
+  -e AITK_S3_ENDPOINT=https://<account>.r2.cloudflarestorage.com \
+  -e AITK_S3_BUCKET=<bucket> \
+  -e AITK_S3_ACCESS_KEY_ID=<key id> -e AITK_S3_SECRET_ACCESS_KEY=<secret> \
+  -e AITK_SYNC_REMOTE=s3 -e AITK_AUTO_RESUME=1 -e AITK_IMPORT_ON_BOOT=all \
   -e HF_TOKEN=<hf token, for gated base models> \
   ghcr.io/geocine/aitoolkit-go:latest
 ```
@@ -52,8 +52,8 @@ same machine.
 **Remotes** (created or updated on every start)
 | Variable | Meaning |
 |---|---|
-| `AITK_R2_ENDPOINT`, `AITK_R2_BUCKET`, `AITK_R2_ACCESS_KEY_ID`, `AITK_R2_SECRET_ACCESS_KEY` | An S3-compatible remote (Cloudflare R2, AWS S3, MinIO, Backblaze B2, ...). |
-| `AITK_R2_REGION` (`auto`), `AITK_R2_PREFIX`, `AITK_R2_PATH_STYLE` (`1` for MinIO), `AITK_R2_NAME` (`r2`) | Its options and the name it gets. |
+| `AITK_S3_ENDPOINT`, `AITK_S3_BUCKET`, `AITK_S3_ACCESS_KEY_ID`, `AITK_S3_SECRET_ACCESS_KEY` | An S3-compatible remote (Cloudflare R2, AWS S3, MinIO, Backblaze B2, ...). |
+| `AITK_S3_REGION` (empty: `auto` for R2, else the bucket's own), `AITK_S3_PREFIX`, `AITK_S3_PATH_STYLE` (`1` for MinIO), `AITK_S3_NAME` (`s3`) | Its options and the name it gets. |
 | `AITK_HF_REPO`, `AITK_HF_REPO_TYPE` (`model`), `AITK_HF_PATH`, `AITK_HF_TOKEN` (else `HF_TOKEN`), `AITK_HF_NAME` (`hf`) | A private Hugging Face repo remote (created if missing). |
 | `AITK_REMOTES` | Any number of remotes as JSON: `[{"name","kind":"s3"\|"hf"\|"fs","config":{...},"credentials":{...}}]` (shapes in docs/headless.md). |
 

@@ -25,10 +25,10 @@ func TestApplyFromEnv(t *testing.T) {
 	shared := testutil.TempDir(t)
 	remotes, _ := json.Marshal([]map[string]any{{"name": "shared", "kind": "fs", "config": map[string]string{"path": shared}}})
 	t.Setenv("AITK_REMOTES", string(remotes))
-	t.Setenv("AITK_R2_ENDPOINT", "https://acct.r2.cloudflarestorage.com")
-	t.Setenv("AITK_R2_BUCKET", "training")
-	t.Setenv("AITK_R2_ACCESS_KEY_ID", "AK")
-	t.Setenv("AITK_R2_SECRET_ACCESS_KEY", "SK")
+	t.Setenv("AITK_S3_ENDPOINT", "https://acct.r2.cloudflarestorage.com")
+	t.Setenv("AITK_S3_BUCKET", "training")
+	t.Setenv("AITK_S3_ACCESS_KEY_ID", "AK")
+	t.Setenv("AITK_S3_SECRET_ACCESS_KEY", "SK")
 	t.Setenv("AITK_SYNC_REMOTE", "shared")
 	t.Setenv("AITK_AUTO_RESUME", "1")
 	t.Setenv("AITK_MAX_AUTO_RESUMES", "5")
@@ -36,14 +36,14 @@ func TestApplyFromEnv(t *testing.T) {
 	if err := Apply(ctx); err != nil {
 		t.Fatal(err)
 	}
-	r2, err := remote.Get(ctx, "r2")
+	r2, err := remote.Get(ctx, "s3")
 	if err != nil || r2 == nil || r2.Kind != "s3" {
-		t.Fatalf("r2 remote: %+v %v", r2, err)
+		t.Fatalf("s3 remote: %+v %v", r2, err)
 	}
 	var cfg map[string]any
 	json.Unmarshal(r2.Config, &cfg)
-	if cfg["region"] != "auto" || cfg["bucket"] != "training" {
-		t.Fatalf("r2 config %v", cfg)
+	if cfg["region"] != "" || cfg["bucket"] != "training" {
+		t.Fatalf("s3 config %v", cfg)
 	}
 	sharedRemote, _ := remote.Get(ctx, "shared")
 	if v, _, _ := state.Setting(ctx, state.SettingSyncRemoteDefault); v != sharedRemote.ID {
@@ -54,7 +54,7 @@ func TestApplyFromEnv(t *testing.T) {
 	}
 
 	// applying again (next boot, changed secret) updates in place
-	t.Setenv("AITK_R2_SECRET_ACCESS_KEY", "SK2")
+	t.Setenv("AITK_S3_SECRET_ACCESS_KEY", "SK2")
 	if err := Apply(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -62,9 +62,9 @@ func TestApplyFromEnv(t *testing.T) {
 	if len(all) != 2 {
 		t.Fatalf("remotes after second apply: %d", len(all))
 	}
-	again, _ := remote.Get(ctx, "r2")
+	again, _ := remote.Get(ctx, "s3")
 	if again.ID != r2.ID || string(again.Secret) == string(r2.Secret) {
-		t.Fatal("r2 should keep its id and get the new secret")
+		t.Fatal("s3 should keep its id and get the new secret")
 	}
 
 	// a job without a policy gets the default; one with a policy keeps it
