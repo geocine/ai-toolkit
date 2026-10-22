@@ -866,7 +866,10 @@ function StepLaunch({ preset, k, dataset, back }: { preset: Preset; k: Knobs; da
   const config = info.data ? buildConfig(preset, k, { datasetPath: info.data.ds.path, trainingFolder: info.data.settings.training_folder }) : null;
   // the server's own look at this config before a GPU is paid for
   const configKey = config ? JSON.stringify(config) : '';
-  const preflight = useLoad(server, s => (config ? post<Preflight>(s, '/v1/jobs/preflight', { config }) : Promise.resolve(null)), [configKey]);
+  const intended: Record<string, unknown> = { auto_resume: autoResume };
+  if (syncRemote) intended.sync_remote = syncRemote === '-' ? '' : syncRemote;
+  if (syncRemote !== '-') intended.keep_checkpoints = Number(keep);
+  const preflight = useLoad(server, s => (config ? post<Preflight>(s, '/v1/jobs/preflight', { config, policy: intended }) : Promise.resolve(null)), [configKey, syncRemote, keep, autoResume]);
   const pf = preflight.data?.checks ?? [];
   const blocked = pf.some(c => c.level === 'block');
 

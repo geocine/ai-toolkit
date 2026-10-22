@@ -46,6 +46,8 @@ func preflightJob(w http.ResponseWriter, r *http.Request) {
 	var b struct {
 		Config json.RawMessage `json:"config"`
 		JobID  string          `json:"job_id"`
+		// the policy the job will be created with (as on POST /v1/jobs)
+		Policy json.RawMessage `json:"policy"`
 	}
 	if !v1api.Decode(w, r, &b) {
 		return
@@ -74,13 +76,21 @@ func preflightJob(w http.ResponseWriter, r *http.Request) {
 		v1api.Fail(w, v1api.CodeInvalidRequest, "config or job_id is required")
 		return
 	}
+	hasPolicy := b.JobID != ""
+	if len(b.Policy) > 0 && string(b.Policy) != "null" {
+		if err := policyPatch(ctx, b.Policy, &pol); err != nil {
+			v1api.Respond(w, r, err)
+			return
+		}
+		hasPolicy = true
+	}
 	if _, err := checkConfig(raw); err != nil {
 		v1api.Respond(w, r, err)
 		return
 	}
 	var cfg map[string]any
 	json.Unmarshal(raw, &cfg)
-	checks := runPreflight(ctx, cfg, pol, b.JobID != "")
+	checks := runPreflight(ctx, cfg, pol, hasPolicy)
 	ok := true
 	for _, c := range checks {
 		if c.Level == LevelBlock {
@@ -174,10 +184,10 @@ func runPreflight(ctx context.Context, cfg map[string]any, pol state.Policy, has
 			add(LevelInfo, fmt.Sprintf("%s: %d images", where, images), "")
 		}
 		if uncaptioned > 0 {
-			add(LevelWarn, fmt.Sprintf("%s: %d of %d images have no caption (the trainer uses the default caption)", where, uncaptioned, images), "datasets.caption, or datasets.fixCaptions with fill_missing")
+			add(LevelWarn, fmt.Sprintf("%s: %d of %d images have no caption (the trainer uses the default caption)", where, uncaptioned, images), "caption them (Auto caption, or datasets.caption / datasets.fixCaptions fill_missing)")
 		}
 		if n := flags[FlagNoTrigger] + flags[FlagTriggerCase]; n > 0 && trigger != "" {
-			add(LevelWarn, fmt.Sprintf("%s: %d captions lack the trigger %q or misspell it", where, n, trigger), "datasets.fixCaptions with fix_trigger_case and ensure_trigger")
+			add(LevelWarn, fmt.Sprintf("%s: %d captions lack the trigger %q or misspell it", where, n, trigger), "fix the trigger in the captions (Fix the trigger, or datasets.fixCaptions)")
 		}
 		if n := flags[FlagTruncated]; n > 0 {
 			add(LevelWarn, fmt.Sprintf("%s: %d captions end mid-sentence (cut off)", where, n), "caption again with a higher caption.max_new_tokens")
@@ -249,7 +259,7 @@ func runPreflight(ctx context.Context, cfg map[string]any, pol state.Policy, has
 		} else if _, err := c.Stat(ctx, "aitk-preflight"); err != nil && !errors.Is(err, remote.ErrNotFound) {
 			add(LevelWarn, "sync remote "+rem.Name+" is not reachable: "+err.Error(), "check its credentials and endpoint")
 		} else if n, ok := state.KeepCheckpoints(ctx, pol); !ok || n == 0 {
-			add(LevelInfo, "the sync remote keeps only the newest checkpoint", "set policy.keep_checkpoints (-1 all) to pick the best step after the server is gone")
+			add(LevelInfo, "the sync remote keeps only the newest checkpoint", "keep all checkpoints (policy.keep_checkpoints -1) to pick the best step after the server is gone")
 		}
 	}
 	if life, err := lifecycle.Get(); err == nil && (life.Mode == lifecycle.ModeStop || life.Mode == lifecycle.ModeDestroy) {
