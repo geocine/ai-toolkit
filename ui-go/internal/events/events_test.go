@@ -3,15 +3,19 @@ package events
 import (
 	"bufio"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/geocine/aitoolkit/internal/settings"
 	"github.com/geocine/aitoolkit/internal/state"
+	"github.com/geocine/aitoolkit/internal/store"
 	"github.com/geocine/aitoolkit/internal/testutil"
 )
 
@@ -150,5 +154,98 @@ func TestLongPoll(t *testing.T) {
 	// and gives up after wait_ms
 	if items, took := get("?after=2&wait_ms=300"); len(items) != 0 || took < 250*time.Millisecond {
 		t.Fatalf("timeout: %d in %s", len(items), took)
+	}
+}
+
+// Two open streams of one job each get every log chunk exactly once: each
+// stream's tailer used to publish to all of them.
+func TestStreamLogOncePerStream(t *testing.T) {
+	srv := setup(t)
+	dir := testutil.TempDir(t)
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(dir, "aitk_db.db")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if _, err := db.Exec(`
+CREATE TABLE "Settings" ("id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, "key" TEXT NOT NULL, "value" TEXT NOT NULL);
+CREATE TABLE "Job" (
+    "id" TEXT NOT NULL PRIMARY KEY, "name" TEXT NOT NULL, "gpu_ids" TEXT NOT NULL, "job_config" TEXT NOT NULL,
+    "created_at" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "updated_at" DATETIME NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'stopped', "stop" BOOLEAN NOT NULL DEFAULT false,
+    "return_to_queue" BOOLEAN NOT NULL DEFAULT false, "step" INTEGER NOT NULL DEFAULT 0, "total_steps" INTEGER,
+    "info" TEXT NOT NULL DEFAULT '', "speed_string" TEXT NOT NULL DEFAULT '', "queue_position" INTEGER NOT NULL DEFAULT 0,
+    "pid" INTEGER, "job_type" TEXT NOT NULL DEFAULT 'train', "job_ref" TEXT,
+    "save_now" BOOLEAN NOT NULL DEFAULT false, "sample_now" BOOLEAN NOT NULL DEFAULT false);`); err != nil {
+		t.Fatal(err)
+	}
+	prev := store.DB
+	store.DB = db
+	t.Cleanup(func() { store.DB = prev; settings.Flush() })
+	training := filepath.Join(dir, "output")
+	if _, err := db.Exec(`INSERT INTO "Settings" ("key","value") VALUES ('TRAINING_FOLDER', ?)`, training); err != nil {
+		t.Fatal(err)
+	}
+	settings.Flush()
+	job, err := store.CreateJob(t.Context(), store.NewJob{Name: "tail", GpuIDs: "0", JobConfig: "{}"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(training, "tail", "log.txt")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(logPath, []byte("start\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	open := func() chan string {
+		req, _ := http.NewRequestWithContext(rctx, "GET", srv.URL+"/v1/events/stream?job_id="+job.ID+"&types=job.log", nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { resp.Body.Close() })
+		texts := make(chan string, 10)
+		go func() {
+			sc := bufio.NewScanner(resp.Body)
+			for sc.Scan() {
+				if line, ok := strings.CutPrefix(sc.Text(), "data: "); ok {
+					var e struct {
+						Data struct{ Text string } `json:"data"`
+					}
+					json.Unmarshal([]byte(line), &e)
+					texts <- e.Data.Text
+				}
+			}
+		}()
+		return texts
+	}
+	a, b := open(), open()
+	time.Sleep(3 * logPoll) // both tailers have taken their first look
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString("step 1\n")
+	f.Close()
+
+	for name, texts := range map[string]chan string{"a": a, "b": b} {
+		var got []string
+		deadline := time.After(4 * logPoll)
+	collect:
+		for {
+			select {
+			case s := <-texts:
+				got = append(got, s)
+			case <-deadline:
+				break collect
+			}
+		}
+		if len(got) != 1 || got[0] != "step 1\n" {
+			t.Fatalf("stream %s got %q, want one \"step 1\n\"", name, got)
+		}
 	}
 }
