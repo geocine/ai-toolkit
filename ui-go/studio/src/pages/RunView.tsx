@@ -5,6 +5,7 @@ import { ExportDialog } from '../components/ExportDialog';
 import { LossChart } from '../components/LossChart';
 import { ErrorNote, NeedServer, Progress, Section, StatePill, useLoad } from '../components/ui';
 import {
+  call,
   get,
   mediaUrl,
   post,
@@ -300,7 +301,7 @@ export function RunView({ id }: { id: string }) {
       </Section>
 
       <Section title="Checkpoints">
-        <Checkpoints job={j} items={ckpts} remotes={remotes.data?.items ?? []} uploads={uploads.data?.items ?? []} onUpload={uploads.reload} />
+        <Checkpoints job={j} items={ckpts} remotes={remotes.data?.items ?? []} uploads={uploads.data?.items ?? []} onUpload={uploads.reload} onJob={job.setData} />
       </Section>
 
       <Section title="Log">
@@ -334,7 +335,7 @@ export function RunView({ id }: { id: string }) {
   );
 }
 
-function Checkpoints({ job, items, remotes, uploads, onUpload }: { job: Job; items: Checkpoint[]; remotes: Remote[]; uploads: Upload[]; onUpload: () => void }) {
+function Checkpoints({ job, items, remotes, uploads, onUpload, onJob }: { job: Job; items: Checkpoint[]; remotes: Remote[]; uploads: Upload[]; onUpload: () => void; onJob: (j: Job) => void }) {
   const server = useServer()!;
   const [remote, setRemote] = useState('');
   const [error, setError] = useState<unknown>(null);
@@ -351,6 +352,15 @@ function Checkpoints({ job, items, remotes, uploads, onUpload }: { job: Job; ite
       setError(e);
     } finally {
       setBusy('');
+    }
+  };
+  // the checkpoint picked as the run's result (agents read it as job.chosen)
+  const choose = async (c: Checkpoint | null) => {
+    setError(null);
+    try {
+      onJob(c ? await call<Job>(server, 'PUT', `/v1/jobs/${job.id}/chosen`, { file: c.name }) : await call<Job>(server, 'DELETE', `/v1/jobs/${job.id}/chosen`));
+    } catch (e) {
+      setError(e);
     }
   };
   const push = async (c: Checkpoint) => {
@@ -402,6 +412,7 @@ function Checkpoints({ job, items, remotes, uploads, onUpload }: { job: Job; ite
                   <td className="num step-cell">{c.step?.toLocaleString() ?? 'Final'}</td>
                   <td className="mono file-cell" title={c.name}>
                     {c.name}
+                    {job.chosen?.file === c.name && <span className="badge tone-ok chosen-badge">Chosen</span>}
                   </td>
                   <td className="num">{bytes(c.size)}</td>
                   <td className="muted-cell">{ago(c.modified)}</td>
@@ -413,6 +424,9 @@ function Checkpoints({ job, items, remotes, uploads, onUpload }: { job: Job; ite
                           label={(u.state === 'running' && u.bytes ? `${Math.round((u.bytes_done / u.bytes) * 100)}%` : u.state[0].toUpperCase() + u.state.slice(1)) + (u.error ? ` · ${u.error}` : '')}
                         />
                       )}
+                      <button className="btn btn-sm" onClick={() => choose(job.chosen?.file === c.name ? null : c)} title={job.chosen?.file === c.name ? 'Clear the choice' : "Mark this checkpoint as the run's result"}>
+                        {job.chosen?.file === c.name ? 'Unchoose' : 'Choose'}
+                      </button>
                       <button className="btn btn-sm" disabled={busy === c.name} onClick={() => dl(c)}>
                         <Download />
                         {busy === c.name ? 'Preparing…' : 'Download'}

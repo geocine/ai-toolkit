@@ -3,6 +3,7 @@ package v1
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
@@ -270,7 +271,123 @@ func jobSamples(w http.ResponseWriter, r *http.Request) {
 		v1api.Internal(w, r, err)
 		return
 	}
+	samplePrompts(j.JobConfig, samples)
 	v1api.Items(w, samples)
+}
+
+// samplePrompts fills each sample's prompt and seed from the job config's
+// sample section, the way ai-toolkit renders them: [trigger] becomes the
+// trigger word, and with walk_seed each prompt's seed is seed + its index.
+func samplePrompts(config string, samples []artifacts.Sample) {
+	var cfg struct {
+		Config struct {
+			Process []struct {
+				TriggerWord string `json:"trigger_word"`
+				Sample      struct {
+					Samples []struct {
+						Prompt string `json:"prompt"`
+						Seed   *int   `json:"seed"`
+					} `json:"samples"`
+					Prompts  []string `json:"prompts"`
+					Seed     *int     `json:"seed"`
+					WalkSeed bool     `json:"walk_seed"`
+				} `json:"sample"`
+			} `json:"process"`
+		} `json:"config"`
+	}
+	if json.Unmarshal([]byte(config), &cfg) != nil || len(cfg.Config.Process) == 0 {
+		return
+	}
+	p := cfg.Config.Process[0]
+	prompts, seeds := []string{}, []*int{}
+	for _, s := range p.Sample.Samples {
+		prompts, seeds = append(prompts, s.Prompt), append(seeds, s.Seed)
+	}
+	if len(prompts) == 0 {
+		for _, s := range p.Sample.Prompts {
+			prompts, seeds = append(prompts, s), append(seeds, nil)
+		}
+	}
+	for i := range samples {
+		idx := samples[i].Index
+		if idx == nil || *idx < 0 || *idx >= len(prompts) {
+			continue
+		}
+		text := prompts[*idx]
+		if p.TriggerWord != "" {
+			text = strings.ReplaceAll(strings.ReplaceAll(text, "[trigger]", p.TriggerWord), "[name]", p.TriggerWord)
+		}
+		samples[i].Prompt = &text
+		switch {
+		case seeds[*idx] != nil:
+			samples[i].Seed = seeds[*idx]
+		case p.Sample.Seed != nil:
+			s := *p.Sample.Seed
+			if p.Sample.WalkSeed {
+				s += *idx
+			}
+			samples[i].Seed = &s
+		}
+	}
+}
+
+// chooseCheckpoint is PUT /v1/jobs/{id}/chosen {step | file, strength?,
+// note?}: marks the checkpoint picked as the run's result; DELETE clears it.
+func chooseCheckpoint(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	j, ok := loadJob(w, r)
+	if !ok {
+		return
+	}
+	if r.Method == http.MethodDelete {
+		if err := state.SetChosen(ctx, j.ID, nil); err != nil {
+			v1api.Internal(w, r, err)
+			return
+		}
+		respondJob(w, r, http.StatusOK, j.ID)
+		return
+	}
+	var b struct {
+		Step     *int    `json:"step"`
+		File     string  `json:"file"`
+		Strength float64 `json:"strength"`
+		Note     string  `json:"note"`
+	}
+	if !v1api.Decode(w, r, &b) {
+		return
+	}
+	folder, err := jobFolder(ctx, j.Name)
+	if err != nil {
+		v1api.Internal(w, r, err)
+		return
+	}
+	cps, err := artifacts.Checkpoints(folder)
+	if err != nil {
+		v1api.Internal(w, r, err)
+		return
+	}
+	var pick *artifacts.Checkpoint
+	for i := range cps {
+		c := &cps[i]
+		if (b.File != "" && c.Name == b.File) || (b.File == "" && b.Step != nil && c.Step != nil && *c.Step == *b.Step) {
+			pick = c
+		}
+	}
+	if b.File == "" && b.Step == nil {
+		v1api.Fail(w, v1api.CodeInvalidRequest, "step or file is required")
+		return
+	}
+	// a step whose file is not on this server (kept only on a remote) is
+	// still a valid pick
+	c := &state.Chosen{Step: b.Step, File: b.File, Strength: b.Strength, Note: b.Note, At: state.NowMs()}
+	if pick != nil {
+		c.Step, c.File = pick.Step, pick.Name
+	}
+	if err := state.SetChosen(ctx, j.ID, c); err != nil {
+		v1api.Internal(w, r, err)
+		return
+	}
+	respondJob(w, r, http.StatusOK, j.ID)
 }
 
 // cachedHash is the file's sha256, cached in file_hashes by path, size and

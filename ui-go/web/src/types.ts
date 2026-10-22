@@ -32,7 +32,8 @@ export type Attempt = {
 };
 
 export type Checkpoint = { name: string; path: string; step: number | null; size: number; modified: string; sha256?: string };
-export type Sample = { name: string; path: string; step: number | null; index: number | null; modified: string };
+export type Sample = { name: string; path: string; step: number | null; index: number | null; modified: string; prompt?: string; seed?: number };
+export type Chosen = { step: number | null; file: string; strength?: number; note?: string; at: number };
 
 export type Job = {
   id: string;
@@ -55,6 +56,7 @@ export type Job = {
   attempts: number;
   last_attempt: Attempt | null;
   latest_checkpoint: Checkpoint | null;
+  chosen?: Chosen | null;
 };
 
 export type Items<T> = { items: T[]; next_cursor?: string | null };

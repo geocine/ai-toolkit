@@ -34,6 +34,9 @@ type Sample struct {
 	Step     *int      `json:"step"`
 	Index    *int      `json:"index"`
 	Modified time.Time `json:"modified"`
+	// from the job config's sample section (the trigger filled in), when known
+	Prompt *string `json:"prompt,omitempty"`
+	Seed   *int    `json:"seed,omitempty"`
 }
 
 var (

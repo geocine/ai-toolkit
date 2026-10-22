@@ -32,6 +32,8 @@ func Register(mux *http.ServeMux) {
 	httpx.Handle(mux, "POST /v1/jobs/{id}/kill", killJob)
 	httpx.Handle(mux, "POST /v1/jobs/{id}/save_now", flagJob("save_now"))
 	httpx.Handle(mux, "POST /v1/jobs/{id}/sample_now", flagJob("sample_now"))
+	httpx.Handle(mux, "PUT /v1/jobs/{id}/chosen", chooseCheckpoint)
+	httpx.Handle(mux, "DELETE /v1/jobs/{id}/chosen", chooseCheckpoint)
 	httpx.Handle(mux, "GET /v1/jobs/{id}/attempts", jobAttempts)
 	httpx.Handle(mux, "GET /v1/jobs/{id}/log", jobLog)
 	httpx.Handle(mux, "GET /v1/jobs/{id}/loss", jobLoss)
