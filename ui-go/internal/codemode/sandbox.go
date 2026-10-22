@@ -106,8 +106,12 @@ type run struct {
 	errCtor  goja.Value
 }
 
-// prelude defines AitkError and jobs.wait (on top of jobs.get).
+// prelude defines AitkError, jobs.wait (on top of jobs.get) and a JSON
+// structuredClone (goja has none; agents copy configs with it).
 const prelude = `
+if (typeof structuredClone === 'undefined') {
+  globalThis.structuredClone = v => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
+}
 class AitkError extends Error {
   constructor(code, status, message) { super(message); this.name = 'AitkError'; this.code = code; this.status = status; }
 }
