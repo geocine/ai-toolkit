@@ -23,7 +23,9 @@ import (
 	"github.com/geocine/aitoolkit/internal/bootstrap"
 	"github.com/geocine/aitoolkit/internal/events"
 	"github.com/geocine/aitoolkit/internal/httpx"
+	"github.com/geocine/aitoolkit/internal/lifecycle"
 	"github.com/geocine/aitoolkit/internal/mcpserver"
+	"github.com/geocine/aitoolkit/internal/notify"
 	"github.com/geocine/aitoolkit/internal/paths"
 	"github.com/geocine/aitoolkit/internal/server"
 	"github.com/geocine/aitoolkit/internal/state"
@@ -65,9 +67,18 @@ func main() {
 		log.Printf("Serving frontend from %s", dir)
 		mux.Handle("/", spa(dir))
 	}
+	// the studio at /studio/, so one server URL works from a phone
+	if dir := resolveStudioDir(); dir != "" {
+		log.Printf("Serving studio from %s at /studio/", dir)
+		mux.Handle("/studio/", http.StripPrefix("/studio", spa(dir)))
+		mux.Handle("/studio", http.RedirectHandler("/studio/", http.StatusMovedPermanently))
+		notify.SetLocalStudio(true)
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	// when done (AITK_WHEN_DONE) on a machine without a provider API: exit cleanly
+	lifecycle.SetExit(cancel)
 	// the supervisor runs even with --no-worker: recovery and events matter
 	// whichever process launched the job
 	go supervisor.Run(ctx)
@@ -106,6 +117,19 @@ func resolveUIDir(flagValue string) string {
 	def := filepath.Join(paths.ToolkitRoot, "ui-go", "web", "dist")
 	if st, err := os.Stat(filepath.Join(def, "index.html")); err == nil && !st.IsDir() {
 		return def
+	}
+	return ""
+}
+
+// resolveStudioDir is ui-go/studio/dist (AITK_STUDIO_DIR overrides) when it
+// holds a build.
+func resolveStudioDir() string {
+	dir := os.Getenv("AITK_STUDIO_DIR")
+	if dir == "" {
+		dir = filepath.Join(paths.ToolkitRoot, "ui-go", "studio", "dist")
+	}
+	if st, err := os.Stat(filepath.Join(dir, "index.html")); err == nil && !st.IsDir() {
+		return dir
 	}
 	return ""
 }

@@ -206,7 +206,7 @@ func TestHandlerCaller(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{"path": r.URL.Path, "body": string(b)})
 	})
-	call := HandlerCaller(h, "Bearer tok")
+	call := HandlerCaller(h, "Bearer tok", "")
 	res := Run(context.Background(), `return await aitk.templates.render({ arch: "sdxl" })`, Options{Call: call})
 	if res.Error != nil || gotAuth != "Bearer tok" || !strings.Contains(string(res.Result), `/v1/templates/render`) {
 		t.Fatalf("%s %+v auth=%q", res.Result, res.Error, gotAuth)

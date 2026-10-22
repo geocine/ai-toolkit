@@ -27,8 +27,20 @@ type Op struct {
 	Params []Param
 	Result string // TypeScript type
 	Doc    string
-	Text   string // "response": body is returned as text; "request": the text param is the raw body
+	Mode   string // how the body travels; "" is JSON both ways (see the Mode constants)
 }
+
+// Op modes for bodies that are not JSON.
+const (
+	ModeTextResponse = "response"  // the response body is returned as a string
+	ModeTextRequest  = "request"   // the `text` param is the raw request body
+	ModeBase64       = "base64"    // the `base64` param, decoded, is the raw request body (max MaxBinaryBytes)
+	ModeMultipart    = "multipart" // the `files` param ([{name, base64}]) is sent as multipart files[]
+	// ModeLink: a GET that downloads binary. Instead of calling it, the client
+	// signs it (POST /v1/links with the path and query) and returns {url,
+	// path, expires_at}; `ttl_s` sets the link's lifetime.
+	ModeLink = "link"
+)
 
 func p(name, typ, in, doc string) Param { return Param{Name: name, Type: typ, In: in, Doc: doc} }
 func opt(name, typ, in, doc string) Param {
@@ -108,21 +120,41 @@ var Ops = []Op{
 		Params: []Param{p("name", "string", "path", ""), p("file", "string", "path", "item file name (may contain /)"), p("caption", "string", "body", "")}},
 	{Group: "datasets", Name: "deleteFile", Method: "DELETE", Path: "/v1/datasets/{name}/files/{file...}", Result: "null",
 		Doc: "Delete one item and its caption.", Params: []Param{p("name", "string", "path", ""), p("file", "string", "path", "")}},
+	{Group: "datasets", Name: "putFile", Method: "PUT", Path: "/v1/datasets/{name}/files/{file...}", Result: "DatasetItem", Mode: ModeBase64,
+		Doc: "Write one file (image, caption, ...) from base64, replacing it. For files up to 16 MiB; larger ones go by URL (importUrl).",
+		Params: []Param{p("name", "string", "path", ""), p("file", "string", "path", "file name in the dataset (may contain /)"),
+			p("base64", "string", "body", "file contents, base64")}},
+	{Group: "datasets", Name: "uploadFiles", Method: "POST", Path: "/v1/datasets/{name}/files", Result: "Items<string>", Mode: ModeMultipart,
+		Doc:    "Add several files from base64 (16 MiB each at most).",
+		Params: []Param{p("name", "string", "path", ""), p("files", "{ name: string; base64: string }[]", "body", "")}},
+	{Group: "datasets", Name: "uploadArchive", Method: "POST", Path: "/v1/datasets/{name}/archive", Result: "ArchiveResult", Mode: ModeBase64,
+		Doc:    "Unpack a zip of images and captions given as base64 (16 MiB at most; larger ones by URL with importUrl).",
+		Params: []Param{p("name", "string", "path", ""), p("base64", "string", "body", "zip contents, base64")}},
+	{Group: "datasets", Name: "importUrl", Method: "POST", Path: "/v1/datasets/{name}/import", Result: "DatasetImport",
+		Doc: "The server downloads an image/video (or a zip of them) from a URL into the dataset.",
+		Params: []Param{p("name", "string", "path", ""), p("url", "string", "body", "http(s) URL of an image or a zip"),
+			opt("file", "string", "body", "file name to save a single image as (default from the URL)"),
+			opt("caption", "string", "body", "caption to write next to a single image")}},
 	{Group: "datasets", Name: "delete", Method: "DELETE", Path: "/v1/datasets/{name}", Result: "null", Doc: "Delete a dataset.",
 		Params: []Param{p("name", "string", "path", "")}},
 
 	// files
 	{Group: "files", Name: "list", Method: "GET", Path: "/v1/files", Result: "FileListing", Doc: "List a folder inside an allowed root.",
 		Params: []Param{p("root", "FileRoot", "query", ""), opt("path", "string", "query", "relative folder, default the root")}},
-	{Group: "files", Name: "readText", Method: "GET", Path: "/v1/files/content", Result: "string", Text: "response",
+	{Group: "files", Name: "readText", Method: "GET", Path: "/v1/files/content", Result: "string", Mode: ModeTextResponse,
 		Doc:    "Read a small text file (max 1 MiB) such as a caption or config.",
 		Params: []Param{p("root", "FileRoot", "query", ""), p("path", "string", "query", "")}},
-	{Group: "files", Name: "writeText", Method: "PUT", Path: "/v1/files/content", Result: "FileWritten", Text: "request",
+	{Group: "files", Name: "writeText", Method: "PUT", Path: "/v1/files/content", Result: "FileWritten", Mode: ModeTextRequest,
 		Doc: "Write a text file atomically.",
 		Params: []Param{p("root", "FileRoot", "query", ""), p("path", "string", "query", ""), p("text", "string", "body", "file contents"),
 			opt("overwrite", "boolean", "query", "")}},
 	{Group: "files", Name: "delete", Method: "DELETE", Path: "/v1/files/content", Result: "null", Doc: "Delete a file.",
 		Params: []Param{p("root", "FileRoot", "query", ""), p("path", "string", "query", "")}},
+	{Group: "files", Name: "link", Method: "GET", Path: "/v1/files/content", Result: "Link", Mode: ModeLink,
+		Doc: "A signed URL that downloads a file (a checkpoint, a sample) without a token until it expires: hand it to a person.",
+		Params: []Param{p("root", "FileRoot", "query", ""), p("path", "string", "query", ""),
+			opt("download", "boolean", "query", "send as an attachment (browsers save it)"), opt("thumb", "boolean", "query", "the 300 px thumbnail of a media file"),
+			opt("ttl_s", "number", "query", "lifetime in seconds (default 3600, max 604800)")}},
 
 	// remotes and uploads
 	{Group: "remotes", Name: "list", Method: "GET", Path: "/v1/remotes", Result: "Items<Remote>", Doc: "Upload / sync targets (secrets never returned)."},
@@ -140,6 +172,8 @@ var Ops = []Op{
 	{Group: "uploads", Name: "list", Method: "GET", Path: "/v1/uploads", Result: "Items<Upload>", Doc: "Uploads, newest first.",
 		Params: []Param{opt("job_id", "string", "query", ""), opt("state", "UploadState", "query", "")}},
 	{Group: "uploads", Name: "get", Method: "GET", Path: "/v1/uploads/{id}", Result: "Upload", Doc: "One upload.",
+		Params: []Param{p("id", "string", "path", "")}},
+	{Group: "uploads", Name: "retry", Method: "POST", Path: "/v1/uploads/{id}/retry", Result: "Upload", Doc: "Queue a failed (or done) upload again.",
 		Params: []Param{p("id", "string", "path", "")}},
 
 	// settings and keys
@@ -176,7 +210,87 @@ var Ops = []Op{
 	// events
 	{Group: "events", Name: "list", Method: "GET", Path: "/v1/events", Result: "EventPage", Doc: "Events after a cursor (oldest first).",
 		Params: []Param{opt("after", "number", "query", "last event id seen"), opt("job_id", "string", "query", ""),
-			opt("types", "string[]", "query", "event types to include"), opt("limit", "number", "query", "max 5000")}},
+			opt("types", "string[]", "query", "event types to include"), opt("limit", "number", "query", "max 5000"),
+			opt("wait_ms", "number", "query", "long poll: when nothing is newer than after, wait up to this long (max 60000) for the next event")}},
+
+	// run bundles
+	{Group: "bundles", Name: "download", Method: "GET", Path: "/v1/jobs/{id}/bundle", Result: "Link", Mode: ModeLink,
+		Doc: "A signed URL that downloads the job's run bundle (dataset + job folder + manifest zip) without a token until it expires. Hand it to a person, or to another server's bundles.import({ url }).",
+		Params: []Param{p("id", "string", "path", "job id"), opt("checkpoints", "BundleCheckpoints", "query", "default latest"),
+			opt("optimizer", "boolean", "query", "include optimizer.pt (default true; needed to resume exactly)"),
+			opt("samples", "boolean", "query", "default true"), opt("caches", "boolean", "query", "include the datasets' ai-toolkit caches: latents, text embeddings (default true; they make a resume start fast)"),
+			opt("ttl_s", "number", "query", "link lifetime in seconds (default 3600, max 604800)")}},
+	{Group: "bundles", Name: "push", Method: "POST", Path: "/v1/jobs/{id}/bundle/push", Result: "BundleTask",
+		Doc: "Build the job's bundle and upload it to a remote's library (bundles/<bundle>.zip + a .json summary) in the background; follow it with pushStatus or wait.",
+		Params: []Param{p("id", "string", "path", "job id"), p("remote", "string", "body", "remote id or name"),
+			opt("bundle", "string", "body", "library id (default <job>_step<step>)"), opt("overwrite", "boolean", "body", "replace a library bundle of that id"),
+			opt("checkpoints", "BundleCheckpoints", "body", "default latest"), opt("optimizer", "boolean", "body", "default true"),
+			opt("samples", "boolean", "body", "default true"), opt("caches", "boolean", "body", "dataset caches, default true")}},
+	{Group: "bundles", Name: "list", Method: "GET", Path: "/v1/bundles", Result: "Items<LibraryBundle>",
+		Doc:    "The run bundles in a remote's library (\"data presets\"), newest first, with their summaries.",
+		Params: []Param{p("remote", "string", "query", "remote id or name")}},
+	{Group: "bundles", Name: "delete", Method: "DELETE", Path: "/v1/bundles/{id}", Result: "null", Doc: "Delete a bundle (and its summary) from a remote's library.",
+		Params: []Param{p("id", "string", "path", "library id"), p("remote", "string", "query", "")}},
+	{Group: "bundles", Name: "import", Method: "POST", Path: "/v1/bundles/imports", Result: "BundleTask",
+		Doc: "Import a run bundle (or a legacy data/ + output/<name>/ zip) in the background: restores the dataset and job folder, creates the job with this server's paths, and with start continues training from the latest checkpoint. Give one source: url, remote + key (a library item's key), or upload_id. Name and dataset conflicts fail the task with conflict / dataset_exists; retry with name / dataset and the task's upload_id (no new download).",
+		Params: []Param{opt("url", "string", "body", "http(s) URL of the zip (e.g. another server's bundles.download link)"),
+			opt("remote", "string", "body", ""), opt("key", "string", "body", "object key in the remote, e.g. bundles/x.zip"),
+			opt("upload_id", "string", "body", "a complete upload (createUpload/uploadChunk, or a failed import's upload_id)"),
+			opt("name", "string", "body", "job name (default the bundle's); checkpoints are renamed to match"),
+			opt("dataset", "string", "body", "dataset name (default the bundle's, else the job name)"),
+			opt("gpu_ids", "string", "body", `default "0"`), opt("policy", "JobPolicy", "body", ""),
+			opt("start", "boolean", "body", "queue the job right after import (resumes from its latest checkpoint)")}},
+	{Group: "bundles", Name: "imports", Method: "GET", Path: "/v1/bundles/imports", Result: "Items<BundleTask>", Doc: "Bundle imports, newest first.",
+		Params: []Param{opt("job_id", "string", "query", "")}},
+	{Group: "bundles", Name: "importStatus", Method: "GET", Path: "/v1/bundles/imports/{id}", Result: "BundleTask", Doc: "One import (state, phase, bytes_done/bytes, job_id, error).",
+		Params: []Param{p("id", "string", "path", "")}},
+	{Group: "bundles", Name: "pushes", Method: "GET", Path: "/v1/bundles/pushes", Result: "Items<BundleTask>", Doc: "Bundle pushes, newest first.",
+		Params: []Param{opt("job_id", "string", "query", "")}},
+	{Group: "bundles", Name: "pushStatus", Method: "GET", Path: "/v1/bundles/pushes/{id}", Result: "BundleTask", Doc: "One push.",
+		Params: []Param{p("id", "string", "path", "")}},
+	{Group: "bundles", Name: "createUpload", Method: "POST", Path: "/v1/bundles/uploads", Result: "BundleUpload",
+		Doc:    "Open a chunked upload session for a bundle of size bytes (then uploadChunk, then import({ upload_id })).",
+		Params: []Param{p("size", "number", "body", "total bytes"), opt("filename", "string", "body", "")}},
+	{Group: "bundles", Name: "uploads", Method: "GET", Path: "/v1/bundles/uploads", Result: "Items<BundleUpload>", Doc: "Open upload sessions (they expire a day after their last chunk)."},
+	{Group: "bundles", Name: "getUpload", Method: "GET", Path: "/v1/bundles/uploads/{id}", Result: "BundleUpload", Doc: "One upload session: bytes received so far.",
+		Params: []Param{p("id", "string", "path", "")}},
+	{Group: "bundles", Name: "uploadChunk", Method: "PUT", Path: "/v1/bundles/uploads/{id}", Result: "BundleUpload", Mode: ModeBase64,
+		Doc: "Write a chunk (base64, 16 MiB at most) at offset; re-sending a chunk is harmless.",
+		Params: []Param{p("id", "string", "path", ""), p("offset", "number", "query", "byte offset, at most the bytes received"),
+			p("base64", "string", "body", "chunk contents, base64")}},
+	{Group: "bundles", Name: "deleteUpload", Method: "DELETE", Path: "/v1/bundles/uploads/{id}", Result: "null", Doc: "Cancel an upload session.",
+		Params: []Param{p("id", "string", "path", "")}},
+
+	// signed links
+	{Group: "links", Name: "create", Method: "POST", Path: "/v1/links", Result: "Link",
+		Doc:    "Sign a download path (GET /v1/files/content?..., /v1/jobs/{id}/bundle?..., /api/img|files/...): the URL works without a token until expires_at.",
+		Params: []Param{p("path", "string", "body", "server path with its query"), opt("ttl_s", "number", "body", "seconds (default 3600, max 604800)")}},
+	// when done (unattended runs)
+	{Group: "lifecycle", Name: "get", Method: "GET", Path: "/v1/lifecycle", Result: "Lifecycle",
+		Doc: "What happens to this server when the work is done: mode (keep/stop/destroy), state, countdown deadline, reason, provider, and the results check."},
+	{Group: "lifecycle", Name: "update", Method: "PATCH", Path: "/v1/lifecycle", Result: "Lifecycle",
+		Doc: "Change when done at runtime (persisted). A change restarts the decision: a countdown starts over with the new delay.",
+		Params: []Param{opt("mode", "LifecycleMode", "body", ""), opt("on", `"completed" | "any"`, "body", "any also triggers on a failed last job"),
+			opt("delay_s", "number", "body", "countdown length in seconds"), opt("dry_run", "boolean", "body", "log and emit events instead of calling the provider")}},
+	{Group: "lifecycle", Name: "cancel", Method: "POST", Path: "/v1/lifecycle/cancel", Result: "Lifecycle",
+		Doc: "Cancel the countdown: the server stays up until another job runs and ends (409 when nothing is pending)."},
+	{Group: "lifecycle", Name: "extend", Method: "POST", Path: "/v1/lifecycle/extend", Result: "Lifecycle", Doc: "Push the countdown deadline out (409 without a countdown).",
+		Params: []Param{p("minutes", "number", "body", "")}},
+	{Group: "lifecycle", Name: "now", Method: "POST", Path: "/v1/lifecycle/now", Result: "Lifecycle",
+		Doc: "Skip the countdown: verify every finished job's results are on a remote, then stop/destroy. Refused (409) while a job is queued or running; never destroys unsaved results (state held)."},
+
+	// notifications
+	{Group: "notify", Name: "get", Method: "GET", Path: "/v1/notify", Result: "NotifyConfig", Doc: "Notification sinks (URLs never returned), event filter and link bases."},
+	{Group: "notify", Name: "update", Method: "PATCH", Path: "/v1/notify", Result: "NotifyConfig", Doc: "Change the event filter, public/studio URLs or the sample interval.",
+		Params: []Param{opt("events", "NotifyKind[] | null", "body", "kinds to send; null sends every kind"), opt("public_url", "string", "body", "this server's public URL (links)"),
+			opt("studio_url", "string", "body", "studio base for tap-through links"), opt("sample_every_s", "number", "body", "min seconds between sample notifications per job")}},
+	{Group: "notify", Name: "addSink", Method: "POST", Path: "/v1/notify/sinks", Result: "NotifySink",
+		Doc:    "Add a sink: https://ntfy.sh/<topic> (ntfy+https://host/topic self-hosted), a Discord webhook URL, telegram://<bot token>@<chat id>, or any https URL (JSON webhook). Write-only.",
+		Params: []Param{p("url", "string", "body", "")}},
+	{Group: "notify", Name: "deleteSink", Method: "DELETE", Path: "/v1/notify/sinks/{id}", Result: "null", Doc: "Remove a sink.",
+		Params: []Param{p("id", "string", "path", "")}},
+	{Group: "notify", Name: "test", Method: "POST", Path: "/v1/notify/test", Result: "Items<NotifyResult>", Doc: "Send a test notification now and report what each sink answered.",
+		Params: []Param{opt("sink", "string", "body", "one sink id (default all)"), opt("message", "string", "body", "")}},
 }
 
 // pathParams returns the op's path params in order.
@@ -281,6 +395,10 @@ const waitTS = `    /** Poll jobs.get until the job reaches one of the states (d
     wait(id: string, options?: { until?: JobState[]; timeout_ms?: number; poll_ms?: number }): Promise<Job>;
 `
 
+const bundleWaitTS = `    /** Poll importStatus / pushStatus until the task is done or failed (failed resolves too: read error). Counts toward the call limit. */
+    wait(id: string, options?: { timeout_ms?: number; poll_ms?: number }): Promise<BundleTask>;
+`
+
 const globalsTS = `
 /** Wait without blocking the server (counts toward the run's time limit). */
 declare function sleep(ms: number): Promise<void>;
@@ -330,6 +448,32 @@ type TemplateCatalog = { archs: TemplateArch[]; default_config: JobConfig; error
 type RenderedTemplate = { config: JobConfig; warnings: string[] };
 type AitkEvent = { id: number; type: string; job_id: string | null; at: string; data: any };
 type EventPage = { items: AitkEvent[]; next_cursor: string | null };
+type Link = { url: string; path: string; expires_at: string };
+type ArchiveResult = { added: number; skipped: string[] };
+type DatasetImport = { added: number; files: string[]; skipped: string[] };
+type BundleCheckpoints = "all" | "latest" | "none";
+type BundleTask = {
+  id: string; kind: "import" | "push"; state: "queued" | "running" | "done" | "failed";
+  phase: "" | "downloading" | "reading" | "restoring" | "building" | "uploading"; bytes: number; bytes_done: number;
+  job_id: string | null; job_name: string | null; dataset: string | null; source: "url" | "remote" | "upload" | "local"; ref: string | null; remote: string | null; key: string | null;
+  url: string | null; upload_id: string | null; skipped: string[]; warnings: string[];
+  error: { code: string; message: string } | null; created_at: string; updated_at: string;
+};
+type BundleUpload = { id: string; filename: string; size: number; received: number; complete: boolean; chunk_size: number; created_at: string; updated_at: string; expires_at: string };
+type BundleSummary = { format: number; name: string; step: number; total_steps: number | null; size: number; sha256?: string; created_at: string; images: number; datasets: string[]; base_model?: string; arch?: string; checkpoints: string[]; optimizer: boolean; server_version: string };
+type LibraryBundle = { id: string; key: string; size: number; modified: string; summary: BundleSummary | null };
+type LifecycleMode = "keep" | "stop" | "destroy";
+type Lifecycle = {
+  mode: LifecycleMode; on: "completed" | "any"; delay_s: number; dry_run: boolean;
+  state: "off" | "waiting" | "countdown" | "verifying" | "acting" | "held" | "cancelled" | "done" | "failed";
+  deadline: string | null; reason: string; provider: "runpod" | "vast" | "command" | "exit";
+  job_id: string | null; job_name: string | null;
+  results: { job_id: string; job_name: string; safe: boolean; via: string; detail: string }[]; updated_at: string;
+};
+type NotifyKind = "started" | "resumed" | "sample" | "checkpoint" | "completed" | "failed" | "interrupted" | "lease_lost" | "sync_failed" | "lifecycle";
+type NotifySink = { id: string; kind: "ntfy" | "discord" | "telegram" | "webhook"; target: string; source: "env" | "api"; created_at: string };
+type NotifyConfig = { sinks: NotifySink[]; events: NotifyKind[] | null; kinds: NotifyKind[]; public_url: string; studio_url: string; sample_every_s: number };
+type NotifyResult = { sink: string; kind: string; target: string; ok: boolean; detail: string };
 type Health = { ok: boolean; version: string; upstream_version: string; started_at: string };
 type SystemInfo = { gpus: any[]; cpu: any; disks: { path: string; free: number; total: number }[]; toolkit_root: string };
 `

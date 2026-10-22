@@ -61,7 +61,7 @@ func TestMCPEndToEnd(t *testing.T) {
 	for _, tl := range tools.Tools {
 		names = append(names, tl.Name)
 	}
-	if strings.Join(names, ",") != "aitk_api,aitk_run" {
+	if strings.Join(names, ",") != "aitk_api,aitk_run,aitk_view" {
 		t.Fatalf("tools = %v", names)
 	}
 

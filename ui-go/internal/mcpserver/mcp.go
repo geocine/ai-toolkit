@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/geocine/aitoolkit/internal/codemode"
 	"github.com/geocine/aitoolkit/internal/httpx"
+	"github.com/geocine/aitoolkit/internal/links"
 )
 
 // Version is reported to MCP clients.
@@ -21,16 +23,24 @@ const instructions = `ai-toolkit training server, code mode.
 Instead of one tool per endpoint, write a short TypeScript script against the typed ` + "`aitk`" + ` client:
 1. Call aitk_api (optionally with a search term) to read the client's TypeScript declaration.
 2. Call aitk_run with code using it. Top-level await and return work; the returned value is your result.
+3. Call aitk_view with sample or dataset image paths (as the API returns them) to look at them.
 
 The script runs in a sandbox with only aitk.*, console.log and sleep(ms): no filesystem, network or processes.
-Typical flow: aitk.datasets.create -> upload images (via the HTTP API) -> aitk.templates.render({arch, name, datasets})
--> aitk.jobs.create({name, gpu_ids, config, policy}) -> aitk.jobs.start(id) -> poll aitk.jobs.get(id) or aitk.jobs.wait(id).
+Typical flow: aitk.datasets.create -> add images (datasets.importUrl by URL, datasets.putFile with base64 for small files)
+-> aitk.templates.render({arch, name, datasets}) -> aitk.jobs.create({name, gpu_ids, config, policy}) -> aitk.jobs.start(id)
+-> poll aitk.jobs.get(id) or aitk.jobs.wait(id); look at aitk.jobs.samples(id) with aitk_view.
+Run bundles move a whole run (dataset + checkpoints + optimizer state) between servers: aitk.bundles.download(jobId) gives a
+signed URL, aitk.bundles.import({ url | remote+key | upload_id, start: true }) continues it here, aitk.bundles.push / list
+manage a remote's library. To hand a person a file, sign it: aitk.files.link({ root, path }) or aitk.links.create.
 Training runs for a long time: start it, return, and check back with later runs instead of waiting in one.`
 
 const apiNotes = `// Usage: every method returns a Promise; await it. Methods with path params take them positionally,
 // then one params object: aitk.jobs.log(id, { offset: -4096 }). Failed calls throw AitkError {code, status, message}.
-// Results are the /v1 JSON bodies (lists are { items: [...] }). Uploading binary files (dataset images, zips) is
-// done over HTTP by the client app (POST /v1/datasets/{name}/files), not from code mode.
+// Results are the /v1 JSON bodies (lists are { items: [...] }).
+// Binary in: base64 params (datasets.putFile, uploadFiles, uploadArchive, bundles.uploadChunk; 16 MiB per call) or
+// let the server fetch a URL (datasets.importUrl, bundles.import({ url })).
+// Binary out: methods returning Link give a signed URL ({ url, expires_at }) that downloads without a token;
+// to see images yourself use the aitk_view tool. events.list({ after, wait_ms }) long-polls for new events.
 `
 
 // APIInput is aitk_api's input.
@@ -61,19 +71,24 @@ func newServer() *mcp.Server {
 		if api == nil {
 			return nil, RunOutput{}, fmt.Errorf("server API not configured")
 		}
-		auth := ""
+		auth, origin := "", ""
 		if req.Extra != nil && req.Extra.Header != nil {
-			auth = req.Extra.Header.Get("Authorization")
+			auth, origin = req.Extra.Header.Get("Authorization"), req.Extra.Header.Get(originHeader)
 		}
 		res := codemode.Run(ctx, in.Code, codemode.Options{
 			Timeout: time.Duration(in.TimeoutMs) * time.Millisecond,
-			Call:    codemode.HandlerCaller(api, auth),
+			Call:    codemode.HandlerCaller(api, auth, origin),
 		})
 		out := RunOutput{Logs: res.Logs, Error: res.Error, Calls: res.Calls, DurationMs: res.DurationMs}
 		json.Unmarshal(res.Result, &out.Result)
 		text, _ := json.MarshalIndent(out, "", "  ")
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(text)}}, IsError: res.Error != nil}, out, nil
 	})
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "aitk_view",
+		Description: "Look at images: sample or dataset image paths as the API returns them (a sample's path; a dataset's path joined with an item's file, " +
+			"or <dataset>/<file>). Returns JPEG previews scaled to max_px (default 512, max 1024), up to 8 per call.",
+	}, view)
 	return s
 }
 
@@ -93,8 +108,16 @@ func Handler() http.Handler {
 		&mcp.StreamableHTTPOptions{Stateless: true})
 }
 
+// originHeader carries the scheme://host the MCP client reached us at into
+// the tool handlers (set here, never trusted from the client), so links
+// signed from code mode are absolute URLs the agent can hand out.
+const originHeader = "X-Aitk-Origin"
+
 // Register serves /mcp. The auth middleware in front of the mux guards it.
 func Register(mux *http.ServeMux) {
 	h := Handler()
-	httpx.Handle(mux, "/mcp", h.ServeHTTP)
+	httpx.Handle(mux, "/mcp", func(w http.ResponseWriter, r *http.Request) {
+		r.Header.Set(originHeader, links.Origin(r, os.Getenv("AITK_PUBLIC_URL")))
+		h.ServeHTTP(w, r)
+	})
 }

@@ -2,6 +2,7 @@ package v1
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"io/fs"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -613,47 +615,212 @@ func uploadDatasetArchive(w http.ResponseWriter, r *http.Request) {
 		v1api.Fail(w, v1api.CodeInvalidRequest, "could not read the archive: "+err.Error())
 		return
 	}
-	if st, err := os.Stat(tmp); err == nil && st.Size() > maxArchiveBytes {
-		v1api.Fail(w, v1api.CodeTooLarge, "archive is larger than 20 GiB")
-		return
-	}
-	zr, err := zip.OpenReader(tmp)
-	if err != nil {
-		v1api.Fail(w, v1api.CodeInvalidRequest, "not a zip archive: "+err.Error())
-		return
-	}
-	defer zr.Close()
-	entries, skipped, err := planArchive(&zr.Reader)
+	res, err := extractArchive(tmp, dir)
 	if err != nil {
 		v1api.Respond(w, r, err)
 		return
 	}
-	added := 0
+	changed(r.Context(), name)
+	v1api.OK(w, map[string]any{"added": res.Added, "skipped": res.Skipped})
+}
+
+type archiveResult struct {
+	Added   int      `json:"added"`
+	Files   []string `json:"files"`
+	Skipped []string `json:"skipped"`
+}
+
+// extractArchive safely unpacks the zip at tmp into the dataset folder dir.
+func extractArchive(tmp, dir string) (archiveResult, error) {
+	res := archiveResult{Files: []string{}, Skipped: []string{}}
+	if st, err := os.Stat(tmp); err == nil && st.Size() > maxArchiveBytes {
+		return res, v1api.Errorf(v1api.CodeTooLarge, "archive is larger than 20 GiB")
+	}
+	zr, err := zip.OpenReader(tmp)
+	if err != nil {
+		return res, v1api.Errorf(v1api.CodeInvalidRequest, "not a zip archive: "+err.Error())
+	}
+	defer zr.Close()
+	entries, skipped, err := planArchive(&zr.Reader)
+	if err != nil {
+		return res, err
+	}
+	res.Skipped = append(res.Skipped, skipped...)
 	for _, e := range entries {
 		dst := safepath.Resolve(filepath.Join(dir, filepath.FromSlash(e.rel)), []string{dir})
 		if dst == "" || dst == dir {
-			skipped = append(skipped, e.f.Name)
+			res.Skipped = append(res.Skipped, e.f.Name)
 			continue
 		}
 		rc, err := e.f.Open()
 		if err != nil {
-			v1api.Fail(w, v1api.CodeInvalidRequest, "corrupt archive entry "+e.f.Name+": "+err.Error())
-			return
+			return res, v1api.Errorf(v1api.CodeInvalidRequest, "corrupt archive entry "+e.f.Name+": "+err.Error())
 		}
 		err = writeAtomic(dst, &limitedReader{r: rc, left: int64(e.f.UncompressedSize64)})
 		rc.Close()
 		if err != nil {
-			v1api.Fail(w, v1api.CodeInvalidRequest, "extracting "+e.f.Name+": "+err.Error())
-			return
+			return res, v1api.Errorf(v1api.CodeInvalidRequest, "extracting "+e.f.Name+": "+err.Error())
 		}
 		if !e.f.Modified.IsZero() {
 			os.Chtimes(dst, time.Now(), e.f.Modified)
 		}
-		added++
+		res.Added++
+		res.Files = append(res.Files, e.rel)
 	}
-	if skipped == nil {
-		skipped = []string{}
+	return res, nil
+}
+
+// putDatasetFile writes one file (raw body) into the dataset, replacing it.
+func putDatasetFile(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	dir, ok := datasetDir(w, r, name, true)
+	if !ok {
+		return
+	}
+	file, ok := datasetFile(w, dir, r.PathValue("file"))
+	if !ok {
+		return
+	}
+	rel, _ := filepath.Rel(dir, file)
+	for _, seg := range strings.Split(filepath.ToSlash(rel), "/") {
+		if strings.HasPrefix(seg, ".") {
+			v1api.Fail(w, v1api.CodeInvalidRequest, "hidden file names are reserved")
+			return
+		}
+	}
+	if st, err := os.Stat(file); err == nil && st.IsDir() {
+		v1api.Fail(w, v1api.CodeConflict, "path is a folder")
+		return
+	}
+	lr := &io.LimitedReader{R: r.Body, N: maxArchiveBytes + 1}
+	if err := writeAtomic(file, lr); err != nil {
+		v1api.Internal(w, r, err)
+		return
+	}
+	if lr.N <= 0 {
+		os.Remove(file)
+		v1api.Fail(w, v1api.CodeTooLarge, "file is larger than 20 GiB")
+		return
+	}
+	info, err := os.Stat(file)
+	if err != nil {
+		v1api.Internal(w, r, err)
+		return
 	}
 	changed(r.Context(), name)
-	v1api.OK(w, map[string]any{"added": added, "skipped": skipped})
+	v1api.OK(w, itemOf(dir, filepath.ToSlash(rel), info))
+}
+
+var sniffedExts = map[string]string{"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp",
+	"image/gif": ".gif", "image/bmp": ".bmp", "video/mp4": ".mp4", "video/webm": ".webm"}
+
+// importDatasetURL downloads an image (or a zip of images) into the
+// dataset: what an agent uses to add pictures it found by URL.
+func importDatasetURL(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	name := r.PathValue("name")
+	dir, ok := datasetDir(w, r, name, true)
+	if !ok {
+		return
+	}
+	var b struct {
+		URL     string  `json:"url"`
+		File    string  `json:"file"`
+		Caption *string `json:"caption"`
+	}
+	if !v1api.Decode(w, r, &b) {
+		return
+	}
+	u, err := url.Parse(b.URL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		v1api.Fail(w, v1api.CodeInvalidRequest, "url must be an http(s) URL")
+		return
+	}
+	if b.File != "" && uploadName(b.File) == "" {
+		v1api.Fail(w, v1api.CodeInvalidRequest, "unusable file name "+strconv.Quote(b.File))
+		return
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.URL, nil)
+	if err != nil {
+		v1api.Fail(w, v1api.CodeInvalidRequest, err.Error())
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		v1api.Fail(w, v1api.CodeRemoteFailed, "download: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		v1api.Fail(w, v1api.CodeRemoteFailed, "download: "+resp.Status)
+		return
+	}
+	tmp, err := os.CreateTemp(dir, ".download-*")
+	if err != nil {
+		v1api.Internal(w, r, err)
+		return
+	}
+	defer os.Remove(tmp.Name())
+	n, err := io.Copy(tmp, io.LimitReader(resp.Body, maxArchiveBytes+1))
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		v1api.Fail(w, v1api.CodeRemoteFailed, "download: "+err.Error())
+		return
+	}
+	if n > maxArchiveBytes {
+		v1api.Fail(w, v1api.CodeTooLarge, "download is larger than 20 GiB")
+		return
+	}
+	head := make([]byte, 512)
+	if f, err := os.Open(tmp.Name()); err == nil {
+		k, _ := io.ReadFull(f, head)
+		head = head[:k]
+		f.Close()
+	}
+	if bytes.HasPrefix(head, []byte("PK\x03\x04")) {
+		res, err := extractArchive(tmp.Name(), dir)
+		if err != nil {
+			v1api.Respond(w, r, err)
+			return
+		}
+		changed(ctx, name)
+		v1api.OK(w, res)
+		return
+	}
+	fname := b.File
+	if fname == "" {
+		if _, params, err := mime.ParseMediaType(resp.Header.Get("Content-Disposition")); err == nil {
+			fname = uploadName(params["filename"])
+		}
+	}
+	if fname == "" {
+		fname = uploadName(path.Base(u.Path))
+	}
+	if !isMedia(fname) {
+		// name it after what the bytes are
+		ext := sniffedExts[http.DetectContentType(head)]
+		if ext == "" {
+			v1api.Fail(w, v1api.CodeInvalidRequest, "the URL is neither a zip nor an image, video or audio file")
+			return
+		}
+		if fname == "" {
+			fname = "image_" + strconv.FormatInt(time.Now().UnixMilli(), 10)
+		}
+		fname = strings.TrimSuffix(fname, filepath.Ext(fname)) + ext
+	}
+	dst := filepath.Join(dir, fname)
+	if err := os.Rename(tmp.Name(), dst); err != nil {
+		v1api.Internal(w, r, err)
+		return
+	}
+	if b.Caption != nil {
+		if err := writeAtomic(captionPath(dst), strings.NewReader(*b.Caption)); err != nil {
+			v1api.Internal(w, r, err)
+			return
+		}
+	}
+	changed(ctx, name)
+	v1api.OK(w, archiveResult{Added: 1, Files: []string{fname}, Skipped: []string{}})
 }

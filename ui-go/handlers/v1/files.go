@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path"
@@ -140,6 +141,9 @@ func getFile(w http.ResponseWriter, r *http.Request) {
 	defer f.Close()
 	w.Header().Set("ETag", fmt.Sprintf(`"%x-%x"`, st.Size(), st.ModTime().UnixNano()))
 	w.Header().Set("Cache-Control", "no-cache")
+	if r.URL.Query().Get("download") == "1" || r.URL.Query().Get("download") == "true" {
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filepath.Base(serve)}))
+	}
 	// ServeContent handles Range, If-None-Match and HEAD
 	http.ServeContent(w, r, filepath.Base(serve), st.ModTime(), f)
 }

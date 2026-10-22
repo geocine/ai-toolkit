@@ -19,6 +19,7 @@ const (
 	CodeForbidden      = "forbidden"       // 403
 	CodeNotFound       = "not_found"       // 404
 	CodeConflict       = "conflict"        // 409
+	CodeDatasetExists  = "dataset_exists"  // 409: a dataset of that name holds other files
 	CodeTooLarge       = "too_large"       // 413
 	CodeInvalidConfig  = "invalid_config"  // 422
 	CodeInternal       = "internal"        // 500
@@ -31,6 +32,7 @@ var statusOf = map[string]int{
 	CodeForbidden:      http.StatusForbidden,
 	CodeNotFound:       http.StatusNotFound,
 	CodeConflict:       http.StatusConflict,
+	CodeDatasetExists:  http.StatusConflict,
 	CodeTooLarge:       http.StatusRequestEntityTooLarge,
 	CodeInvalidConfig:  http.StatusUnprocessableEntity,
 	CodeInternal:       http.StatusInternalServerError,
