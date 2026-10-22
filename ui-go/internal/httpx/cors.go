@@ -2,8 +2,11 @@ package httpx
 
 import (
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
+
+	"github.com/geocine/aitoolkit/internal/state"
 )
 
 // CORS lets browser apps on other origins (the studio, a desktop app's
@@ -14,6 +17,15 @@ import (
 func CORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
+		if origin != "" && corsPath(r.URL.Path) && unsafeMethod(r.Method) && open() && !sameOrigin(origin, r) && !originAllowed(origin) {
+			// a page on another site posting here (CSRF): browsers send such
+			// "simple" requests without a preflight, and a server without a
+			// token would act on them. With a token they cannot (it is a
+			// header the page does not have), so only an open server checks.
+			JSON(w, http.StatusForbidden, map[string]any{"error": map[string]string{
+				"code": "forbidden", "message": "cross-origin request from " + origin + " (allow it with AITK_CORS_ORIGINS)"}})
+			return
+		}
 		if origin == "" || !corsPath(r.URL.Path) || !originAllowed(origin) {
 			next.ServeHTTP(w, r)
 			return
@@ -31,6 +43,31 @@ func CORS(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// open: no token configured and no API key, so requests need no credentials.
+func open() bool { return os.Getenv("AI_TOOLKIT_AUTH") == "" && !state.HasKeys() }
+
+func unsafeMethod(m string) bool {
+	return m != http.MethodGet && m != http.MethodHead && m != http.MethodOptions
+}
+
+// sameOrigin: the Origin names the host the request was sent to (directly, or
+// the one a proxy forwarded).
+func sameOrigin(origin string, r *http.Request) bool {
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	if strings.EqualFold(u.Host, r.Host) {
+		return true
+	}
+	for _, h := range strings.Split(r.Header.Get("X-Forwarded-Host"), ",") {
+		if h = strings.TrimSpace(h); h != "" && strings.EqualFold(u.Host, h) {
+			return true
+		}
+	}
+	return false
 }
 
 func corsPath(p string) bool {

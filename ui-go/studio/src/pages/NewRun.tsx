@@ -776,6 +776,9 @@ function StepLaunch({ preset, k, dataset, back }: { preset: Preset; k: Knobs; da
 
   const config = info.data ? buildConfig(preset, k, { datasetPath: info.data.ds.path, trainingFolder: info.data.settings.training_folder }) : null;
 
+  // the job this page created: a retry after a failed start starts it
+  // instead of creating it again (which the taken name would refuse)
+  const created = useRef<{ id: string; name: string } | null>(null);
   const launch = async () => {
     if (!config) return;
     setBusy(true);
@@ -783,8 +786,15 @@ function StepLaunch({ preset, k, dataset, back }: { preset: Preset; k: Knobs; da
     try {
       const policy: Record<string, unknown> = { auto_resume: autoResume };
       if (syncRemote) policy.sync_remote = syncRemote === '-' ? '' : syncRemote;
-      const job = await post<Job>(server, '/v1/jobs', { name: k.name, gpu_ids: gpu, config, policy });
-      await post<Job>(server, `/v1/jobs/${job.id}/start`);
+      let id = created.current?.name === k.name ? created.current.id : '';
+      if (id) {
+        await call<Job>(server, 'PATCH', `/v1/jobs/${id}`, { gpu_ids: gpu, config, policy });
+      } else {
+        id = (await post<Job>(server, '/v1/jobs', { name: k.name, gpu_ids: gpu, config, policy })).id;
+        created.current = { id, name: k.name };
+      }
+      await post<Job>(server, `/v1/jobs/${id}/start`);
+      const job = { id };
       save(DRAFT_KEY, null);
       go({ page: 'run', id: job.id });
     } catch (e) {
