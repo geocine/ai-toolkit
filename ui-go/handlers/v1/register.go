@@ -23,6 +23,7 @@ func Register(mux *http.ServeMux) {
 
 	httpx.Handle(mux, "GET /v1/jobs", listJobs)
 	httpx.Handle(mux, "POST /v1/jobs", createJob)
+	httpx.Handle(mux, "POST /v1/jobs/preflight", preflightJob)
 	httpx.Handle(mux, "GET /v1/jobs/{id}", getJob)
 	httpx.Handle(mux, "PATCH /v1/jobs/{id}", patchJob)
 	httpx.Handle(mux, "DELETE /v1/jobs/{id}", deleteJob)

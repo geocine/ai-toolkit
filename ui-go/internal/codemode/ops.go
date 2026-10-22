@@ -71,6 +71,9 @@ var Ops = []Op{
 			opt("config", "JobConfig", "body", ""), opt("policy", "JobPolicy", "body", "")}},
 	{Group: "jobs", Name: "delete", Method: "DELETE", Path: "/v1/jobs/{id}", Result: "null", Doc: "Delete a job that is not running.",
 		Params: []Param{p("id", "string", "path", "job id"), opt("files", "boolean", "query", "true also deletes its output folder (checkpoints, samples); default false keeps it")}},
+	{Group: "jobs", Name: "preflight", Method: "POST", Path: "/v1/jobs/preflight", Result: "Preflight",
+		Doc:    "What would go wrong or be wasted if a config ran now, before paying for the GPU: ignored keys, missing datasets, images the trainer skips, uncaptioned or trigger-less captions, low disk, a missing local model, an unreachable sync remote, checkpoints that will not be kept, when done with nowhere to keep the results. ok is false when anything blocks. Run it on a config or a created job before jobs.start.",
+		Params: []Param{opt("config", "JobConfig", "body", "a config to check"), opt("job_id", "string", "body", "a created job (its config and policy)")}},
 	{Group: "jobs", Name: "start", Method: "POST", Path: "/v1/jobs/{id}/start", Result: "Job",
 		Doc:    "Queue the job and make sure its GPU queue runs. A job with checkpoints resumes from the latest one.",
 		Params: []Param{p("id", "string", "path", "job id")}},
@@ -476,6 +479,7 @@ type Dataset = { name: string; path: string; images: number; captions: number; s
 type DatasetItem = { file: string; caption: string | null; size: number; width?: number; height?: number };
 type DatasetDetail = Dataset & { items: DatasetItem[]; next_cursor: string | null; caption_job: Job | null };
 type CaptionOption = { value: unknown; label: string };
+type Preflight = { ok: boolean; checks: { level: "block" | "warn" | "info"; message: string; fix?: string }[] };
 type Preset = { id: string; name: string; description?: string; builtIn?: boolean; edited?: boolean; base: JobConfig; defaults?: Record<string, unknown>; promptSets?: Record<string, string[]>; captionTemplates?: Record<string, string>; notes?: { title: string; body: string }[]; updated_at: number; deleted?: boolean };
 type CaptionFlag = "missing" | "no_trigger" | "trigger_case" | "truncated" | "hedging" | "preamble" | "duplicate";
 type CaptionCheck = { items: { file: string; caption: string | null; flags: CaptionFlag[] }[]; total: number; flagged: number; counts: Partial<Record<CaptionFlag, number>>; trigger: string };

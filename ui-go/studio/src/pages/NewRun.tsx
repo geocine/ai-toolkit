@@ -15,6 +15,7 @@ import {
   type CaptionFix,
   type CaptionFlag,
   type Captioner,
+  type Preflight,
   type Dataset,
   type DatasetDetail,
   type DatasetItem,
@@ -863,6 +864,11 @@ function StepLaunch({ preset, k, dataset, back }: { preset: Preset; k: Knobs; da
   const problems = validate(k);
 
   const config = info.data ? buildConfig(preset, k, { datasetPath: info.data.ds.path, trainingFolder: info.data.settings.training_folder }) : null;
+  // the server's own look at this config before a GPU is paid for
+  const configKey = config ? JSON.stringify(config) : '';
+  const preflight = useLoad(server, s => (config ? post<Preflight>(s, '/v1/jobs/preflight', { config }) : Promise.resolve(null)), [configKey]);
+  const pf = preflight.data?.checks ?? [];
+  const blocked = pf.some(c => c.level === 'block');
 
   // the job this page created: a retry after a failed start starts it
   // instead of creating it again (which the taken name would refuse)
@@ -972,6 +978,35 @@ function StepLaunch({ preset, k, dataset, back }: { preset: Preset; k: Knobs; da
               </ul>
             </Callout>
           )}
+          {(['block', 'warn'] as const).map(level => {
+            const list = pf.filter(c => c.level === level);
+            return (
+              list.length > 0 && (
+                <Callout key={level} kind={level === 'block' ? 'danger' : 'warn'}>
+                  <ul className="problems">
+                    {list.map(c => (
+                      <li key={c.message}>
+                        {c.message}
+                        {c.fix && <span className="muted"> · {c.fix}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </Callout>
+              )
+            );
+          })}
+          {pf.some(c => c.level === 'info') && (
+            <ul className="problems preflight-info">
+              {pf
+                .filter(c => c.level === 'info')
+                .map(c => (
+                  <li key={c.message}>
+                    {c.message}
+                    {c.fix && <span className="muted"> · {c.fix}</span>}
+                  </li>
+                ))}
+            </ul>
+          )}
           <div className="config-toggle">
             <button className="btn btn-ghost btn-sm" aria-expanded={showConfig} onClick={() => setShowConfig(v => !v)}>
               {showConfig ? <ChevronDown /> : <ChevronRight />}
@@ -987,7 +1022,7 @@ function StepLaunch({ preset, k, dataset, back }: { preset: Preset; k: Knobs; da
           <ArrowLeft />
           Back
         </button>
-        <button className="btn btn-primary" disabled={!config || problems.length > 0 || busy} onClick={launch}>
+        <button className="btn btn-primary" disabled={!config || problems.length > 0 || blocked || busy} onClick={launch} title={blocked ? 'Fix what blocks the run first' : undefined}>
           <Rocket />
           {busy ? 'Starting…' : 'Create and start training'}
         </button>

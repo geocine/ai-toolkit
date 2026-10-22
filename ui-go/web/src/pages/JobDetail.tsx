@@ -318,6 +318,7 @@ function OverviewTab({ job, onChange, syncVer }: { job: Job; onChange: (j: Job) 
   const a = job.last_attempt;
   return (
     <div className="grid grid-2">
+      {!busy && job.state !== 'completed' && <PreflightCard job={job} />}
       <div className="card">
         <div className="card-head">
           <h3 className="card-title">Details</h3>
@@ -473,6 +474,50 @@ const policyForm = (job: Job) => ({
 // ---------------------------------------------------------------- log
 
 type LogState = { text: string; end: number; loaded: boolean };
+
+type Preflight = { ok: boolean; checks: { level: 'block' | 'warn' | 'info'; message: string; fix?: string }[] };
+
+// What would go wrong if the job started now (POST /v1/jobs/preflight).
+function PreflightCard({ job }: { job: Job }) {
+  const [res, setRes] = useState<Preflight | null>(null);
+  const [error, setError] = useState('');
+  const run = useCallback(() => {
+    setError('');
+    api.post<Preflight>('/v1/jobs/preflight', { job_id: job.id }).then(setRes, e => setError(e?.message ?? String(e)));
+  }, [job.id]);
+  useEffect(run, [run, JSON.stringify(job.config), JSON.stringify(job.policy)]); // eslint-disable-line react-hooks/exhaustive-deps
+  const shown = (res?.checks ?? []).filter(c => c.level !== 'info');
+  return (
+    <div className="card">
+      <div className="card-head">
+        <h3 className="card-title">Before starting</h3>
+        <button className="btn btn-sm" onClick={run}>
+          <RefreshCw size={14} /> Check again
+        </button>
+      </div>
+      {error && <Callout tone="danger">{error}</Callout>}
+      {!res && !error && <Spinner />}
+      {res && shown.length === 0 && <div className="small muted">Nothing in the way.</div>}
+      {shown.length > 0 && (
+        <ul className="preflight">
+          {shown.map(c => (
+            <li key={c.message} className={c.level === 'block' ? 'danger-text' : ''}>
+              {c.message}
+              {c.fix && <span className="muted"> · {c.fix}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {(res?.checks ?? [])
+        .filter(c => c.level === 'info')
+        .map(c => (
+          <div key={c.message} className="small muted">
+            {c.message}
+          </div>
+        ))}
+    </div>
+  );
+}
 
 function LogTab({ job, log, setLog }: { job: Job; log: LogState; setLog: (fn: (l: LogState) => LogState) => void }) {
   const ref = useRef<HTMLPreElement>(null);

@@ -247,6 +247,7 @@ export interface DatasetDetail extends Dataset { items: DatasetItem[]; next_curs
 export interface CaptionOption { value: unknown; label: string }
 export type CaptionFlag = 'missing' | 'no_trigger' | 'trigger_case' | 'truncated' | 'hedging' | 'preamble' | 'duplicate';
 export interface CaptionCheck { items: { file: string; caption: string | null; flags: CaptionFlag[] }[]; total: number; flagged: number; counts: Partial<Record<CaptionFlag, number>>; trigger: string }
+export interface Preflight { ok: boolean; checks: { level: 'block' | 'warn' | 'info'; message: string; fix?: string }[] }
 export interface CaptionFix { changes: { file: string; before: string | null; after: string }[]; applied: boolean }
 export interface Captioner {
   name: string; label: string; group: string; defaults: Record<string, unknown>;
