@@ -393,6 +393,10 @@ func Render(_ context.Context, req RenderRequest, opt Options) (RenderResult, er
 		return RenderResult{}, v1api.Errorf(v1api.CodeInvalidConfig,
 			fmt.Sprintf("upstream did not apply arch %q (the default config's arch %q is not in the arch list)", req.Arch, res.ArchApplied))
 	}
+	// keys the overrides put where the trainer does not read them
+	for _, p := range Check(res.Config).Problems {
+		warnings = append(warnings, p.Text())
+	}
 	return RenderResult{Config: res.Config, Warnings: warnings}, nil
 }
 
