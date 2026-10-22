@@ -54,7 +54,7 @@ var discordHosts = map[string]bool{"discord.com": true, "discordapp.com": true, 
 // parseSink recognises:
 //
 //	https://ntfy.sh/<topic>                      ntfy (ntfy+https://host/topic for a self-hosted server;
-//	                                             https://:tk_token@host/topic or user:pass@ for auth)
+//	                                             ntfy+https://:tk_token@host/topic or user:pass@ for auth)
 //	https://discord.com/api/webhooks/<id>/<tok>  Discord webhook
 //	telegram://<bot token>@<chat id>             Telegram bot (sendMessage / sendPhoto)
 //	pushover://<api token>@<user key>[/<device>] Pushover (image as attachment)

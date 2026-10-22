@@ -69,7 +69,7 @@ same machine.
 **Failover**
 | Variable | Meaning |
 |---|---|
-| `AITK_IMPORT_ON_BOOT` | `all` (every unfinished job on the remote) or a comma list of job names to import and start at boot. |
+| `AITK_IMPORT_ON_BOOT` | `all` (every job on the remote that was cut off mid-run: queued, running or interrupted; not ones that completed, failed or that you stopped) or a comma list of job names to import and start at boot. |
 | `AITK_IMPORT_REMOTE` | Remote to import from (default `AITK_SYNC_REMOTE`). |
 | `AITK_IMPORT_WAIT` (`15m`) | How long to keep waiting for another server's lease to expire. |
 | `AITK_IMPORT_FORCE` (`0`) | Take jobs over even while another server's lease is valid (only when you know it is gone). |

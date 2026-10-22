@@ -104,3 +104,14 @@ func TestApplyRejectsBadEnv(t *testing.T) {
 		t.Fatal("malformed AITK_REMOTES must fail at boot")
 	}
 }
+
+// AITK_IMPORT_ON_BOOT=all picks up runs cut off mid-way, never ones the user
+// stopped or that failed or finished on their own.
+func TestImportAllTakesCutOffRunsOnly(t *testing.T) {
+	for st, want := range map[string]bool{"queued": true, "starting": true, "running": true, "stopping": true,
+		"interrupted": true, "stopped": false, "failed": false, "completed": false, "draft": false} {
+		if cutOff(st) != want {
+			t.Errorf("%s: cutOff = %v, want %v", st, !want, want)
+		}
+	}
+}

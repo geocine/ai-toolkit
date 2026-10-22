@@ -188,7 +188,7 @@ export function WhenDoneSection() {
           </div>
         )}
         <div className="form-grid life-grid">
-          <Field label="Then" hint={MODES.find(m => m.id === life.mode)?.hint}>
+          <Field group label="Then" hint={MODES.find(m => m.id === life.mode)?.hint}>
             <div className="seg seg-text" role="radiogroup" aria-label="When done">
               {MODES.map(m => (
                 <button key={m.id} type="button" role="radio" aria-checked={life.mode === m.id} className={life.mode === m.id ? 'on' : ''} onClick={() => life.mode !== m.id && patch({ mode: m.id })}>
@@ -297,7 +297,7 @@ const SINK_GUIDES: { id: string; label: string; placeholder: string; steps: Reac
       <>Subscribe to a topic with a name nobody could guess, like <span className="mono">aitk-7f3k9q</span>. Anyone who knows the name can read it.</>,
       <>
         Add <span className="mono">https://ntfy.sh/&lt;topic&gt;</span>. A server of your own: <span className="mono">ntfy+https://&lt;host&gt;/&lt;topic&gt;</span>, with an access token{' '}
-        <span className="mono">https://:&lt;token&gt;@&lt;host&gt;/&lt;topic&gt;</span>.
+        <span className="mono">ntfy+https://:&lt;token&gt;@&lt;host&gt;/&lt;topic&gt;</span>.
       </>,
     ],
   },

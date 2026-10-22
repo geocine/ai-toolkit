@@ -413,9 +413,9 @@ func startJob(w http.ResponseWriter, r *http.Request) {
 }
 
 // How long a stopping job gets for its graceful shutdown before it is assumed
-// hung and force-killed (Windows; see handlers/jobs).
+// hung and force-killed.
 const (
-	gracefulStopTimeout = 60 * time.Second
+	gracefulStopTimeout = 3 * time.Minute // saving a large model and optimizer state can take a while
 	backstopPoll        = 2 * time.Second
 )
 
@@ -459,12 +459,15 @@ func stopJob(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if j.Pid != nil {
-			if runtime.GOOS == "windows" {
-				// the stop flag is the signal there; see proc.Interrupt
-				scheduleForceKillBackstop(*j.Pid, j.ID)
-			} else if err := proc.Interrupt(*j.Pid); err != nil {
-				log.Printf("Error sending signal to job %s: %v", j.ID, err)
+			// Windows: the stop flag is the signal (see proc.Interrupt). Both:
+			// a trainer that does not exit in time (hung, or ignoring SIGINT)
+			// is killed rather than left "stopping" for ever
+			if runtime.GOOS != "windows" {
+				if err := proc.Interrupt(*j.Pid); err != nil {
+					log.Printf("Error sending signal to job %s: %v", j.ID, err)
+				}
 			}
+			scheduleForceKillBackstop(*j.Pid, j.ID)
 		}
 	}
 	respondJob(w, r, http.StatusOK, j.ID)

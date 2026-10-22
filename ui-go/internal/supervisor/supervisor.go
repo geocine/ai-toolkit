@@ -182,6 +182,12 @@ func (s *Supervisor) transition(ctx context.Context, j *store.Job, p *snapshot) 
 		if end == jobstate.Interrupted {
 			s.maybeResume(ctx, j)
 		}
+	case (p.status == "running" || p.status == "stopping") && j.Status == "queued":
+		// returned to the queue (the queue was paused): the attempt ends
+		// here, as "requeued", which is not an interruption
+		if a, err := state.EndAttempt(ctx, j.ID, "requeued", j.Info, j.Step); err == nil && a != nil {
+			events.Emit(ctx, events.JobAttempt, j.ID, a)
+		}
 	}
 	events.Emit(ctx, events.JobState, j.ID, map[string]any{"from": from, "to": to, "status": j.Status, "info": j.Info})
 }

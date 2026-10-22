@@ -1,7 +1,8 @@
 import { Upload } from 'lucide-react';
 import { useRef, useState } from 'react';
 
-const accepted = /\.(jpe?g|png|webp|bmp|gif|avif|heic|txt)$/i;
+// what the wizard can use, as is or converted to JPEG (lib/images.ts)
+const accepted = /\.(jpe?g|png|webp|bmp|gif|avif|heic|heif|tiff?|txt)$/i;
 
 /** Reads files and dropped folders (one level of entries per folder). */
 async function fromDrop(dt: DataTransfer): Promise<File[]> {

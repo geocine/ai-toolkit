@@ -328,7 +328,7 @@ const sinkGuides: { id: string; label: string; placeholder: string; steps: React
       <>Subscribe to a topic with a name nobody could guess, like <span className="mono">aitk-7f3k9q</span>. Anyone who knows the name can read it.</>,
       <>
         Add <span className="mono">https://ntfy.sh/&lt;topic&gt;</span>. A server of your own: <span className="mono">ntfy+https://&lt;host&gt;/&lt;topic&gt;</span>, with an access token{' '}
-        <span className="mono">https://:&lt;token&gt;@&lt;host&gt;/&lt;topic&gt;</span>.
+        <span className="mono">ntfy+https://:&lt;token&gt;@&lt;host&gt;/&lt;topic&gt;</span>.
       </>,
     ],
   },

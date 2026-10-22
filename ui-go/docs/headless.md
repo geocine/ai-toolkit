@@ -415,7 +415,7 @@ Sinks (URLs hold their secret: write-only, shown redacted):
 
 | URL | Sends |
 |---|---|
-| `https://ntfy.sh/<topic>`; self-hosted `ntfy+https://<host>/<topic>`; auth `https://:<token>@host/topic` or `user:pass@` | ntfy publish: title, click link, priority, tags; the image as an attachment |
+| `https://ntfy.sh/<topic>`; self-hosted `ntfy+https://<host>/<topic>`; auth `ntfy+https://:<token>@host/topic` or `user:pass@` | ntfy publish: title, click link, priority, tags; the image as an attachment |
 | `https://discord.com/api/webhooks/<id>/<token>` | an embed (title links to the run) with the image attached |
 | `telegram://<bot token>@<chat id>` | `sendMessage`, or `sendPhoto` with a caption |
 | `pushover://<api token>@<user key>`, optionally `/<device>` | a message with the link as its URL and the image attached; failures at high priority |

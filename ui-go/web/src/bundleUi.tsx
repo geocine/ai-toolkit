@@ -618,7 +618,7 @@ export function ExportDialog({ job, onClose }: { job: Job; onClose: () => void }
           One zip with the dataset and the job folder, in the layout ai-toolkit resumes from.
         </div>
         <div className="form-grid" style={{ gridTemplateColumns: '1fr' }}>
-          <Field label="Checkpoints" hint={checkpoints === 'none' ? 'Dataset and config only: trains from step 0.' : checkpoints === 'all' ? 'Every save.' : 'The newest save, enough to resume.'}>
+          <Field group label="Checkpoints" hint={checkpoints === 'none' ? 'Dataset and config only: trains from step 0.' : checkpoints === 'all' ? 'Every save.' : 'The newest save, enough to resume.'}>
             <div className="seg seg-text" role="radiogroup" aria-label="Checkpoints">
               {(['latest', 'all', 'none'] as const).map(c => (
                 <button key={c} type="button" role="radio" aria-checked={checkpoints === c} className={checkpoints === c ? 'on' : ''} onClick={() => setCheckpoints(c)}>

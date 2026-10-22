@@ -26,6 +26,7 @@ import { buildConfig, knobsFor, validate, withSubject, type Knobs, type Preset, 
 import { go } from '../lib/route';
 import { save, useStored } from '../lib/store';
 import { bytes } from '../lib/format';
+import { batches, prepareImages, trainable } from '../lib/images';
 import { PresetNotes } from './Presets';
 
 const steps = ['Subject', 'Images', 'Captions', 'Settings', 'Launch'] as const;
@@ -215,8 +216,10 @@ function StepImages({ k, dataset, onDone, back }: { k: Knobs; dataset: string; o
   const [name, setName] = useState(dataset || datasetSafe(k.trigger.toLowerCase()) || datasetSafe(k.name));
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const [skipped, setSkipped] = useState<string[]>([]);
+  const [converting, setConverting] = useState(false);
   const existing = useLoad(server, s => get<Items<Dataset>>(s, '/v1/datasets'), []);
-  const images = files.filter(f => /\.(jpe?g|png|webp|bmp|gif|avif|heic)$/i.test(f.name));
+  const images = useMemo(() => files.filter(f => trainable.test(f.name)), [files]);
   const captions = files.filter(f => /\.txt$/i.test(f.name));
   const urls = useMemo(() => images.slice(0, 60).map(f => URL.createObjectURL(f)), [images]);
   useEffect(() => () => urls.forEach(u => URL.revokeObjectURL(u)), [urls]);
@@ -233,8 +236,15 @@ function StepImages({ k, dataset, onDone, back }: { k: Knobs; dataset: string; o
         }
       }
       if (files.length) {
+        // in batches, so a proxy's request size limit never refuses the lot
         setProgress(0);
-        await upload(server, `/v1/datasets/${encodeURIComponent(name)}/files`, files, (d, t) => setProgress(d / t));
+        const total = files.reduce((n, f) => n + f.size, 0) || 1;
+        let sent = 0;
+        for (const batch of batches(files)) {
+          const size = batch.reduce((n, f) => n + f.size, 0);
+          await upload(server, `/v1/datasets/${encodeURIComponent(name)}/files`, batch, (d, t) => setProgress((sent + (d / (t || 1)) * size) / total));
+          sent += size;
+        }
       }
       onDone(name);
     } catch (e) {
@@ -265,7 +275,23 @@ function StepImages({ k, dataset, onDone, back }: { k: Knobs; dataset: string; o
           </label>
         )}
       </div>
-      <Dropzone onFiles={fs => setFiles(prev => [...prev, ...fs])} />
+      <Dropzone
+        onFiles={async fs => {
+          setConverting(true);
+          const { ok, skipped: bad } = await prepareImages(fs);
+          setConverting(false);
+          setFiles(prev => [...prev, ...ok]);
+          setSkipped(prev => [...prev, ...bad]);
+        }}
+      />
+      {converting && <p className="quiet-note">Converting photos to JPEG…</p>}
+      {skipped.length > 0 && (
+        <Callout kind="warn">
+          {skipped.length} file{skipped.length === 1 ? '' : 's'} left out: the trainer reads JPEG, PNG and WebP, and this browser could not convert{' '}
+          {skipped.slice(0, 3).join(', ')}
+          {skipped.length > 3 ? ', …' : ''}. Export them as JPEG and add them again.
+        </Callout>
+      )}
       {files.length > 0 && (
         <>
           <div className="tally">
@@ -274,7 +300,13 @@ function StepImages({ k, dataset, onDone, back }: { k: Knobs; dataset: string; o
               {captions.length > 0 && <> · {captions.length} captions</>} · {bytes(files.reduce((n, f) => n + f.size, 0))}
               {images.length > 0 && images.length < 15 && <span className="warn"> · fewer than ~15 images rarely holds a likeness</span>}
             </p>
-            <button className="btn btn-ghost btn-sm" onClick={() => setFiles([])}>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => {
+                setFiles([]);
+                setSkipped([]);
+              }}
+            >
               Clear
             </button>
           </div>
@@ -385,7 +417,7 @@ function StepCaptions({ preset, k, dataset, next, back }: { preset: Preset; k: K
           <div className="fill">
             <label htmlFor="fill-missing">Fill {missing.length} missing with</label>
             <input id="fill-missing" value={fallback} onChange={e => setFallback(e.target.value)} />
-            <button className="btn" disabled={busy || !fallback.trim()} onClick={fillMissing}>
+            <button className="btn" disabled={busy || running || !fallback.trim()} onClick={fillMissing} title={running ? 'Wait for the caption run to finish' : undefined}>
               {busy ? 'Saving…' : 'Fill'}
             </button>
           </div>
@@ -394,7 +426,7 @@ function StepCaptions({ preset, k, dataset, next, back }: { preset: Preset; k: K
       <ErrorNote error={error || detail.error} />
       <div className="caption-grid">
         {items.map(item => (
-          <CaptionCard key={item.file} item={item} src={detail.data ? mediaUrl(server, joinServerPath(detail.data.path, item.file), true) : ''} onSave={saveCaption} />
+          <CaptionCard key={item.file} item={item} src={detail.data ? mediaUrl(server, joinServerPath(detail.data.path, item.file), true) : ''} onSave={saveCaption} locked={running} />
         ))}
       </div>
       <div className="wizard-nav">
@@ -559,7 +591,8 @@ function AutoCaption({ dataset, template, job, onChange }: { dataset: string; te
   );
 }
 
-function CaptionCard({ item, src, onSave }: { item: DatasetItem; src: string; onSave: (i: DatasetItem, c: string) => Promise<void> }) {
+// locked: a caption job is writing captions; an edit now would race it
+function CaptionCard({ item, src, onSave, locked }: { item: DatasetItem; src: string; onSave: (i: DatasetItem, c: string) => Promise<void>; locked?: boolean }) {
   const [text, setText] = useState(item.caption ?? '');
   const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const saved = useRef(item.caption ?? '');
@@ -595,7 +628,7 @@ function CaptionCard({ item, src, onSave }: { item: DatasetItem; src: string; on
             !text.trim() && <span className="badge tone-warn">No caption</span>
           )}
         </div>
-        <textarea value={text} rows={3} placeholder="No caption; the default caption is used" onChange={e => setText(e.target.value)} onBlur={commit} />
+        <textarea value={text} rows={3} placeholder="No caption; the default caption is used" readOnly={locked} onChange={e => setText(e.target.value)} onBlur={commit} />
       </figcaption>
     </figure>
   );
