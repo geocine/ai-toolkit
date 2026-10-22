@@ -1,2 +1,4 @@
 node_modules/
 dist/
+# the repo root ignores lib/ (Python build output); this one is source
+!src/lib/
