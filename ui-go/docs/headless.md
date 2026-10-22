@@ -504,7 +504,7 @@ OpenAPI document). Bodies that are not JSON:
 Example the agent might send to `aitk_run`:
 ```ts
 const ds = await aitk.datasets.create({ name: "my_set" });
-const { config, warnings } = await aitk.templates.render({ arch: "sd1", name: "my_lora", datasets: [ds.name],
+const { config, warnings } = await aitk.templates.render({ arch: "sdxl", name: "my_lora", datasets: [ds.name],
   overrides: { "config.process[0].train.steps": 1500 } });
 console.log(warnings); // e.g. an override in a section the trainer does not read
 const job = await aitk.jobs.create({ name: "my_lora", gpu_ids: "0", config,
