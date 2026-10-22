@@ -61,7 +61,10 @@ export function Servers() {
             return (
               <li key={s.id} className={s.id === active?.id ? 'server server-on' : 'server'}>
                 <div className="server-main">
-                  <p className="server-name">{s.name}</p>
+                  <p className="server-name">
+                    {s.name}
+                    {s.id === active?.id && <span className="pill pill-completed">in use</span>}
+                  </p>
                   <p className="mono dim">{s.base}</p>
                   {c === 'pending' && <p className="dim">testing…</p>}
                   {c && c !== 'pending' && c.ok && (
