@@ -448,6 +448,68 @@ func listLibrary(w http.ResponseWriter, r *http.Request) {
 	v1api.Items(w, items)
 }
 
+// libraryContent serves a library bundle's zip (GET /v1/bundles/content?remote=&id=).
+// Remotes have no streaming read, so the zip is fetched into the staging
+// folder first (server to bucket, fast) and served from there with Range
+// support; sign it with POST /v1/links for a browser download.
+func libraryContent(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	q := r.URL.Query()
+	id := q.Get("id")
+	if err := validBundleID(id); err != nil {
+		v1api.Fail(w, v1api.CodeInvalidRequest, err.Error())
+		return
+	}
+	_, c, err := openRemote(ctx, q.Get("remote"))
+	if err != nil {
+		v1api.Respond(w, r, err)
+		return
+	}
+	zipKey, _ := libraryKeys(id)
+	if _, err := c.Stat(ctx, zipKey); errors.Is(err, remote.ErrNotFound) {
+		v1api.Fail(w, v1api.CodeNotFound, "no bundle "+id+" in the library")
+		return
+	} else if err != nil {
+		v1api.Fail(w, v1api.CodeRemoteFailed, err.Error())
+		return
+	}
+	staging, err := bundles.StagingDir(ctx)
+	if err == nil {
+		err = os.MkdirAll(staging, 0o755)
+	}
+	if err != nil {
+		v1api.Internal(w, r, err)
+		return
+	}
+	tmp, err := os.CreateTemp(staging, "library-*.zip")
+	if err != nil {
+		v1api.Internal(w, r, err)
+		return
+	}
+	tmp.Close()
+	defer os.Remove(tmp.Name())
+	if err := c.Get(ctx, zipKey, tmp.Name(), nil); err != nil {
+		v1api.Fail(w, v1api.CodeRemoteFailed, err.Error())
+		return
+	}
+	f, err := os.Open(tmp.Name())
+	if err != nil {
+		v1api.Internal(w, r, err)
+		return
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		v1api.Internal(w, r, err)
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", "application/zip")
+	h.Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": id + ".zip"}))
+	h.Set("Cache-Control", "no-store")
+	http.ServeContent(w, r, id+".zip", st.ModTime(), f)
+}
+
 func deleteLibraryBundle(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := r.PathValue("id")

@@ -60,6 +60,7 @@ func Register(mux *http.ServeMux) {
 	httpx.Handle(mux, "DELETE /v1/files/content", deleteFile)
 
 	httpx.Handle(mux, "GET /v1/bundles", listLibrary)
+	httpx.Handle(mux, "GET /v1/bundles/content", libraryContent)
 	httpx.Handle(mux, "DELETE /v1/bundles/{id}", deleteLibraryBundle)
 	httpx.Handle(mux, "POST /v1/bundles/imports", createImport)
 	httpx.Handle(mux, "GET /v1/bundles/imports", listTasks("import"))

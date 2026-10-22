@@ -806,6 +806,14 @@ export function LibraryTable({ remote, onImport }: { remote: string; onImport: (
                     <button className="btn btn-sm" onClick={() => onImport({ source: librarySource(remote, b) })}>
                       <FileArchive size={14} /> Import
                     </button>
+                    <button
+                      className="icon-btn"
+                      onClick={() => signedDownload(`/v1/bundles/content${qs({ remote, id: b.id })}`).catch(e => toast.error(e))}
+                      aria-label="Download"
+                      title="Download"
+                    >
+                      <Download size={14} />
+                    </button>
                     <button className="icon-btn danger" onClick={() => del(b)} aria-label="Delete" title="Delete">
                       <Trash2 size={14} />
                     </button>

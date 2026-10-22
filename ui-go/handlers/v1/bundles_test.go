@@ -307,6 +307,12 @@ func TestBundleLibraryAndLinks(t *testing.T) {
 		t.Fatalf("library import: %v", task)
 	}
 	want(t, e.call(t, "POST", "/v1/bundles/imports", map[string]any{"remote": "lib", "key": "bundles/nope.zip"}), 404, "not_found")
+	dl := e.call(t, "GET", "/v1/bundles/content?remote=lib&id=run_step200", nil)
+	want(t, dl, 200, "")
+	if zst, _ := os.Stat(filepath.Join(lib, "bundles", "run_step200.zip")); int64(len(dl.body)) != zst.Size() {
+		t.Fatalf("library download: %d bytes, want %d", len(dl.body), zst.Size())
+	}
+	want(t, e.call(t, "GET", "/v1/bundles/content?remote=lib&id=nope", nil), 404, "not_found")
 	want(t, e.call(t, "DELETE", "/v1/bundles/run_step200?remote=lib", nil), 204, "")
 	if items := e.call(t, "GET", "/v1/bundles?remote=lib", nil).json(t)["items"].([]any); len(items) != 0 {
 		t.Fatalf("after delete: %v", items)
