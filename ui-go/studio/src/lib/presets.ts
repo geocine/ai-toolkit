@@ -199,14 +199,7 @@ export const kreaPreset: Preset = {
   },
   promptSets: { female: femalePrompts, male: malePrompts, man: malePrompts },
   captionTemplates,
-  notes: [
-    {
-      title: 'From your notes',
-      body:
-        '~25 images is enough; 1024 only was the key (768+1024 is an option); 3000 steps with the best checkpoints ' +
-        'around 2000–2750, so every 150-step save is kept for picking; sampling is optional and slow.',
-    },
-  ],
+  notes: [],
 };
 
 export const builtInPresets: Preset[] = [kreaPreset];

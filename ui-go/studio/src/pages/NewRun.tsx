@@ -271,7 +271,6 @@ function StepImages({ k, dataset, onDone, back }: { k: Knobs; dataset: string; o
               <strong className="num">{images.length}</strong> images
               {captions.length > 0 && <> · {captions.length} captions</>} · {bytes(files.reduce((n, f) => n + f.size, 0))}
               {images.length > 0 && images.length < 15 && <span className="warn"> · fewer than ~15 images rarely holds a likeness</span>}
-              {images.length > 40 && <span className="muted"> · ~25 was enough in your notes</span>}
             </p>
             <button className="btn btn-ghost btn-sm" onClick={() => setFiles([])}>
               Clear
@@ -460,8 +459,7 @@ function Num({ label, value, onChange, hint, step = 1 }: { label: string; value:
 
 function StepSettings({ preset, k, set, next, back }: { preset: Preset; k: Knobs; set: (p: Partial<Knobs>) => void; next: () => void; back: () => void }) {
   const saves = Math.floor(k.steps / Math.max(1, k.saveEvery));
-  // the Krea notes only apply to the built-in preset; imported ones keep their own resolution
-  const krea = preset.builtIn;
+  // a preset's own resolution is offered even when it is not a standard choice
   const own = preset.defaults.resolution;
   const choices = resolutionChoices.some(r => r.value.join() === own.join())
     ? resolutionChoices
@@ -472,7 +470,7 @@ function StepSettings({ preset, k, set, next, back }: { preset: Preset; k: Knobs
       <div className="form-section">
         <h3>Training</h3>
         <div className="form-grid">
-          <Num label="Steps" value={k.steps} onChange={steps => set({ steps })} hint={krea ? 'Your best Krea results came at 2000–2750 of 3000.' : undefined} />
+          <Num label="Steps" value={k.steps} onChange={steps => set({ steps })} />
           <Num label="Save every" value={k.saveEvery} onChange={saveEvery => set({ saveEvery })} hint={`${saves} checkpoints to pick from`} />
           <label className="field">
             <span>Optimizer</span>
@@ -493,7 +491,6 @@ function StepSettings({ preset, k, set, next, back }: { preset: Preset; k: Knobs
                 </button>
               ))}
             </div>
-            {krea && <small>1024 only was the key in your notes.</small>}
           </fieldset>
         </div>
       </div>

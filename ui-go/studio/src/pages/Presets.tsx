@@ -150,7 +150,7 @@ function SettingsPresets() {
     <>
       <PageHeader
         title="Presets"
-        description="A preset is a full ai-toolkit job config plus the handful of knobs you change per run. Import any ai-toolkit YAML or JSON, or edit one here; the two settings traps found in your Krea files are checked on every import and save."
+        description="A preset is a full ai-toolkit job config plus the handful of knobs you change per run. Import any ai-toolkit YAML or JSON, or edit one here. Every import and save fixes two settings the trainer would ignore: loss settings outside train, and EMA outside train.ema_config."
         actions={
           <>
             <input
