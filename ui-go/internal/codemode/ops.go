@@ -435,7 +435,7 @@ declare class AitkError extends Error { code: string; status: number; }
 const typesTS = `type Items<T> = { items: T[]; next_cursor?: string | null };
 type JobState = "draft" | "queued" | "starting" | "running" | "stopping" | "stopped" | "completed" | "failed" | "interrupted";
 type JobConfig = { job: string; config: { name: string; process: Record<string, any>[] }; meta?: Record<string, any> };
-type JobPolicy = { auto_resume?: boolean | null; max_auto_resumes?: number | null; auto_upload_remote?: string | null; sync_remote?: string | null };
+type JobPolicy = { auto_resume?: boolean | null; max_auto_resumes?: number | null; auto_upload_remote?: string | null; sync_remote?: string | null; /** older checkpoints the sync remote keeps besides the newest; -1 keeps all (pick the best step later) */ keep_checkpoints?: number | null };
 type Attempt = { n: number; started_at: string; ended_at: string | null; end_state: string | null; end_reason: string | null; start_step: number; end_step: number | null; auto: boolean; pid: number | null };
 type Checkpoint = { name: string; path: string; step: number | null; size: number; modified: string; sha256?: string };
 type Sample = { name: string; path: string; step: number | null; index: number | null; modified: string };

@@ -63,6 +63,7 @@ same machine.
 | Variable | Meaning |
 |---|---|
 | `AITK_SYNC_REMOTE` | Remote that keeps jobs portable (checkpoint + optimizer state + dataset + manifest). |
+| `AITK_SYNC_KEEP_CHECKPOINTS` | Older checkpoints the sync remote keeps besides the newest: a number, or `all` (default: only the newest). A job's `policy.keep_checkpoints` overrides it. Keep them if you pick the best step after training, since a destroyed pod takes its local copies with it. |
 | `AITK_AUTO_UPLOAD_REMOTE` | Remote every new checkpoint is also uploaded to (e.g. a Hugging Face repo for the LoRAs). |
 | `AITK_AUTO_RESUME` (`0`) / `AITK_MAX_AUTO_RESUMES` (`3`) | Re-queue a job whose trainer died without finishing, up to N times in a row. |
 
@@ -92,7 +93,7 @@ same machine.
 | `AITK_WHEN_DONE` (`keep`) | `stop` or `destroy` this server once every queue is idle and the last job reached the trigger, after verifying the finished jobs' results are on a remote (never when they are only here). |
 | `AITK_WHEN_DONE_DELAY` (`10m`) | Countdown before acting; cancel, extend or skip it from the studio, the API or MCP. A job queued meanwhile cancels it; only training runs arm it (not caption jobs or inference engines), and it waits for bundle transfers and uploads in flight. |
 | `AITK_WHEN_DONE_ON` (`completed`) | `any` also triggers when the last job failed. |
-| `AITK_WHEN_DONE_BUNDLE` | A remote to keep each finished run in as a resumable bundle (`bundles/<name>_step<step>.zip`, docs/bundle-format.md) before acting. Pushed when missing, verified by size, and preferred over the sync and upload checks. |
+| `AITK_WHEN_DONE_BUNDLE` | A remote to keep each finished run in as a resumable bundle (`bundles/<name>_step<step>.zip`, docs/bundle-format.md) before acting. Pushed when missing, verified by size, and preferred over the sync and upload checks. It holds the newest checkpoint, or every one when the job keeps older checkpoints (`keep_checkpoints`); `AITK_WHEN_DONE_BUNDLE_CHECKPOINTS=all|latest` forces either. |
 | `AITK_WHEN_DONE_DRY_RUN` (`0`) | Log and emit events instead of calling the provider. |
 | `AITK_WHEN_DONE_PROVIDER` (auto) | `runpod`, `vast`, `command` or `exit`. Auto: `AITK_WHEN_DONE_CMD`, else RunPod (`RUNPOD_POD_ID`), else Vast.ai (`CONTAINER_ID` + `CONTAINER_API_KEY`), else the process exits. |
 | `AITK_RUNPOD_API_KEY` | A full RunPod key (the pod's own `RUNPOD_API_KEY` may only be allowed to stop, not terminate; then the pod is stopped and its disk still billed). |

@@ -80,7 +80,7 @@ one by one; they expire.
 { id, name, type, ref, gpu_ids, state, status, info, step, total_steps, speed,
   queue_position, pid, created_at, updated_at,
   config,                          // parsed job_config object
-  policy: {auto_resume, max_auto_resumes, auto_upload_remote, sync_remote},
+  policy: {auto_resume, max_auto_resumes, auto_upload_remote, sync_remote, keep_checkpoints},
   attempts: n, last_attempt: Attempt | null,
   latest_checkpoint: Checkpoint | null }
 ```
@@ -277,7 +277,9 @@ Sync (on the server running the job):
 - On every `job.checkpoint`: the checkpoint and `optimizer.pt` (and the loss
   log and log) are uploaded, then the manifest is updated. Only the newest
   checkpoint is required for resuming; older ones are pruned remotely unless
-  `keep_checkpoints` is set on the remote's config.
+  kept: the job's `policy.keep_checkpoints` (N older ones besides the newest,
+  `-1` all), else `AITK_SYNC_KEEP_CHECKPOINTS`, else `keep_checkpoints` on
+  the remote's config. Keep them when you will pick the best step afterwards.
 - While running, the lease is renewed every 60 s. On a clean end (completed,
   stopped, failed) the lease is released (`lease: null`).
 

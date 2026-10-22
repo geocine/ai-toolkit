@@ -16,6 +16,7 @@ export type JobPolicy = {
   max_auto_resumes?: number | null;
   auto_upload_remote?: string | null;
   sync_remote?: string | null;
+  keep_checkpoints?: number | null;
 };
 
 export type Attempt = {

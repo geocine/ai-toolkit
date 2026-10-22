@@ -291,7 +291,7 @@ func syncJob(ctx context.Context, j *store.Job, r *remote.Remote, c remote.Clien
 	if err := writeManifest(ctx, c, m); err != nil {
 		return nil, nil, err
 	}
-	if err := prune(ctx, c, r, j.Name, files); err != nil {
+	if err := prune(ctx, c, r, j.Name, files, pol); err != nil {
 		log.Printf("portable: prune %s: %v", j.Name, err)
 	}
 	return uploaded, m.Lease, nil
@@ -444,7 +444,7 @@ func isCheckpoint(file string) bool {
 
 // prune deletes files/ objects the new manifest no longer references, except
 // old checkpoints the remote is configured to keep.
-func prune(ctx context.Context, c remote.Client, r *remote.Remote, name string, current []File) error {
+func prune(ctx context.Context, c remote.Client, r *remote.Remote, name string, current []File, pol state.Policy) error {
 	objs, err := c.List(ctx, jobKey(name, "files/"))
 	if err != nil {
 		return err
@@ -454,6 +454,9 @@ func prune(ctx context.Context, c remote.Client, r *remote.Remote, name string, 
 		ref[f.Key] = true
 	}
 	keepAll, keepN := keepCheckpoints(r)
+	if n, ok := state.KeepCheckpoints(ctx, pol); ok {
+		keepAll, keepN = n < 0, max(n, 0)
+	}
 	type old struct {
 		key  string
 		step int

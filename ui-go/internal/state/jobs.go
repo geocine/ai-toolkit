@@ -155,15 +155,18 @@ type Policy struct {
 	// SyncRemote keeps the job portable: its resumable state is pushed there
 	// so another server can import and continue it.
 	SyncRemote *string `json:"sync_remote"`
+	// KeepCheckpoints is how many older checkpoints the sync remote keeps
+	// besides the newest (-1: every one), for picking the best step later.
+	KeepCheckpoints *int `json:"keep_checkpoints"`
 }
 
 // GetPolicy returns the stored policy (all nil when none).
 func GetPolicy(ctx context.Context, jobID string) (Policy, error) {
 	var p Policy
-	var ar, mx sql.NullInt64
+	var ar, mx, keep sql.NullInt64
 	var up, sync sql.NullString
-	err := DB.QueryRowContext(ctx, `SELECT auto_resume, max_auto_resumes, auto_upload_remote, sync_remote FROM job_policies WHERE job_id = ?`, jobID).
-		Scan(&ar, &mx, &up, &sync)
+	err := DB.QueryRowContext(ctx, `SELECT auto_resume, max_auto_resumes, auto_upload_remote, sync_remote, keep_checkpoints FROM job_policies WHERE job_id = ?`, jobID).
+		Scan(&ar, &mx, &up, &sync, &keep)
 	if err == sql.ErrNoRows {
 		return p, nil
 	}
@@ -184,16 +187,20 @@ func GetPolicy(ctx context.Context, jobID string) (Policy, error) {
 	if sync.Valid {
 		p.SyncRemote = &sync.String
 	}
+	if keep.Valid {
+		v := int(keep.Int64)
+		p.KeepCheckpoints = &v
+	}
 	return p, nil
 }
 
 // SetPolicy replaces the job's policy.
 func SetPolicy(ctx context.Context, jobID string, p Policy) error {
-	_, err := DB.ExecContext(ctx, `INSERT INTO job_policies (job_id, auto_resume, max_auto_resumes, auto_upload_remote, sync_remote)
-		VALUES (?, ?, ?, ?, ?) ON CONFLICT(job_id) DO UPDATE SET auto_resume = excluded.auto_resume,
+	_, err := DB.ExecContext(ctx, `INSERT INTO job_policies (job_id, auto_resume, max_auto_resumes, auto_upload_remote, sync_remote, keep_checkpoints)
+		VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(job_id) DO UPDATE SET auto_resume = excluded.auto_resume,
 		max_auto_resumes = excluded.max_auto_resumes, auto_upload_remote = excluded.auto_upload_remote,
-		sync_remote = excluded.sync_remote`,
-		jobID, p.AutoResume, p.MaxAutoResumes, p.AutoUploadRemote, p.SyncRemote)
+		sync_remote = excluded.sync_remote, keep_checkpoints = excluded.keep_checkpoints`,
+		jobID, p.AutoResume, p.MaxAutoResumes, p.AutoUploadRemote, p.SyncRemote, p.KeepCheckpoints)
 	return err
 }
 
@@ -203,7 +210,23 @@ const (
 	SettingMaxAutoResumesDefault   = "max_auto_resumes_default"
 	SettingSyncRemoteDefault       = "sync_remote_default"
 	SettingAutoUploadRemoteDefault = "auto_upload_remote_default"
+	SettingKeepCheckpointsDefault  = "keep_checkpoints_default"
 )
+
+// KeepCheckpoints is the job's checkpoint retention on its sync remote: its
+// policy, else the server default (AITK_SYNC_KEEP_CHECKPOINTS); ok false
+// when neither is set (the remote's own keep_checkpoints config decides).
+func KeepCheckpoints(ctx context.Context, p Policy) (n int, ok bool) {
+	if p.KeepCheckpoints != nil {
+		return *p.KeepCheckpoints, true
+	}
+	if v, set, _ := Setting(ctx, SettingKeepCheckpointsDefault); set {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n, true
+		}
+	}
+	return 0, false
+}
 
 // EffectivePolicy resolves a job's policy against the defaults (auto_resume
 // off and 3 resumes unless configured).

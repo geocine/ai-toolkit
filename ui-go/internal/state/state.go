@@ -115,6 +115,8 @@ var migrations = []string{
 	);`,
 	// portable jobs: the remote a job's resumable state is synced to
 	`ALTER TABLE job_policies ADD COLUMN sync_remote TEXT;`,
+	// how many older checkpoints the sync remote keeps (-1: all)
+	`ALTER TABLE job_policies ADD COLUMN keep_checkpoints INTEGER;`,
 }
 
 // NodeID identifies this server (stable across restarts, new per database):

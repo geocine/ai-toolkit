@@ -11,6 +11,7 @@ import (
 	"github.com/geocine/aitoolkit/internal/artifacts"
 	"github.com/geocine/aitoolkit/internal/bundles"
 	"github.com/geocine/aitoolkit/internal/lifecycle"
+	"github.com/geocine/aitoolkit/internal/state"
 	"github.com/geocine/aitoolkit/internal/store"
 )
 
@@ -33,6 +34,16 @@ func (bundleSaver) Save(ctx context.Context, j *store.Job, newest artifacts.Chec
 		return lifecycle.Proof{}, true, err
 	}
 	opt := bundles.DefaultOptions()
+	// a job that keeps its older checkpoints keeps them in the bundle too:
+	// they are what the best step is picked from once the server is gone
+	if pol, err := state.GetPolicy(ctx, j.ID); err == nil {
+		if n, ok := state.KeepCheckpoints(ctx, pol); ok && n != 0 {
+			opt.Checkpoints = bundles.CheckpointsAll
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("AITK_WHEN_DONE_BUNDLE_CHECKPOINTS")); v == bundles.CheckpointsAll || v == bundles.CheckpointsLatest {
+		opt.Checkpoints = v
+	}
 	_, m, cleanup, err := buildBundle(ctx, j, opt)
 	if err != nil {
 		return lifecycle.Proof{}, true, err
