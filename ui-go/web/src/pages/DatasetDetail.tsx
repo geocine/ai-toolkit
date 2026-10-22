@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronRight, FileArchive, FileX, ImagePlus, Save, Trash2, Upload as UploadIcon } from 'lucide-react';
+import { ChevronRight, FileArchive, FileX, ImagePlus, Save, Sparkles, Trash2, Upload as UploadIcon } from 'lucide-react';
 import { api, ApiError, fmtBytes, imgUrl, joinServerPath, plural, upload } from '../api';
+import { CaptionDialog, CaptionRun, captionActive } from '../captionUi';
 import { go, href } from '../router';
 import type { DatasetDetail as Detail, DatasetItem } from '../types';
 import { Bar, Empty, Loading, Spinner, useConfirm, useToast } from '../ui';
@@ -18,6 +19,7 @@ export function DatasetDetail({ name }: { name: string }) {
   const [missing, setMissing] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [over, setOver] = useState(false);
+  const [captioning, setCaptioning] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const zipInput = useRef<HTMLInputElement>(null);
   const base = `/v1/datasets/${encodeURIComponent(name)}`;
@@ -37,6 +39,21 @@ export function DatasetDetail({ name }: { name: string }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  // while a caption job runs, its progress and the captions it writes
+  const active = captionActive(ds?.caption_job);
+  const wasActive = useRef(false);
+  useEffect(() => {
+    if (wasActive.current && !active && ds?.caption_job) {
+      const j = ds.caption_job;
+      if (j.state === 'completed') toast.success('Captioning finished');
+      else if (j.state === 'stopped') toast.success('Captioning stopped');
+    }
+    wasActive.current = active;
+    if (!active) return;
+    const id = setInterval(() => document.visibilityState !== 'hidden' && load(), 3000);
+    return () => clearInterval(id);
+  }, [active, load]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const more = async () => {
     if (!cursor) return;
@@ -116,6 +133,9 @@ export function DatasetDetail({ name }: { name: string }) {
           <button className="btn btn-destructive" onClick={delDataset}>
             <Trash2 size={14} /> Delete
           </button>
+          <button className="btn" onClick={() => setCaptioning(true)} disabled={active || ds.images === 0} title={active ? 'Captioning now' : undefined}>
+            <Sparkles size={14} /> Auto caption
+          </button>
           <button className="btn" onClick={() => zipInput.current?.click()} disabled={progress !== null}>
             <FileArchive size={14} /> Import zip
           </button>
@@ -124,6 +144,15 @@ export function DatasetDetail({ name }: { name: string }) {
           </button>
         </div>
       </div>
+      {ds.caption_job && <CaptionRun job={ds.caption_job} onChange={load} />}
+      {captioning && (
+        <CaptionDialog
+          dataset={name}
+          media={items.some(i => isVideo(i.file) || isAudio(i.file))}
+          onStarted={j => setDs(d => (d ? { ...d, caption_job: j } : d))}
+          onClose={() => setCaptioning(false)}
+        />
+      )}
       <input ref={fileInput} type="file" multiple hidden onChange={e => send(Array.from(e.target.files ?? []))} />
       <input ref={zipInput} type="file" accept=".zip" hidden onChange={e => send(Array.from(e.target.files ?? []))} />
 

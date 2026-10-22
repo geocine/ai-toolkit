@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, Copy, Rocket, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, Copy, Rocket, Sparkles, Square, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import YAML from 'yaml';
 import { Dropzone } from '../components/Dropzone';
@@ -10,6 +10,8 @@ import {
   mediaUrl,
   post,
   upload,
+  type CaptionCatalog,
+  type Captioner,
   type Dataset,
   type DatasetDetail,
   type DatasetItem,
@@ -318,6 +320,15 @@ function StepCaptions({ preset, k, dataset, next, back }: { preset: Preset; k: K
   const template = preset.captionTemplates?.[k.subject];
   const items = detail.data?.items ?? [];
   const missing = items.filter(i => !i.caption?.trim());
+  const job = detail.data?.caption_job ?? null;
+  const running = !!job && captionBusy.has(job.state);
+
+  // the captions land while the caption job runs
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => document.visibilityState !== 'hidden' && detail.reload(), 3000);
+    return () => clearInterval(id);
+  }, [running]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveCaption = async (item: DatasetItem, caption: string) => {
     await call(server, 'PUT', `/v1/datasets/${encodeURIComponent(dataset)}/captions/${item.file.split('/').map(encodeURIComponent).join('/')}`, {
@@ -340,11 +351,12 @@ function StepCaptions({ preset, k, dataset, next, back }: { preset: Preset; k: K
 
   return (
     <WizardStep title="Captions">
+      <AutoCaption dataset={dataset} template={template} job={job} onChange={detail.reload} />
       {template && (
-        <div className="template">
-          <div className="template-head">
+        <details className="template">
+          <summary className="template-head">
             <p>
-              Caption prompt for your VLM <span className="muted">· {k.subject}</span>
+              Caption prompt for your own VLM <span className="muted">· {k.subject}</span>
             </p>
             <button
               className="btn btn-sm"
@@ -361,9 +373,9 @@ function StepCaptions({ preset, k, dataset, next, back }: { preset: Preset; k: K
               {copied ? <Check /> : <Copy />}
               {copied ? 'Copied' : 'Copy prompt'}
             </button>
-          </div>
+          </summary>
           <pre className="code-block">{template}</pre>
-        </div>
+        </details>
       )}
       <div className="tally">
         <p>
@@ -399,13 +411,163 @@ function StepCaptions({ preset, k, dataset, next, back }: { preset: Preset; k: K
   );
 }
 
+const captionBusy = new Set(['queued', 'starting', 'running', 'stopping']);
+const CAPTION = 'config.process[0].caption.';
+
+// Runs one of the server's captioner models on the dataset (a caption job);
+// the preset's caption prompt is the starting prompt.
+function AutoCaption({ dataset, template, job, onChange }: { dataset: string; template?: string; job: Job | null; onChange: () => void }) {
+  const server = useServer()!;
+  const cat = useLoad(server, s => get<CaptionCatalog>(s, '/v1/templates/captioners'), []);
+  const [name, setName] = useState('');
+  const [model, setModel] = useState('');
+  const [prompt, setPrompt] = useState(template ?? '');
+  const [recaption, setRecaption] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const c = cat.data?.captioners.find(x => x.name === name);
+  const running = !!job && captionBusy.has(job.state);
+
+  const choose = (next: Captioner, keepPrompt: boolean) => {
+    setName(next.name);
+    setModel(String(next.defaults[CAPTION + 'model_name_or_path'] ?? next.model_options[0]?.value ?? ''));
+    if (!keepPrompt) setPrompt(String(next.defaults[CAPTION + 'caption_prompt'] ?? ''));
+  };
+  useEffect(() => {
+    const list = cat.data?.captioners ?? [];
+    const first = list.find(x => x.name === 'Qwen3VLCaptioner') ?? list[0];
+    if (first && !name) choose(first, !!template);
+  }, [cat.data]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const start = async () => {
+    if (!c) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await post(server, `/v1/datasets/${encodeURIComponent(dataset)}/caption`, {
+        captioner: c.name,
+        model,
+        prompt: c.additional_sections.includes('caption.caption_prompt') ? prompt : undefined,
+        recaption,
+      });
+      onChange();
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const stop = async () => {
+    if (!job) return;
+    try {
+      await post(server, `/v1/jobs/${encodeURIComponent(job.id)}/stop`, {});
+      onChange();
+    } catch (e) {
+      setError(e);
+    }
+  };
+
+  if (cat.error || (cat.data && !cat.data.captioners.length)) return null;
+  const prompts: [string, string][] = [...(template ? [['This preset', template] as [string, string]] : []), ...Object.entries(c?.caption_prompts ?? {})];
+  return (
+    <div className="card auto-caption">
+      <div className="auto-caption-head">
+        <Sparkles aria-hidden />
+        <p>Caption with a model on the server</p>
+      </div>
+      {running && job ? (
+        <div className="auto-caption-run">
+          <p className="auto-caption-status">
+            {job.state === 'queued' ? 'Waiting for the GPU' : job.info || 'Captioning'}
+            {job.total_steps ? (
+              <span className="muted num">
+                {' '}
+                · {job.step} / {job.total_steps}
+              </span>
+            ) : null}
+          </p>
+          <Progress value={job.step} max={job.total_steps} indeterminate={!job.total_steps} />
+          <button className="btn btn-sm" onClick={stop} disabled={job.state === 'stopping'}>
+            <Square />
+            Stop
+          </button>
+        </div>
+      ) : (
+        c && (
+          <>
+            <div className="auto-caption-grid">
+              <label className="field">
+                <span>Captioner</span>
+                <select value={name} onChange={e => choose(cat.data!.captioners.find(x => x.name === e.target.value)!, !!template)}>
+                  {cat.data!.captioners.map(x => (
+                    <option key={x.name} value={x.name}>
+                      {x.label} · {x.group}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Model</span>
+                {c.model_options.length ? (
+                  <select value={model} onChange={e => setModel(e.target.value)}>
+                    {c.model_options.map(o => (
+                      <option key={String(o.value)} value={String(o.value)}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input value={model} onChange={e => setModel(e.target.value)} spellCheck={false} />
+                )}
+              </label>
+            </div>
+            {c.additional_sections.includes('caption.caption_prompt') && (
+              <label className="field">
+                <span>Prompt</span>
+                {prompts.length > 1 && (
+                  <select value={prompts.find(([, v]) => v === prompt)?.[0] ?? ''} onChange={e => setPrompt(prompts.find(([k]) => k === e.target.value)?.[1] ?? prompt)} aria-label="Prompt preset">
+                    {!prompts.some(([, v]) => v === prompt) && <option value="">Your own</option>}
+                    {prompts.map(([k]) => (
+                      <option key={k} value={k}>
+                        {k}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <textarea rows={5} value={prompt} onChange={e => setPrompt(e.target.value)} />
+                <small>
+                  <span className="mono">[trigger]</span> in a caption becomes the trigger word when training.
+                </small>
+              </label>
+            )}
+            <div className="auto-caption-foot">
+              <label className="check">
+                <input type="checkbox" checked={recaption} onChange={e => setRecaption(e.target.checked)} />
+                Replace existing captions
+              </label>
+              <button className="btn btn-primary" onClick={start} disabled={busy || !model.trim()}>
+                <Sparkles />
+                {busy ? 'Starting…' : 'Caption'}
+              </button>
+            </div>
+            {job?.state === 'failed' && <Callout kind="danger">The last caption run failed{job.info ? `: ${job.info}` : ''}.</Callout>}
+          </>
+        )
+      )}
+      <ErrorNote error={error} />
+    </div>
+  );
+}
+
 function CaptionCard({ item, src, onSave }: { item: DatasetItem; src: string; onSave: (i: DatasetItem, c: string) => Promise<void> }) {
   const [text, setText] = useState(item.caption ?? '');
   const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const saved = useRef(item.caption ?? '');
   useEffect(() => {
-    setText(item.caption ?? '');
-    saved.current = item.caption ?? '';
+    // a caption written elsewhere (the caption job) replaces this one unless it is being edited
+    const fresh = item.caption ?? '';
+    setText(cur => (cur === saved.current ? fresh : cur));
+    saved.current = fresh;
   }, [item.caption]);
   const commit = async () => {
     if (text === saved.current) return;

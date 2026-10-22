@@ -31,6 +31,8 @@ Typical flow: aitk.datasets.create -> add images (datasets.importUrl by URL, dat
 To build or change a config: aitk.templates.fields({ section }) lists every key the trainer reads with its default and where
 it goes, aitk.templates.examples / example(name) are upstream's starting points, and aitk.templates.check({ config }) finds keys
 the trainer would ignore (wrong section, typos). Check before jobs.create.
+To caption a dataset with a model: aitk.templates.captioners() lists upstream's captioners (model choices, named prompts),
+then aitk.datasets.caption(name, { captioner, model, prompt }) queues a caption job; datasets.get(name).caption_job follows it.
 -> poll aitk.jobs.get(id) or aitk.jobs.wait(id); look at aitk.jobs.samples(id) with aitk_view.
 Run bundles move a whole run (dataset + checkpoints + optimizer state) between servers: aitk.bundles.download(jobId) gives a
 signed URL, aitk.bundles.import({ url | remote+key | upload_id, start: true }) continues it here, aitk.bundles.push / list

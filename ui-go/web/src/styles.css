@@ -1890,6 +1890,36 @@ input[aria-invalid='true'] {
   padding-top: 16px;
   border-top: 1px solid var(--border);
 }
+.caption-run {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.caption-run-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.caption-run-head .cell-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.caption-run-note {
+  margin-bottom: 16px;
+}
+.caption-form {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+}
+.caption-span {
+  grid-column: 1 / -1;
+}
+.caption-span .field select.sm {
+  margin-bottom: 6px;
+}
 .notify-grid {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr));
   align-items: stretch;

@@ -1,7 +1,8 @@
 // Package templates builds job configs from upstream's own UI definitions:
 // ui/src/app/jobs/new/jobConfig.ts (the default job), utils.ts
-// (handleModelArchChange, what selecting a model arch does) and the extension
-// ui modules (internal/extui) that define the archs. The TypeScript is
+// (handleModelArchChange, what selecting a model arch does), the extension
+// ui modules (internal/extui) that define the archs, and the captioners
+// (ui/src/helpers/captionOptions.ts, captionJobConfig.ts; captions.go). The TypeScript is
 // bundled with esbuild and evaluated in goja at runtime, so templates follow
 // upstream after a rebase with no edits here. See docs/headless.md, Templates.
 package templates
@@ -39,9 +40,12 @@ import { setNestedValue } from '@/utils/hooks';
 import { objectCopy } from '@/utils/basic';
 import * as defaultSamples from '@/helpers/defaultSamples';
 import * as options from '@/app/jobs/new/options';
+import { defaultCaptionJobConfig, handleCaptionerTypeChange } from '@/helpers/captionJobConfig';
+import * as captionOptions from '@/helpers/captionOptions';
 (globalThis as any).__aitkUpstream = {
   defaultJobConfig, defaultDatasetConfig, migrateJobConfig, handleModelArchChange,
   setNestedValue, objectCopy, defaultSamples, options,
+  defaultCaptionJobConfig, handleCaptionerTypeChange, captionOptions,
 };
 `
 
