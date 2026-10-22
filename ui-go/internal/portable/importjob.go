@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/geocine/aitoolkit/internal/jobstate"
 	"github.com/geocine/aitoolkit/internal/jsonx"
 	"github.com/geocine/aitoolkit/internal/paths"
 	"github.com/geocine/aitoolkit/internal/remote"
@@ -124,13 +125,21 @@ func Import(ctx context.Context, req ImportRequest) (*store.Job, error) {
 		release()
 		return nil, err
 	}
-	if req.Start {
-		if err := supervisor.Requeue(ctx, job, "Queued after import"); err != nil {
-			return nil, err
+	if !req.Start {
+		if m.State == jobstate.Completed || m.State == jobstate.Failed {
+			// a finished run brought here to look at: nobody runs it, so the
+			// lease goes back to what it was and another server need not wait
+			// for it to expire. Unfinished work (stopped to move it here,
+			// interrupted) keeps the claim.
+			release()
 		}
-		if job, err = store.GetJob(ctx, job.ID); err != nil {
-			return nil, err
-		}
+		return job, nil
+	}
+	if err := supervisor.Requeue(ctx, job, "Queued after import"); err != nil {
+		return nil, err
+	}
+	if job, err = store.GetJob(ctx, job.ID); err != nil {
+		return nil, err
 	}
 	return job, nil
 }
