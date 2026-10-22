@@ -201,19 +201,6 @@ export const kreaPreset: Preset = {
   captionTemplates,
   notes: [
     {
-      title: 'Differential guidance was off in krea_lokr.yml',
-      body:
-        '`loss_type`, `do_differential_guidance` and `differential_guidance_scale` sat at the process level. ' +
-        'The trainer only reads them from `train` (TrainConfig), so they were silently ignored. Moved into `train`.',
-    },
-    {
-      title: 'EMA was off in both files',
-      body:
-        'EMA is read only from `train.ema_config: {use_ema, ema_decay}` (EMAConfig). The files set `ema_config: null` ' +
-        'plus loose `use_ema` / `ema_decay` (`ma_decay`, a typo, in the female file), which the trainer never reads. ' +
-        'The preset uses `ema_config: {use_ema: true, ema_decay: 0.99}` as intended.',
-    },
-    {
       title: 'From your notes',
       body:
         '~25 images is enough; 1024 only was the key (768+1024 is an option); 3000 steps with the best checkpoints ' +
@@ -370,8 +357,7 @@ export function editPreset(p: Preset, name: string, text: string): Preset {
     description: p.description === describe(p.base) ? describe(cfg) : p.description,
     base: cfg,
     defaults: { ...knobDefaults(cfg), subject: p.defaults.subject },
-    // a built-in one keeps the notes it ships with
-    notes: [...(builtInPresets.find(b => b.id === p.id)?.notes ?? []), ...notes],
+    notes,
   };
 }
 
