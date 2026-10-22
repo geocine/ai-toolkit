@@ -1890,6 +1890,13 @@ a.runs-row:hover {
   display: none;
 }
 
+.flag-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: -4px 0 12px;
+}
+
 .auto-caption {
   display: grid;
   gap: 14px;

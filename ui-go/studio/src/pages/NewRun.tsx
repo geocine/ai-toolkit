@@ -11,6 +11,9 @@ import {
   post,
   upload,
   type CaptionCatalog,
+  type CaptionCheck,
+  type CaptionFix,
+  type CaptionFlag,
   type Captioner,
   type Dataset,
   type DatasetDetail,
@@ -354,6 +357,30 @@ function StepCaptions({ preset, k, dataset, next, back }: { preset: Preset; k: K
   const missing = items.filter(i => !i.caption?.trim());
   const job = detail.data?.caption_job ?? null;
   const running = !!job && captionBusy.has(job.state);
+  // what is wrong with the captions, re-read whenever they change
+  const captionsKey = items.map(i => i.file + '\u0000' + (i.caption ?? '')).join('\u0001');
+  const check = useLoad(server, s => get<CaptionCheck>(s, `/v1/datasets/${encodeURIComponent(dataset)}/captions/check?trigger=${encodeURIComponent(k.trigger)}`), [dataset, k.trigger, captionsKey]);
+  const flagsOf = useMemo(() => new Map((check.data?.items ?? []).map(i => [i.file, i.flags])), [check.data]);
+  const [onlyFlagged, setOnlyFlagged] = useState(false);
+  const shown = onlyFlagged ? items.filter(i => (flagsOf.get(i.file) ?? []).length > 0) : items;
+  const triggerIssues = (check.data?.counts.no_trigger ?? 0) + (check.data?.counts.trigger_case ?? 0);
+
+  const fixTriggers = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await post<CaptionFix>(server, `/v1/datasets/${encodeURIComponent(dataset)}/captions/fix`, {
+        ops: [{ op: 'fix_trigger_case' }, { op: 'ensure_trigger' }],
+        trigger: k.trigger,
+        apply: true,
+      });
+      detail.reload();
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   // the captions land while the caption job runs
   useEffect(() => {
@@ -412,7 +439,20 @@ function StepCaptions({ preset, k, dataset, next, back }: { preset: Preset; k: K
       <div className="tally">
         <p>
           <strong className="num">{items.length - missing.length}</strong> of {items.length} captioned
+          {check.data && check.data.flagged > 0 && (
+            <>
+              {' · '}
+              <button type="button" className="link" onClick={() => setOnlyFlagged(v => !v)}>
+                {onlyFlagged ? 'show all' : `${check.data.flagged} to look at`}
+              </button>
+            </>
+          )}
         </p>
+        {triggerIssues > 0 && (
+          <button className="btn btn-sm" disabled={busy || running} onClick={fixTriggers} title="[Trigger] and wrong-case trigger words become exact; captions without one get [trigger] first">
+            Fix the trigger in {triggerIssues}
+          </button>
+        )}
         {missing.length > 0 && (
           <div className="fill">
             <label htmlFor="fill-missing">Fill {missing.length} missing with</label>
@@ -423,10 +463,26 @@ function StepCaptions({ preset, k, dataset, next, back }: { preset: Preset; k: K
           </div>
         )}
       </div>
+      {check.data && check.data.flagged > 0 && (
+        <p className="flag-summary">
+          {(Object.entries(check.data.counts) as [CaptionFlag, number][]).map(([f, n]) => (
+            <span key={f} className="badge tone-warn" title={flagHelp[f]}>
+              {n} {flagLabel[f]}
+            </span>
+          ))}
+        </p>
+      )}
       <ErrorNote error={error || detail.error} />
       <div className="caption-grid">
-        {items.map(item => (
-          <CaptionCard key={item.file} item={item} src={detail.data ? mediaUrl(server, joinServerPath(detail.data.path, item.file), true) : ''} onSave={saveCaption} locked={running} />
+        {shown.map(item => (
+          <CaptionCard
+            key={item.file}
+            item={item}
+            src={detail.data ? mediaUrl(server, joinServerPath(detail.data.path, item.file), true) : ''}
+            onSave={saveCaption}
+            locked={running}
+            flags={flagsOf.get(item.file)}
+          />
         ))}
       </div>
       <div className="wizard-nav">
@@ -444,6 +500,25 @@ function StepCaptions({ preset, k, dataset, next, back }: { preset: Preset; k: K
 }
 
 const captionBusy = new Set(['queued', 'starting', 'running', 'stopping']);
+
+const flagLabel: Record<CaptionFlag, string> = {
+  missing: 'missing',
+  no_trigger: 'without the trigger',
+  trigger_case: 'with a misspelled trigger',
+  truncated: 'cut off',
+  hedging: 'unsure',
+  preamble: 'with a preamble',
+  duplicate: 'duplicate',
+};
+const flagHelp: Record<CaptionFlag, string> = {
+  missing: 'No caption: the trainer uses the default one.',
+  no_trigger: 'No [trigger] and no trigger word: the trainer puts the trigger word first itself.',
+  trigger_case: '[Trigger] or a differently cased trigger word: matched exactly, so it is not replaced and the trigger is added again.',
+  truncated: 'Ends mid-sentence: the captioner ran out of tokens.',
+  hedging: '"appears to be", "possibly": the model was unsure.',
+  preamble: '"Here is a caption", "This image shows".',
+  duplicate: 'The same text as another caption.',
+};
 const CAPTION = 'config.process[0].caption.';
 
 // Runs one of the server's captioner models on the dataset (a caption job);
@@ -481,6 +556,8 @@ function AutoCaption({ dataset, template, job, onChange }: { dataset: string; te
         model,
         prompt: c.additional_sections.includes('caption.caption_prompt') ? prompt : undefined,
         recaption,
+        // the preset's prompts ask for a detailed caption; 128 tokens cut them off
+        overrides: c.additional_sections.includes('caption.max_new_tokens') && Number(c.defaults[CAPTION + 'max_new_tokens'] ?? 0) < 384 ? { 'caption.max_new_tokens': 384 } : undefined,
       });
       onChange();
     } catch (e) {
@@ -592,7 +669,7 @@ function AutoCaption({ dataset, template, job, onChange }: { dataset: string; te
 }
 
 // locked: a caption job is writing captions; an edit now would race it
-function CaptionCard({ item, src, onSave, locked }: { item: DatasetItem; src: string; onSave: (i: DatasetItem, c: string) => Promise<void>; locked?: boolean }) {
+function CaptionCard({ item, src, onSave, locked, flags }: { item: DatasetItem; src: string; onSave: (i: DatasetItem, c: string) => Promise<void>; locked?: boolean; flags?: CaptionFlag[] }) {
   const [text, setText] = useState(item.caption ?? '');
   const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const saved = useRef(item.caption ?? '');
@@ -624,8 +701,15 @@ function CaptionCard({ item, src, onSave, locked }: { item: DatasetItem; src: st
           </span>
           {state !== 'idle' ? (
             <span className={`save-state save-${state}`}>{state === 'saving' ? 'Saving…' : state === 'saved' ? 'Saved' : 'Not saved'}</span>
+          ) : !text.trim() ? (
+            <span className="badge tone-warn">No caption</span>
           ) : (
-            !text.trim() && <span className="badge tone-warn">No caption</span>
+            flags &&
+            flags.length > 0 && (
+              <span className="badge tone-warn" title={flags.map(f => flagHelp[f]).join(' ')}>
+                {flags.map(f => flagLabel[f]).join(', ')}
+              </span>
+            )
           )}
         </div>
         <textarea value={text} rows={3} placeholder="No caption; the default caption is used" readOnly={locked} onChange={e => setText(e.target.value)} onBlur={commit} />

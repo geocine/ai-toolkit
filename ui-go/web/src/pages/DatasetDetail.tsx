@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronRight, FileArchive, FileX, ImagePlus, Save, Sparkles, Trash2, Upload as UploadIcon } from 'lucide-react';
 import { api, ApiError, fmtBytes, imgUrl, joinServerPath, plural, upload } from '../api';
-import { CaptionDialog, CaptionRun, captionActive } from '../captionUi';
+import { CaptionCheckBar, CaptionDialog, CaptionRun, captionActive } from '../captionUi';
 import { go, href } from '../router';
 import type { DatasetDetail as Detail, DatasetItem } from '../types';
 import { Bar, Empty, Loading, Spinner, useConfirm, useToast } from '../ui';
@@ -20,6 +20,7 @@ export function DatasetDetail({ name }: { name: string }) {
   const [progress, setProgress] = useState<number | null>(null);
   const [over, setOver] = useState(false);
   const [captioning, setCaptioning] = useState(false);
+  const [onlyFiles, setOnlyFiles] = useState<Set<string> | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const zipInput = useRef<HTMLInputElement>(null);
   const base = `/v1/datasets/${encodeURIComponent(name)}`;
@@ -195,8 +196,9 @@ export function DatasetDetail({ name }: { name: string }) {
         </Empty>
       ) : (
         <>
+          <CaptionCheckBar dataset={name} version={items.map(i => i.caption ?? '').join('|')} onFilter={setOnlyFiles} onFixed={load} />
           <div className="grid grid-items">
-            {items.map(it => (
+            {(onlyFiles ? items.filter(i => onlyFiles.has(i.file)) : items).map(it => (
               <ItemCard key={it.file} dsName={name} folder={ds.path} item={it} onDeleted={() => setItems(x => x.filter(y => y.file !== it.file))} />
             ))}
           </div>
