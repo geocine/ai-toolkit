@@ -210,9 +210,13 @@ code {
 }
 
 .sidebar {
-  position: sticky;
+  /* fixed, not sticky: a sticky one wobbles under fractional display scaling */
+  position: fixed;
   top: 0;
+  left: 0;
+  width: var(--sidebar);
   height: 100vh;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   padding: 12px;
@@ -406,6 +410,7 @@ a.conn:hover {
 }
 
 .main {
+  grid-column: 2;
   min-width: 0;
 }
 
@@ -2017,10 +2022,17 @@ a.runs-row:hover {
     grid-template-rows: auto 1fr;
   }
 
+  .main {
+    grid-column: auto;
+  }
+
   .sidebar {
     position: sticky;
     top: 0;
+    left: auto;
+    width: auto;
     height: auto;
+    overflow-y: visible;
     padding: 0;
     border-right: 0;
     border-bottom: 1px solid var(--border);
