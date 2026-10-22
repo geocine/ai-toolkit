@@ -202,6 +202,21 @@ var Ops = []Op{
 	{Group: "keys", Name: "revoke", Method: "DELETE", Path: "/v1/keys/{id}", Result: "null", Doc: "Revoke a key.",
 		Params: []Param{p("id", "string", "path", "")}},
 
+	// training presets (the studio's, synced to this server)
+	{Group: "presets", Name: "list", Method: "GET", Path: "/v1/presets", Result: "Items<Preset>",
+		Doc:    "The user's training presets from the studio (synced to this server whenever the studio connects): each holds a complete ai-toolkit job config (base) tuned for a kind of run, plus the knobs the studio asks for and its sample prompts and caption prompt per subject. Start a config from one: set config.name, the trigger word and datasets[0].folder_path, then templates.check and jobs.create.",
+		Params: []Param{opt("deleted", "boolean", "query", "include deleted ones (tombstones)")}},
+	{Group: "presets", Name: "get", Method: "GET", Path: "/v1/presets/{id}", Result: "Preset", Doc: "One training preset.",
+		Params: []Param{p("id", "string", "path", "")}},
+	{Group: "presets", Name: "put", Method: "PUT", Path: "/v1/presets/{id}", Result: "{ preset: Preset; problems: string[] }",
+		Doc: "Create or replace a training preset; it appears in the studio the next time it syncs. builtIn: true with an existing built-in id stores an edit of it. problems are keys of base the trainer would ignore.",
+		Params: []Param{p("id", "string", "path", "letters, digits, '.', '_', '-'"), p("name", "string", "body", ""), p("base", "JobConfig", "body", "the full ai-toolkit job config"),
+			opt("description", "string", "body", ""), opt("builtIn", "boolean", "body", ""), opt("defaults", "Record<string, unknown>", "body", "the studio knobs (steps, saveEvery, resolution, optimizer, rank, lokrFactor, sampling, sampleEvery, prompts, ...)"),
+			opt("promptSets", "Record<string, string[]>", "body", "sample prompts per subject"), opt("captionTemplates", "Record<string, string>", "body", "caption prompt per subject"),
+			opt("notes", "{ title: string; body: string }[]", "body", "")}},
+	{Group: "presets", Name: "delete", Method: "DELETE", Path: "/v1/presets/{id}", Result: "null", Doc: "Delete a training preset (the studio drops it at its next sync).",
+		Params: []Param{p("id", "string", "path", "")}},
+
 	// templates
 	{Group: "templates", Name: "list", Method: "GET", Path: "/v1/templates", Result: "TemplateCatalog",
 		Doc: "Model archs (from upstream's UI definitions) and the default job config."},
@@ -459,6 +474,7 @@ type Dataset = { name: string; path: string; images: number; captions: number; s
 type DatasetItem = { file: string; caption: string | null; size: number; width?: number; height?: number };
 type DatasetDetail = Dataset & { items: DatasetItem[]; next_cursor: string | null; caption_job: Job | null };
 type CaptionOption = { value: unknown; label: string };
+type Preset = { id: string; name: string; description?: string; builtIn?: boolean; edited?: boolean; base: JobConfig; defaults?: Record<string, unknown>; promptSets?: Record<string, string[]>; captionTemplates?: Record<string, string>; notes?: { title: string; body: string }[]; updated_at: number; deleted?: boolean };
 type CaptionFlag = "missing" | "no_trigger" | "trigger_case" | "truncated" | "hedging" | "preamble" | "duplicate";
 type CaptionCheck = { items: { file: string; caption: string | null; flags: CaptionFlag[] }[]; total: number; flagged: number; counts: Partial<Record<CaptionFlag, number>>; trigger: string };
 type CaptionFixOp = { op: "ensure_trigger" | "fix_trigger_case" | "replace" | "fill_missing" | "strip"; text?: string; find?: string; with?: string; regex?: boolean; caption?: string };

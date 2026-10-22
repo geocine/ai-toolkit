@@ -28,6 +28,8 @@ Instead of one tool per endpoint, write a short TypeScript script against the ty
 The script runs in a sandbox with only aitk.*, console.log and sleep(ms): no filesystem, network or processes.
 Typical flow: aitk.datasets.create -> add images (datasets.importUrl by URL, datasets.putFile with base64 for small files)
 -> aitk.templates.render({arch, name, datasets}) -> aitk.jobs.create({name, gpu_ids, config, policy}) -> aitk.jobs.start(id)
+The user's tuned training presets are aitk.presets.list() (from the studio): prefer starting from one of them over a bare
+template; each preset's base is a full job config.
 To build or change a config: aitk.templates.fields({ section }) lists every key the trainer reads with its default and where
 it goes, aitk.templates.examples / example(name) are upstream's starting points, and aitk.templates.check({ config }) finds keys
 the trainer would ignore (wrong section, typos). Check before jobs.create.

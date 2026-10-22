@@ -204,6 +204,17 @@ class reads which section (`internal/templates/fields.go`).
   the same way as the archs; `defaults` are the dotted paths selecting one sets,
   `additional_sections` the settings its dialog shows (`caption.caption_prompt`, `caption.max_res`, ...)
 
+### Training presets
+The studio's presets (a full job config tuned for a kind of run, the knobs the
+wizard asks for, sample prompts and a caption prompt per subject) are kept on
+each server the studio connects to, so MCP agents can use them. The studio
+keeps its own copy and syncs both ways: the newer `updated_at` (ms) wins; a
+deletion is a tombstone (`deleted: true`).
+- `GET /v1/presets?deleted=` → `{items: [Preset]}`
+- `GET /v1/presets/{id}` → Preset
+- `PUT /v1/presets/{id} {name, base, description?, builtIn?, edited?, defaults?, promptSets?, captionTemplates?, notes?, updated_at?}` → `{preset, problems}` (`problems`: keys of `base` the trainer ignores)
+- `DELETE /v1/presets/{id}?updated_at=` → 204
+
 ## Events
 
 Every change worth reacting to is an event in `events`, with a monotonically
