@@ -150,7 +150,7 @@ with step 0 and no trainer progress yet).
   dataset. `GET /v1/datasets/{name}` returns the newest as `caption_job`.
 - `PUT /v1/datasets/{name}/captions/{file...} {caption}` → item
 - `DELETE /v1/datasets/{name}/files/{file...}` → 204 (also removes its caption)
-- `DELETE /v1/datasets/{name}` → 204
+- `DELETE /v1/datasets/{name}` → 204 (409 while a queued or running job, or a caption job, reads it)
 
 ### Files
 Generic access inside the allowed roots: `datasets`, `training`, `data`, `models`.
@@ -168,7 +168,7 @@ Generic access inside the allowed roots: `datasets`, `training`, `data`, `models
 `internal/remote.Client`.
 Credentials (`s3: {access_key_id, secret_access_key}`, `hf: {token}`; HF falls
 back to the HF_TOKEN setting) are accepted on create and never returned.
-- `GET /v1/remotes`, `POST /v1/remotes`, `DELETE /v1/remotes/{id}`, `POST /v1/remotes/{id}/test` → `{ok, detail}`
+- `GET /v1/remotes`, `POST /v1/remotes`, `DELETE /v1/remotes/{id}` (409 while a running job syncs or uploads to it), `POST /v1/remotes/{id}/test` → `{ok, detail}`
 - `POST /v1/uploads {remote, root, path}` or `{remote, job_id, checkpoint}` → 202 Upload
 - `GET /v1/uploads?job_id=&state=` → `{items: [Upload]}`; `GET /v1/uploads/{id}`
 - `POST /v1/uploads/{id}/retry` → Upload (queued again; 409 while queued/running)

@@ -16,6 +16,7 @@ import (
 	"github.com/geocine/aitoolkit/internal/httpx"
 	"github.com/geocine/aitoolkit/internal/remote"
 	"github.com/geocine/aitoolkit/internal/settings"
+	"github.com/geocine/aitoolkit/internal/state"
 	"github.com/geocine/aitoolkit/internal/store"
 	"github.com/geocine/aitoolkit/internal/uploads"
 	"github.com/geocine/aitoolkit/internal/v1api"
@@ -106,6 +107,41 @@ func deleteRemote(w http.ResponseWriter, r *http.Request) {
 	}
 	if rem == nil {
 		v1api.Fail(w, v1api.CodeNotFound, "remote not found")
+		return
+	}
+	// a remote a running job syncs or uploads to, or with uploads in flight,
+	// stays until they are done
+	var users []string
+	jobs, err := store.FindJobs(r.Context(), store.JobQuery{Where: `"status" IN ('queued', 'running', 'stopping')`})
+	if err != nil {
+		v1api.Internal(w, r, err)
+		return
+	}
+	for _, j := range jobs {
+		p, err := state.GetPolicy(r.Context(), j.ID)
+		if err != nil {
+			v1api.Internal(w, r, err)
+			return
+		}
+		if (p.SyncRemote != nil && *p.SyncRemote == rem.ID) || (p.AutoUploadRemote != nil && *p.AutoUploadRemote == rem.ID) {
+			users = append(users, j.Name)
+		}
+	}
+	for _, st := range []string{uploads.Queued, uploads.Running} {
+		list, err := uploads.List(r.Context(), "", st)
+		if err != nil {
+			v1api.Internal(w, r, err)
+			return
+		}
+		for _, u := range list {
+			if u.RemoteID == rem.ID {
+				users = append(users, "an upload of "+filepath.Base(u.Path))
+				break
+			}
+		}
+	}
+	if len(users) > 0 {
+		v1api.Fail(w, v1api.CodeConflict, "remote "+rem.Name+" is in use by "+strings.Join(users, ", ")+"; stop them first")
 		return
 	}
 	if _, err := remote.Delete(r.Context(), rem.ID); err != nil {
