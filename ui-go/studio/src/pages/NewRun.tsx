@@ -769,6 +769,9 @@ function StepLaunch({ preset, k, dataset, back }: { preset: Preset; k: Knobs; da
   const [gpu, setGpu] = useState('0');
   const [syncRemote, setSyncRemote] = useState('');
   const [autoResume, setAutoResume] = useState(true);
+  // every checkpoint by default: the best step is picked after training, and a
+  // destroyed pod takes its local copies with it
+  const [keep, setKeep] = useState('-1');
   const [showConfig, setShowConfig] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
@@ -786,6 +789,7 @@ function StepLaunch({ preset, k, dataset, back }: { preset: Preset; k: Knobs; da
     try {
       const policy: Record<string, unknown> = { auto_resume: autoResume };
       if (syncRemote) policy.sync_remote = syncRemote === '-' ? '' : syncRemote;
+      if (syncRemote !== '-') policy.keep_checkpoints = Number(keep);
       let id = created.current?.name === k.name ? created.current.id : '';
       if (id) {
         await call<Job>(server, 'PATCH', `/v1/jobs/${id}`, { gpu_ids: gpu, config, policy });
@@ -859,6 +863,15 @@ function StepLaunch({ preset, k, dataset, back }: { preset: Preset; k: Knobs; da
                 ))}
               </select>
               <small>Synced runs continue on another server if this one goes away.</small>
+            </label>
+            <label className="field">
+              <span>Checkpoints kept there</span>
+              <select value={keep} onChange={e => setKeep(e.target.value)} disabled={syncRemote === '-'}>
+                <option value="-1">All, to pick the best step later</option>
+                <option value="3">The newest and 3 before it</option>
+                <option value="0">Only the newest</option>
+              </select>
+              <small>Only the newest is needed to resume.</small>
             </label>
             <label className="check field-wide">
               <input type="checkbox" checked={autoResume} onChange={e => setAutoResume(e.target.checked)} />

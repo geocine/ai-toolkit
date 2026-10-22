@@ -160,6 +160,15 @@ func policyPatch(ctx context.Context, raw json.RawMessage, p *state.Policy) erro
 				}
 				p.MaxAutoResumes = &n
 			}
+		case "keep_checkpoints":
+			p.KeepCheckpoints = nil
+			if !null {
+				var n int
+				if err := json.Unmarshal(v, &n); err != nil || n < -1 {
+					return v1api.Errorf(v1api.CodeInvalidRequest, "policy.keep_checkpoints must be -1 (all) or a non-negative integer")
+				}
+				p.KeepCheckpoints = &n
+			}
 		case "auto_upload_remote", "sync_remote":
 			var target **string
 			if k == "auto_upload_remote" {

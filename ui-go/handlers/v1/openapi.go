@@ -149,9 +149,9 @@ func schemas() map[string]any {
 	checkpoint := obj(map[string]any{"name": str(), "path": str(), "step": intOrNull(), "size": integer(),
 		"modified": dateTime(), "sha256": str()})
 	policy := obj(map[string]any{"auto_resume": boolean(), "max_auto_resumes": integer(),
-		"auto_upload_remote": strOrNull(), "sync_remote": strOrNull()})
+		"auto_upload_remote": strOrNull(), "sync_remote": strOrNull(), "keep_checkpoints": intOrNull()})
 	policyPatch := obj(map[string]any{"auto_resume": map[string]any{"type": []string{"boolean", "null"}},
-		"max_auto_resumes": intOrNull(), "auto_upload_remote": strOrNull(), "sync_remote": strOrNull()})
+		"max_auto_resumes": intOrNull(), "auto_upload_remote": strOrNull(), "sync_remote": strOrNull(), "keep_checkpoints": intOrNull()})
 	dataset := obj(map[string]any{"name": str(), "path": str(), "images": integer(), "captions": integer(),
 		"size": integer(), "modified": dateTime()})
 	datasetItem := obj(map[string]any{"file": str(), "caption": strOrNull(), "size": integer(),

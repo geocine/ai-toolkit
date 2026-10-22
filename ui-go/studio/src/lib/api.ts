@@ -238,7 +238,7 @@ export interface Attempt { n: number; started_at: string; ended_at: string | nul
 export interface Job {
   id: string; name: string; type: string; gpu_ids: string; state: JobState; status: string; info: string;
   step: number; total_steps: number | null; speed: string; created_at: string; updated_at: string;
-  config: JobConfig; policy: { auto_resume: boolean; sync_remote: string | null; auto_upload_remote: string | null };
+  config: JobConfig; policy: { auto_resume: boolean; sync_remote: string | null; auto_upload_remote: string | null; keep_checkpoints?: number | null };
   attempts: number; last_attempt: Attempt | null; latest_checkpoint: Checkpoint | null;
 }
 export interface Dataset { name: string; path: string; images: number; captions: number; size: number; modified: string }

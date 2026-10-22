@@ -22,6 +22,9 @@ type Policy struct {
 	MaxAutoResumes   int     `json:"max_auto_resumes"`
 	AutoUploadRemote *string `json:"auto_upload_remote"`
 	SyncRemote       *string `json:"sync_remote"`
+	// older checkpoints kept on the sync remote besides the newest (-1: all;
+	// null: the remote's own setting)
+	KeepCheckpoints *int `json:"keep_checkpoints"`
 }
 
 // Job is the /v1 job.
@@ -85,6 +88,9 @@ func View(ctx context.Context, j *store.Job) (*Job, error) {
 	}
 	if upload != "" {
 		v.Policy.AutoUploadRemote = &upload
+	}
+	if n, ok := state.KeepCheckpoints(ctx, p); ok {
+		v.Policy.KeepCheckpoints = &n
 	}
 	attempts, err := state.Attempts(ctx, j.ID)
 	if err != nil {

@@ -290,6 +290,7 @@ function OverviewTab({ job, onChange, syncVer }: { job: Job; onChange: (j: Job) 
           max_auto_resumes: Number(policy.max_auto_resumes),
           sync_remote: policy.sync_remote, // "" = explicitly none
           auto_upload_remote: policy.auto_upload_remote,
+          keep_checkpoints: policy.keep_checkpoints === '' ? null : Number(policy.keep_checkpoints),
         },
       });
       onChange(updated);
@@ -390,6 +391,15 @@ function OverviewTab({ job, onChange, syncVer }: { job: Job; onChange: (j: Job) 
               ))}
             </select>
           </Field>
+          <Field label="Checkpoints kept on the sync remote" hint="Keep them to pick the best step after training">
+            <select value={policy.keep_checkpoints} onChange={e => setPolicy({ ...policy, keep_checkpoints: e.target.value })} disabled={!policy.sync_remote}>
+              <option value="">Server default</option>
+              <option value="0">Newest only</option>
+              <option value="3">Newest and 3 before it</option>
+              <option value="-1">All</option>
+              {!['', '0', '3', '-1'].includes(policy.keep_checkpoints) && <option value={policy.keep_checkpoints}>Newest and {policy.keep_checkpoints} before it</option>}
+            </select>
+          </Field>
           <Field label="Auto-upload remote" hint="Every new checkpoint is uploaded">
             <select value={policy.auto_upload_remote} onChange={e => setPolicy({ ...policy, auto_upload_remote: e.target.value })}>
               <option value="">None</option>
@@ -457,6 +467,7 @@ const policyForm = (job: Job) => ({
   max_auto_resumes: String(job.policy?.max_auto_resumes ?? 3),
   sync_remote: job.policy?.sync_remote ?? '',
   auto_upload_remote: job.policy?.auto_upload_remote ?? '',
+  keep_checkpoints: job.policy?.keep_checkpoints == null ? '' : String(job.policy.keep_checkpoints),
 });
 
 // ---------------------------------------------------------------- log

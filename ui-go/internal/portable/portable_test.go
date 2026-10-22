@@ -662,3 +662,35 @@ func TestOtherRunAndStaleNodeNeverOverwrite(t *testing.T) {
 		t.Fatalf("other run overwrote the manifest: %+v", got)
 	}
 }
+
+// A job's keep_checkpoints policy decides what the remote keeps, over the
+// remote's own setting: -1 keeps every checkpoint for picking the best later.
+func TestJobKeepsCheckpoints(t *testing.T) {
+	ctx := context.Background()
+	shared := t.TempDir()
+	a := newNode(t, shared)
+	j := setupJob(t, a, "shared")
+	all, k := -1, "shared"
+	if err := state.SetPolicy(ctx, j.ID, state.Policy{SyncRemote: &k, KeepCheckpoints: &all}); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range []string{"000000030", "000000040"} {
+		write(t, a.tr(jobName, jobName+"_"+step+".safetensors"), "weights-"+step)
+		if _, err := SyncJob(ctx, j.ID, ReasonCheckpoint); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var got []string
+	filepath.WalkDir(filepath.Join(shared, "jobs", jobName, "files"), func(p string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.HasSuffix(p, ".safetensors") {
+			got = append(got, filepath.Base(p))
+		}
+		return nil
+	})
+	if len(got) != 2 { // 30 kept after 40 (default: pruned)
+		t.Fatalf("keep all: %v", got)
+	}
+	if p, _ := state.GetPolicy(ctx, j.ID); p.KeepCheckpoints == nil || *p.KeepCheckpoints != -1 {
+		t.Fatalf("policy %+v", p)
+	}
+}

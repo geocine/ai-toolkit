@@ -108,6 +108,18 @@ func Apply(ctx context.Context) error {
 			return err
 		}
 	}
+	if v := env("AITK_SYNC_KEEP_CHECKPOINTS"); v != "" {
+		n := -1
+		if v != "all" {
+			var err error
+			if n, err = strconv.Atoi(v); err != nil || n < 0 {
+				return fmt.Errorf("AITK_SYNC_KEEP_CHECKPOINTS must be a number or all: %q", v)
+			}
+		}
+		if err := state.SetSetting(ctx, state.SettingKeepCheckpointsDefault, strconv.Itoa(n)); err != nil {
+			return err
+		}
+	}
 	if v := env("AITK_MAX_AUTO_RESUMES"); v != "" {
 		if _, err := strconv.Atoi(v); err != nil {
 			return fmt.Errorf("AITK_MAX_AUTO_RESUMES must be a number: %q", v)
