@@ -192,10 +192,21 @@ var Ops = []Op{
 	{Group: "templates", Name: "list", Method: "GET", Path: "/v1/templates", Result: "TemplateCatalog",
 		Doc: "Model archs (from upstream's UI definitions) and the default job config."},
 	{Group: "templates", Name: "render", Method: "POST", Path: "/v1/templates/render", Result: "RenderedTemplate",
-		Doc: "Build a job config for an arch like the upstream UI does, then apply dotted-path overrides. Read `warnings`.",
+		Doc: "Build a job config for an arch like the upstream UI does, then apply dotted-path overrides. Read `warnings`: they include templates.check's problems.",
 		Params: []Param{opt("arch", "string", "body", "arch name from templates.list"), opt("name", "string", "body", "job name"),
 			opt("datasets", "string[]", "body", "dataset names"),
 			opt("overrides", "Record<string, unknown>", "body", `e.g. {"config.process[0].train.steps": 1500}`)}},
+	{Group: "templates", Name: "fields", Method: "GET", Path: "/v1/templates/fields", Result: "TemplateFields",
+		Doc:    "Every key the trainer reads from a process config, per section (process, train, train.ema_config, model, network, save, sample, datasets[], ...), with the Python default and the source's comments; read from this server's ai-toolkit code, so it matches the trainer that runs. Use it to find a setting and the section it belongs in.",
+		Params: []Param{opt("section", "string", "query", "only this section and the ones nested in it, e.g. train")}},
+	{Group: "templates", Name: "check", Method: "POST", Path: "/v1/templates/check", Result: "ConfigCheck",
+		Doc:    "Keys in a job config that the trainer ignores (in the wrong section, or misspelled), each with where it is read or a did-you-mean. Run it on any config you build or edit before jobs.create.",
+		Params: []Param{p("config", "JobConfig", "body", "")}},
+	{Group: "templates", Name: "examples", Method: "GET", Path: "/v1/templates/examples", Result: "Items<TemplateExample>",
+		Doc: "Upstream's example configs (config/examples): one per model family, with arch, model and network type."},
+	{Group: "templates", Name: "example", Method: "GET", Path: "/v1/templates/examples/{name}", Result: "TemplateExampleConfig",
+		Doc:    "One example config, as written (yaml, with its comments) and parsed (config).",
+		Params: []Param{p("name", "string", "path", "name from templates.examples")}},
 
 	// portable jobs
 	{Group: "portable", Name: "list", Method: "GET", Path: "/v1/portable/jobs", Result: "Items<PortableJob>",
@@ -450,6 +461,13 @@ type ApiKey = { id: string; name: string; prefix: string; created_at: string; la
 type TemplateArch = { name: string; label: string; group: string; source: string; defaults: Record<string, [unknown, unknown]>; disable_sections: string[]; additional_sections: string[]; controls: unknown[]; is_video_model: boolean; python_arch: string; python_accepted: boolean };
 type TemplateCatalog = { archs: TemplateArch[]; default_config: JobConfig; errors: string[] };
 type RenderedTemplate = { config: JobConfig; warnings: string[] };
+type TemplateField = { key: string; default: string; type?: string; doc?: string };
+type TemplateSection = { path: string; class: string; fields: TemplateField[] };
+type TemplateFields = { sections: TemplateSection[]; errors: string[] };
+type ConfigProblem = { path: string; message: string; fix?: string };
+type ConfigCheck = { problems: ConfigProblem[]; errors: string[] };
+type TemplateExample = { name: string; file: string; arch?: string; model?: string; network?: string; error?: string };
+type TemplateExampleConfig = TemplateExample & { yaml: string; config: JobConfig | null };
 type AitkEvent = { id: number; type: string; job_id: string | null; at: string; data: any };
 type EventPage = { items: AitkEvent[]; next_cursor: string | null };
 type Link = { url: string; path: string; expires_at: string };

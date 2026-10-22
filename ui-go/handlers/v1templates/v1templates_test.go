@@ -97,3 +97,51 @@ func TestListAndRender(t *testing.T) {
 		t.Fatalf("bad arch %d: %s", rec.Code, rec.Body)
 	}
 }
+
+func TestFieldsCheckExamples(t *testing.T) {
+	mux, _ := setup(t)
+	get := func(path string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		return rec
+	}
+	rec := get("/v1/templates/fields?section=train")
+	var ref struct {
+		Sections []struct {
+			Path string `json:"path"`
+		} `json:"sections"`
+	}
+	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &ref) != nil || len(ref.Sections) < 2 || ref.Sections[0].Path != "train" {
+		t.Fatalf("fields %d: %.300s", rec.Code, rec.Body)
+	}
+	for _, s := range ref.Sections {
+		if s.Path != "train" && !strings.HasPrefix(s.Path, "train.") {
+			t.Errorf("section=train returned %s", s.Path)
+		}
+	}
+	if rec := get("/v1/templates/fields?section=nope"); rec.Code != 404 {
+		t.Errorf("unknown section %d", rec.Code)
+	}
+
+	body := `{"config":{"config":{"process":[{"type":"sd_trainer","loss_type":"mse","train":{"steps":10}}]}}}`
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/templates/check", strings.NewReader(body)))
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"fix":"it is read in train"`) {
+		t.Fatalf("check %d: %s", rec.Code, rec.Body)
+	}
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/templates/check", strings.NewReader(`{}`)))
+	if rec.Code != 400 {
+		t.Errorf("check without config %d", rec.Code)
+	}
+
+	if rec := get("/v1/templates/examples"); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"train_lora_flux_24gb"`) {
+		t.Fatalf("examples %d: %.300s", rec.Code, rec.Body)
+	}
+	if rec := get("/v1/templates/examples/train_lora_flux_24gb"); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"yaml"`) {
+		t.Fatalf("example %d", rec.Code)
+	}
+	if rec := get("/v1/templates/examples/nope"); rec.Code != 404 {
+		t.Errorf("unknown example %d", rec.Code)
+	}
+}

@@ -164,8 +164,26 @@ Job configs are built from upstream's own UI definitions (read from
 `ui/src/app/jobs/new/jobConfig.ts` and the extensions' `ui.tsx` at runtime, so
 they follow upstream after a rebase).
 - `GET /v1/templates` → `{archs: [{name, label, group, defaults}], default_config}`
-- `POST /v1/templates/render {arch, name, datasets: [names], overrides: {"config.process[0].train.steps": 500, ...}}` → `{config}`
-  (applies the arch's defaults like the UI does, then the dotted-path overrides)
+- `POST /v1/templates/render {arch, name, datasets: [names], overrides: {"config.process[0].train.steps": 500, ...}}` → `{config, warnings}`
+  (applies the arch's defaults like the UI does, then the dotted-path overrides;
+  `warnings` include the check below on the result)
+
+The keys the trainer reads are read from the toolkit's Python at runtime too
+(`toolkit/config_modules.py`, whose classes read their section with
+`kwargs.get(key, default)`, and the processes' `get_conf` reads), so they
+match the trainer that runs. Nothing in this list is hand-written except which
+class reads which section (`internal/templates/fields.go`).
+- `GET /v1/templates/fields?section=` → `{sections: [{path, class, fields: [{key, default, type, doc}]}], errors}`;
+  paths are `process`, `train`, `train.ema_config`, `model`, `network`,
+  `save`, `sample`, `sample.samples[]`, `datasets[]`, ...; `section=train` also
+  returns the sections nested in it. `default` is the Python expression.
+- `POST /v1/templates/check {config}` → `{problems: [{path, message, fix}], errors}`:
+  keys the trainer ignores where they are, e.g. `config.process[0].loss_type`
+  (`fix`: "it is read in train") or `train.ma_decay` (`fix`: "did you mean
+  train.ema_config.ema_decay?"). Processes without a `train` or `model`
+  section are not checked.
+- `GET /v1/templates/examples` → `{items: [{name, file, arch, model, network, error}]}` (upstream's `config/examples`)
+- `GET /v1/templates/examples/{name}` → `{name, file, arch, model, network, error, yaml, config}`
 
 ## Events
 
@@ -486,8 +504,9 @@ OpenAPI document). Bodies that are not JSON:
 Example the agent might send to `aitk_run`:
 ```ts
 const ds = await aitk.datasets.create({ name: "my_set" });
-const { config } = await aitk.templates.render({ arch: "sd1", name: "my_lora", datasets: [ds.name],
+const { config, warnings } = await aitk.templates.render({ arch: "sd1", name: "my_lora", datasets: [ds.name],
   overrides: { "config.process[0].train.steps": 1500 } });
+console.log(warnings); // e.g. an override in a section the trainer does not read
 const job = await aitk.jobs.create({ name: "my_lora", gpu_ids: "0", config,
   policy: { auto_resume: true, auto_upload_remote: "s3" } });
 await aitk.jobs.start(job.id);
