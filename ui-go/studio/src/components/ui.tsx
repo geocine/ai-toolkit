@@ -114,19 +114,31 @@ export function useLoad<T>(server: Server | null, fn: (s: Server) => Promise<T>,
   const [loading, setLoading] = useState(false);
   const fnRef = useRef(fn);
   fnRef.current = fn;
+  // only the newest request may land: a slow answer from the previous server
+  // (or for the previous deps) must not overwrite the current one
+  const seq = useRef(0);
   const reload = useCallback(async () => {
     if (!server) return;
+    const n = ++seq.current;
     setLoading(true);
     try {
-      setData(await fnRef.current(server));
+      const v = await fnRef.current(server);
+      if (n !== seq.current) return;
+      setData(v);
       setError(null);
     } catch (e) {
-      setError(e);
+      if (n === seq.current) setError(e);
     } finally {
-      setLoading(false);
+      if (n === seq.current) setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [server, ...deps]);
+  // another server's data is not shown while this one's loads
+  const serverId = server?.id;
+  useEffect(() => {
+    setData(null);
+    setError(null);
+  }, [serverId]);
   useEffect(() => {
     reload();
     if (!everyMs) return;

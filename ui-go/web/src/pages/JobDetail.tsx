@@ -71,6 +71,11 @@ export function JobDetail({ id }: { id: string }) {
               if (!l.loaded) return l;
               const start = e.data.offset as number;
               const text = e.data.text as string;
+              if (start === 0 && l.end > 0) {
+                // a new attempt rotated log.txt and writes a fresh one from 0
+                const all = l.text + '\n' + text;
+                return { ...l, text: all.length > LOG_KEEP ? all.slice(-LOG_KEEP) : all, end: text.length };
+              }
               if (start + text.length <= l.end) return l; // already have it
               const fresh = start < l.end ? text.slice(l.end - start) : text;
               const all = l.text + fresh;

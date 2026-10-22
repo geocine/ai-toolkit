@@ -12,7 +12,14 @@ export default defineConfig({
   server: {
     port: 5174,
     proxy: {
-      '/aitk': { target, changeOrigin: true, rewrite: p => p.replace(/^\/aitk/, '') },
+      '/aitk': {
+        target,
+        changeOrigin: true,
+        rewrite: p => p.replace(/^\/aitk/, ''),
+        // to the server this is a same-origin call: without this its CSRF check
+        // would refuse writes carrying the dev page's Origin
+        configure: proxy => proxy.on('proxyReq', req => req.removeHeader('origin')),
+      },
     },
   },
 });

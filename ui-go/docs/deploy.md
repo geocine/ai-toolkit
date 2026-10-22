@@ -49,7 +49,7 @@ same machine.
 |---|---|
 | `AI_TOOLKIT_AUTH` | Bearer token for `/api`, `/v1` and `/mcp` (admin). Named, revocable keys can be added with `POST /v1/keys`. Without a token and without keys the server is open. |
 | `HF_TOKEN` | Hugging Face token passed to trainers (gated base models) and the default for `hf` remotes. |
-| `AITK_CORS_ORIGINS` | Origins allowed to call the API from a browser app hosted elsewhere (the studio, a desktop webview): comma list, or `*`. Unset = same origin only. |
+| `AITK_CORS_ORIGINS` | Origins allowed to call the API from a browser app hosted elsewhere (the studio, a desktop webview): comma list, or `*`. Unset = same origin only. A server with no token and no API key also refuses writes (POST, PUT, PATCH, DELETE) from pages on other origins not listed here, so a website you visit cannot drive it. |
 
 **Remotes** (created or updated on every start)
 | Variable | Meaning |
