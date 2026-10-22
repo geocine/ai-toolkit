@@ -28,10 +28,19 @@ RUN npm ci --no-audit --no-fund
 COPY ui-go/web/ ./
 RUN npm run build
 
+# The studio (ui-go/studio), served at /studio/ so one server URL works from a phone.
+FROM node:22-alpine AS studio-build
+WORKDIR /studio
+COPY ui-go/studio/package.json ui-go/studio/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY ui-go/studio/ ./
+RUN npm run build
+
 FROM ${BASE_IMAGE}
 
 COPY --from=go-build /out/aitk-server /app/ai-toolkit/ui-go/aitk-server
 COPY --from=web-build /web/dist /app/ai-toolkit/ui-go/web/dist
+COPY --from=studio-build /studio/dist /app/ai-toolkit/ui-go/studio/dist
 COPY ui-go/docker/start-go.sh /tmp/start-go.sh
 
 # Keep upstream's pod setup (ssh, env export) and replace only its final

@@ -17,7 +17,9 @@ async function check(s: Server): Promise<Check> {
   }
 }
 
-const blank = (): Server => ({ id: uid(), name: '', base: '', token: '' });
+// served by the server itself (/studio/): that server is the natural first one
+const sameOrigin = () => (window.location.pathname.startsWith('/studio') ? window.location.origin : '');
+const blank = (): Server => ({ id: uid(), name: '', base: sameOrigin(), token: '' });
 
 export function Servers() {
   const { servers, setServers, active, setActiveId } = useStudio();
