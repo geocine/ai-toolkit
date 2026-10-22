@@ -146,6 +146,17 @@ func TestRemotesCRUD(t *testing.T) {
 		t.Fatalf("test missing = %d", status)
 	}
 
+	// a running job syncing to it keeps it
+	j, err := store.CreateJob(context.Background(), store.NewJob{Name: "run", GpuIDs: "0", JobConfig: `{"config":{"process":[{}]}}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.UpdateJob(context.Background(), j.ID, store.Fields{"status": "running"})
+	state.SetPolicy(context.Background(), j.ID, state.Policy{SyncRemote: &fsID})
+	if status, m, _ := h.do("DELETE", "/v1/remotes/"+fsID, ""); status != 409 || errCode(m) != "conflict" {
+		t.Fatalf("delete in use = %d", status)
+	}
+	store.UpdateJob(context.Background(), j.ID, store.Fields{"status": "stopped"})
 	if status, _, _ := h.do("DELETE", "/v1/remotes/"+fsID, ""); status != 204 {
 		t.Fatalf("delete = %d", status)
 	}

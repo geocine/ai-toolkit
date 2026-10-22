@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -32,6 +33,7 @@ import (
 	"github.com/geocine/aitoolkit/internal/jobview"
 	"github.com/geocine/aitoolkit/internal/safepath"
 	"github.com/geocine/aitoolkit/internal/settings"
+	"github.com/geocine/aitoolkit/internal/store"
 	"github.com/geocine/aitoolkit/internal/thumbs"
 	"github.com/geocine/aitoolkit/internal/v1api"
 )
@@ -314,12 +316,60 @@ func deleteDataset(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	users, err := jobsUsingDataset(r.Context(), dir)
+	if err != nil {
+		v1api.Internal(w, r, err)
+		return
+	}
+	if len(users) > 0 {
+		v1api.Fail(w, v1api.CodeConflict, "the dataset is in use by "+strings.Join(users, ", ")+"; stop it first")
+		return
+	}
 	if err := os.RemoveAll(dir); err != nil {
 		v1api.Internal(w, r, err)
 		return
 	}
 	changed(r.Context(), name)
 	v1api.NoContent(w)
+}
+
+// jobsUsingDataset names the queued, running or stopping jobs that read dir:
+// training runs through datasets[].folder_path, caption jobs through their ref.
+func jobsUsingDataset(ctx context.Context, dir string) ([]string, error) {
+	jobs, err := store.FindJobs(ctx, store.JobQuery{Where: `"status" IN ('queued', 'running', 'stopping')`})
+	if err != nil {
+		return nil, err
+	}
+	clean := filepath.Clean(dir)
+	var out []string
+	for _, j := range jobs {
+		if j.JobRef != nil && filepath.Clean(*j.JobRef) == clean {
+			out = append(out, j.Name)
+			continue
+		}
+		var cfg struct {
+			Config struct {
+				Process []struct {
+					Datasets []struct {
+						FolderPath string `json:"folder_path"`
+					} `json:"datasets"`
+				} `json:"process"`
+			} `json:"config"`
+		}
+		if json.Unmarshal([]byte(j.JobConfig), &cfg) != nil {
+			continue
+		}
+	process:
+		for _, p := range cfg.Config.Process {
+			for _, d := range p.Datasets {
+				if d.FolderPath != "" && filepath.Clean(d.FolderPath) == clean {
+					out = append(out, j.Name)
+					break process
+				}
+			}
+		}
+	}
+	return out, nil
 }
 
 // datasetFile resolves {file...} inside the dataset, refusing traversal.
