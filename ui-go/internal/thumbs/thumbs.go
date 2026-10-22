@@ -13,6 +13,7 @@ import (
 	"image"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -33,6 +34,27 @@ import (
 
 // Size is the thumb edge length.
 const Size = 300
+
+// MaxPixels caps what Decode will decode: a few KB of PNG can declare a
+// canvas that needs gigabytes, and the server shares its memory with the
+// training run.
+const MaxPixels = 100_000_000
+
+// Decode decodes an image after checking the size its header declares.
+func Decode(r io.ReadSeeker) (image.Image, error) {
+	cfg, _, err := image.DecodeConfig(r)
+	if err != nil {
+		return nil, err
+	}
+	if int64(cfg.Width)*int64(cfg.Height) > MaxPixels {
+		return nil, fmt.Errorf("image is %dx%d, more than %d pixels", cfg.Width, cfg.Height, MaxPixels)
+	}
+	if _, err := r.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	img, _, err := image.Decode(r)
+	return img, err
+}
 
 var (
 	imageExts = map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".webp": true, ".gif": true, ".bmp": true}
@@ -158,7 +180,7 @@ func generate(sourcePath, base string) (string, error) {
 			return "", err
 		}
 		// animated formats decode their first frame
-		img, _, err = image.Decode(bytes.NewReader(data))
+		img, err = Decode(bytes.NewReader(data))
 		if err != nil {
 			return "", err
 		}

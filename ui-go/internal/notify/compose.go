@@ -510,7 +510,7 @@ func Grid(paths []string) ([]byte, error) {
 		if err != nil {
 			continue
 		}
-		img, _, err := image.Decode(f)
+		img, err := thumbs.Decode(f)
 		f.Close()
 		if err == nil {
 			imgs = append(imgs, img)

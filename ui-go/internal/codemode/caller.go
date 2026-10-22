@@ -35,8 +35,45 @@ func HandlerCaller(h http.Handler, authorization, origin string) Caller {
 			req.Header.Set("X-Forwarded-Host", host)
 			req.Header.Set("X-Forwarded-Proto", scheme)
 		}
-		rec := httptest.NewRecorder()
+		rec := &cappedRecorder{header: http.Header{}, limit: MaxResponseBytes}
 		h.ServeHTTP(rec, req)
-		return Response{Status: rec.Code, Header: rec.Header(), Body: rec.Body.Bytes()}, nil
+		if rec.code == 0 {
+			rec.code = http.StatusOK
+		}
+		return Response{Status: rec.code, Header: rec.header, Body: rec.buf.Bytes(), Size: rec.size}, nil
 	}
 }
+
+// MaxResponseBytes is how much of one in-process response is kept: a file
+// read through the API (a checkpoint, a model) must not be buffered whole in
+// the server, which shares its memory with the training run.
+const MaxResponseBytes = 16 << 20
+
+// cappedRecorder is an http.ResponseWriter that keeps the first limit bytes
+// and counts the rest.
+type cappedRecorder struct {
+	header http.Header
+	code   int
+	buf    bytes.Buffer
+	size   int64
+	limit  int64
+}
+
+func (c *cappedRecorder) Header() http.Header { return c.header }
+
+func (c *cappedRecorder) WriteHeader(code int) {
+	if c.code == 0 {
+		c.code = code
+	}
+}
+
+func (c *cappedRecorder) Write(p []byte) (int, error) {
+	c.WriteHeader(http.StatusOK)
+	c.size += int64(len(p))
+	if room := c.limit - int64(c.buf.Len()); room > 0 {
+		c.buf.Write(p[:min(int64(len(p)), room)])
+	}
+	return len(p), nil
+}
+
+func (c *cappedRecorder) Flush() {}

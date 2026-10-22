@@ -163,7 +163,21 @@ func claim(ctx context.Context, c remote.Client, req ImportRequest) (*Manifest, 
 	return m, prev, nil
 }
 
+// plainName is a single folder name: what a manifest from the bucket may
+// name a job or dataset (it becomes a folder under the training or datasets root).
+func plainName(s string) bool {
+	return s != "" && !strings.HasPrefix(s, ".") && !strings.ContainsAny(s, `/\:`) && filepath.Base(s) == s
+}
+
 func restore(ctx context.Context, c remote.Client, rem *remote.Remote, m *Manifest, req ImportRequest, dsRoot, trRoot string) (*store.Job, error) {
+	if !plainName(m.Name) {
+		return nil, v1api.Errorf(v1api.CodeInvalidRequest, fmt.Sprintf("the manifest names the job %q, which is not a plain folder name", m.Name))
+	}
+	for _, name := range m.Datasets {
+		if !plainName(name) {
+			return nil, v1api.Errorf(v1api.CodeInvalidRequest, fmt.Sprintf("the manifest names a dataset %q, which is not a plain folder name", name))
+		}
+	}
 	for _, name := range m.Datasets {
 		if err := restoreDataset(ctx, c, dsRoot, name); err != nil {
 			switch {

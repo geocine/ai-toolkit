@@ -249,7 +249,7 @@ func TestJobLifecycle(t *testing.T) {
 	if r = e.call(t, "GET", "/v1/jobs?state=stopped", nil); len(r.json(t)["items"].([]any)) != 1 {
 		t.Fatalf("filter: %s", r.body)
 	}
-	want(t, e.call(t, "DELETE", "/v1/jobs/"+id, nil), 204, "")
+	want(t, e.call(t, "DELETE", "/v1/jobs/"+id+"?files=true", nil), 204, "")
 	if _, err := os.Stat(filepath.Join(e.training, "lora1")); !os.IsNotExist(err) {
 		t.Fatal("job folder not deleted")
 	}

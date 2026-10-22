@@ -149,6 +149,10 @@ func zipDataset(w http.ResponseWriter, r *http.Request, datasetName string, capt
 	// basename strips any path segments so the name can't escape the datasets root
 	safeName := jsBasename(datasetName)
 	folderPath, err := realpath(filepath.Join(datasetsRoot, safeName))
+	// "." and ".." survive basename and would zip the datasets root or the toolkit
+	if err == nil && (safeName == "" || safeName == "." || safeName == ".." || !underRoot(folderPath, datasetsRoot) || folderPath == datasetsRoot) {
+		err = errors.New("not a dataset folder")
+	}
 	if err != nil {
 		httpx.Error(w, http.StatusNotFound, fmt.Sprintf("Dataset '%s' not found", datasetName))
 		return

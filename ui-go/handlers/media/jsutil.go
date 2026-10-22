@@ -68,8 +68,14 @@ func captionExt(ext any) (string, error) {
 	if s == "" {
 		return "txt", nil
 	}
+	// an extension, not a path: "txt", "json", "caption.txt" (no separators, no "..")
+	if !captionExtRe.MatchString(s) {
+		return "", errors.New("invalid caption extension")
+	}
 	return s, nil
 }
+
+var captionExtRe = regexp.MustCompile(`^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$`)
 
 func truthy(v any) bool {
 	switch x := v.(type) {

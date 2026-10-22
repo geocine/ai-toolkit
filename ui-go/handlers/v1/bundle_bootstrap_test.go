@@ -19,7 +19,7 @@ func TestBootstrap(t *testing.T) {
 	id := bundleFixture(t, e)
 	bundle := e.do(t, "GET", "/v1/jobs/"+id+"/bundle", nil, nil).body
 	// a fresh server: the job and its folder are gone, the bundle is on disk
-	want(t, e.call(t, "DELETE", "/v1/jobs/"+id, nil), 204, "")
+	want(t, e.call(t, "DELETE", "/v1/jobs/"+id+"?files=true", nil), 204, "")
 	local := filepath.Join(e.root, "boot", "run.zip")
 	put(t, local, bundle)
 	ctx := context.Background()

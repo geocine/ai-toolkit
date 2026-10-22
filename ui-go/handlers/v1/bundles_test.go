@@ -413,6 +413,12 @@ func TestDatasetPutAndImportURL(t *testing.T) {
 	want(t, e.call(t, "POST", "/v1/datasets/set/import", map[string]any{"url": srv.URL + "/text"}), 400, "invalid_request")
 	want(t, e.call(t, "POST", "/v1/datasets/set/import", map[string]any{"url": srv.URL + "/missing"}), 502, "remote_failed")
 	want(t, e.call(t, "POST", "/v1/datasets/set/import", map[string]any{"url": "file:///etc/passwd"}), 400, "invalid_request")
+	for _, file := range []string{"../escape.png", "sub/x.png", ".hidden.png"} {
+		want(t, e.call(t, "POST", "/v1/datasets/set/import", map[string]any{"url": srv.URL + "/img", "file": file}), 400, "invalid_request")
+	}
+	if _, err := os.Stat(filepath.Join(e.datasets, "escape.png")); err == nil {
+		t.Fatal("import wrote outside the dataset")
+	}
 }
 
 // newMultipart writes fields and one file part into b; returns the content type.

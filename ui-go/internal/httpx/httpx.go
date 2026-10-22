@@ -72,7 +72,9 @@ func Routes() []string {
 }
 
 // Public routes are fetched by plain <img>/<audio> tags, which cannot send
-// the bearer token.
+// the bearer token. Only reads are public: the writes under the same
+// prefixes (POST /api/img/caption, /api/img/upload, /api/img/delete,
+// /api/files/delete) need the token like any other route.
 var publicRoutes = []string{"/api/img/", "/api/files/", "/api/audio/art/", "/v1/health"}
 
 // guarded are the path prefixes that need a token when auth is on.
@@ -87,7 +89,7 @@ var guarded = []string{"/api/", "/v1/", "/mcp"}
 func Auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		want := os.Getenv("AI_TOOLKIT_AUTH")
-		if !needsToken(r.URL.Path) || (want == "" && !state.HasKeys()) {
+		if !needsToken(r.Method, r.URL.Path) || (want == "" && !state.HasKeys()) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -114,10 +116,12 @@ func Auth(next http.Handler) http.Handler {
 	})
 }
 
-func needsToken(path string) bool {
-	for _, p := range publicRoutes {
-		if strings.HasPrefix(path, p) {
-			return false
+func needsToken(method, path string) bool {
+	if method == http.MethodGet || method == http.MethodHead {
+		for _, p := range publicRoutes {
+			if strings.HasPrefix(path, p) {
+				return false
+			}
 		}
 	}
 	for _, p := range guarded {

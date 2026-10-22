@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -359,10 +360,19 @@ func deleteJob(w http.ResponseWriter, r *http.Request) {
 		v1api.Fail(w, v1api.CodeConflict, "job is "+j.Status+"; stop it before deleting it")
 		return
 	}
-	if r.URL.Query().Get("files") != "false" {
+	// the output folder (checkpoints, samples) goes only when asked for
+	if f := r.URL.Query().Get("files"); f == "true" || f == "1" {
 		folder, err := jobFolder(ctx, j.Name)
 		if err != nil {
 			v1api.Internal(w, r, err)
+			return
+		}
+		// an old name like "." or ".." (made before names were checked) must
+		// never resolve to the training root or outside it
+		root := filepath.Dir(folder)
+		if validJobName(j.Name) != nil || filepath.Clean(folder) == filepath.Clean(root) ||
+			!strings.HasPrefix(filepath.Clean(folder), filepath.Clean(root)+string(filepath.Separator)) {
+			v1api.Fail(w, v1api.CodeInvalidRequest, "the job's name does not map to a folder under the training folder; delete it with files=false")
 			return
 		}
 		if err := os.RemoveAll(folder); err != nil {

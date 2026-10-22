@@ -326,9 +326,18 @@ func del(w http.ResponseWriter, r *http.Request) {
 		httpx.Internal(w, r, err)
 		return
 	}
-	if err := os.RemoveAll(filepath.Join(root, job.Name)); err != nil {
-		httpx.Internal(w, r, err)
+	if job.Status == "running" || job.Status == "stopping" {
+		httpx.Error(w, http.StatusConflict, "Job is "+job.Status+"; stop it before deleting it")
 		return
+	}
+	// a name like "", "." or ".." (or one with separators) must never resolve
+	// to the training root or outside it
+	folder := filepath.Clean(filepath.Join(root, job.Name))
+	if job.Name != "" && filepath.Base(folder) == job.Name && filepath.Dir(folder) == filepath.Clean(root) {
+		if err := os.RemoveAll(folder); err != nil {
+			httpx.Internal(w, r, err)
+			return
+		}
 	}
 	if err := store.DeleteJob(ctx, job.ID); err != nil {
 		httpx.Internal(w, r, err)
