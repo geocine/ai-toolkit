@@ -2,3 +2,4 @@
 /aitk-server.exe
 /web/node_modules/
 /web/dist/
+*.tsbuildinfo
