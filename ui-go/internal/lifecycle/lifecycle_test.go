@@ -352,6 +352,7 @@ func TestConfigFromEnv(t *testing.T) {
 
 type recorded struct {
 	method, path, auth, body string
+	query, apiKey            string // raw query; X-API-Key
 }
 
 func fakeAPI(t *testing.T, answer func(r recorded) (int, string)) (*httptest.Server, *[]recorded) {
@@ -360,7 +361,7 @@ func fakeAPI(t *testing.T, answer func(r recorded) (int, string)) (*httptest.Ser
 	var got []recorded
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
-		rec := recorded{r.Method, r.URL.Path, r.Header.Get("Authorization"), string(b)}
+		rec := recorded{r.Method, r.URL.Path, r.Header.Get("Authorization"), string(b), r.URL.RawQuery, r.Header.Get("X-API-Key")}
 		mu.Lock()
 		got = append(got, rec)
 		mu.Unlock()
@@ -372,51 +373,297 @@ func fakeAPI(t *testing.T, answer func(r recorded) (int, string)) (*httptest.Ser
 	return srv, &got
 }
 
+// clearProviderEnv unsets every variable detectProvider reads.
+func clearProviderEnv(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{"AITK_WHEN_DONE_PROVIDER", "AITK_WHEN_DONE_CMD", "RUNPOD_POD_ID", "RUNPOD_API_KEY", "AITK_RUNPOD_API_KEY",
+		"CONTAINER_ID", "CONTAINER_API_KEY", "AITK_VAST_API_KEY", "CONTAINER_LABEL", "QUICKPOD_PORT_8675", "AITK_QUICKPOD_API_KEY"} {
+		t.Setenv(k, "")
+	}
+}
+
+// fakeRunPod points both RunPod API bases at srv (v2 under /v2, v1 under /v1).
+func fakeRunPod(t *testing.T, srv *httptest.Server) {
+	t.Helper()
+	runpodAPI, runpodV1API = srv.URL, srv.URL+"/v1"
+	t.Cleanup(func() { runpodAPI, runpodV1API = "https://api.runpod.io", "https://rest.runpod.io/v1" })
+}
+
 func TestRunPodTerminate(t *testing.T) {
-	srv, got := fakeAPI(t, func(r recorded) (int, string) { return http.StatusNoContent, "" })
-	runpodAPI = srv.URL + "/v1"
-	t.Cleanup(func() { runpodAPI = "https://rest.runpod.io/v1" })
+	srv, got := fakeAPI(t, func(r recorded) (int, string) {
+		if r.method == "POST" {
+			return http.StatusOK, `{"id":"abc123","status":"RUNNING","actions":["stop","restart","terminate"]}`
+		}
+		return http.StatusNoContent, ""
+	})
+	fakeRunPod(t, srv)
+	clearProviderEnv(t)
 	t.Setenv("RUNPOD_POD_ID", "abc123")
 	t.Setenv("RUNPOD_API_KEY", "pod-key")
 	t.Setenv("AITK_RUNPOD_API_KEY", "full-key")
 	p := detectProvider()
-	if p.Name() != "runpod" {
-		t.Fatal(p.Name())
+	if p.Name() != "runpod" || p.(*runPod).podKey {
+		t.Fatalf("%s %+v", p.Name(), p)
 	}
 	detail, err := p.Destroy(context.Background())
-	if err != nil || !strings.Contains(detail, "terminated") {
+	if err != nil || !strings.Contains(detail, "terminated") || strings.Contains(detail, "v1") {
 		t.Fatalf("%q %v", detail, err)
 	}
-	if g := *got; len(g) != 1 || g[0].method != "DELETE" || g[0].path != "/v1/pods/abc123" || g[0].auth != "Bearer full-key" {
+	if _, err := p.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	g := *got
+	if len(g) != 2 || g[0].method != "DELETE" || g[0].path != "/v2/pods/abc123" || g[0].auth != "Bearer full-key" || g[0].body != "" {
 		t.Fatalf("%+v", g)
+	}
+	if g[1].method != "POST" || g[1].path != "/v2/pods/abc123/action" || g[1].auth != "Bearer full-key" || g[1].body != `{"action":"stop"}` {
+		t.Fatalf("%+v", g[1])
 	}
 }
 
 func TestRunPodPodKeyFallsBackToStop(t *testing.T) {
+	// a full key (AITK_RUNPOD_API_KEY) whose terminate v2 refuses stops through v2
 	srv, got := fakeAPI(t, func(r recorded) (int, string) {
 		if r.method == "DELETE" {
 			return http.StatusForbidden, `{"error":"insufficient permissions"}`
 		}
-		return http.StatusOK, `{"id":"abc123","desiredStatus":"EXITED"}`
+		return http.StatusOK, `{"id":"abc123","status":"EXITED"}`
 	})
-	runpodAPI = srv.URL + "/v1"
-	t.Cleanup(func() { runpodAPI = "https://rest.runpod.io/v1" })
-	p := &runPod{id: "abc123", key: "pod-key"}
+	fakeRunPod(t, srv)
+	p := &runPod{id: "abc123", key: "full-key"}
 	detail, err := p.Destroy(context.Background())
-	if err != nil || !strings.Contains(detail, "stopped") || !strings.Contains(detail, "AITK_RUNPOD_API_KEY") {
+	if err != nil || !strings.Contains(detail, "stopped") || strings.Contains(detail, "v1") || !strings.Contains(detail, "AITK_RUNPOD_API_KEY") {
 		t.Fatalf("%q %v", detail, err)
 	}
-	if g := *got; len(g) != 2 || g[1].method != "POST" || g[1].path != "/v1/pods/abc123/stop" || g[1].auth != "Bearer pod-key" {
+	if g := *got; len(g) != 2 || g[0].method+" "+g[0].path != "DELETE /v2/pods/abc123" ||
+		g[1].method+" "+g[1].path != "POST /v2/pods/abc123/action" || g[1].auth != "Bearer full-key" {
 		t.Fatalf("%+v", g)
 	}
+
+	// the pod's own RUNPOD_API_KEY before the cutoff: both terminates and the
+	// v2 stop are refused, and the v1 stop is the one that works
+	t.Cleanup(func() { now = time.Now })
+	now = func() time.Time { return v1Retire.Add(-time.Hour) }
+	srvPod, gotPod := fakeAPI(t, func(r recorded) (int, string) {
+		if r.method == "POST" && r.path == "/v1/pods/abc123/stop" {
+			return http.StatusOK, `{"id":"abc123","desiredStatus":"EXITED"}`
+		}
+		return http.StatusForbidden, `{"error":"insufficient permissions"}`
+	})
+	fakeRunPod(t, srvPod)
+	clearProviderEnv(t)
+	t.Setenv("RUNPOD_POD_ID", "abc123")
+	t.Setenv("RUNPOD_API_KEY", "pod-key")
+	pod := detectProvider()
+	if rp, ok := pod.(*runPod); !ok || !rp.podKey {
+		t.Fatalf("%+v", pod)
+	}
+	detail, err = pod.Destroy(context.Background())
+	if err != nil || !strings.Contains(detail, "stopped through API v1") || !strings.Contains(detail, "the API key may not terminate") ||
+		!strings.Contains(detail, "AITK_RUNPOD_API_KEY") {
+		t.Fatalf("%q %v", detail, err)
+	}
+	want := []string{"DELETE /v2/pods/abc123", "DELETE /v1/pods/abc123", "POST /v2/pods/abc123/action", "POST /v1/pods/abc123/stop"}
+	if g := *gotPod; len(g) != len(want) {
+		t.Fatalf("%+v", g)
+	}
+	for i, w := range want {
+		if r := (*gotPod)[i]; r.method+" "+r.path != w || r.auth != "Bearer pod-key" {
+			t.Fatalf("call %d: %+v, want %s", i, r, w)
+		}
+	}
+
 	// other errors are errors, not a silent stop
 	srv2, _ := fakeAPI(t, func(recorded) (int, string) { return http.StatusInternalServerError, "boom" })
-	runpodAPI = srv2.URL + "/v1"
+	runpodAPI = srv2.URL
 	if _, err := p.Destroy(context.Background()); err == nil || !strings.Contains(err.Error(), "500") {
 		t.Fatalf("%v", err)
 	}
 	if _, err := (&runPod{id: "x"}).Destroy(context.Background()); err == nil {
 		t.Fatal("no key accepted")
+	}
+}
+
+// The pod-scoped key v2 refuses is retried on v1 until v1 retires.
+func TestRunPodPodKeyFallsBackToV1(t *testing.T) {
+	srv, got := fakeAPI(t, func(r recorded) (int, string) {
+		if strings.HasPrefix(r.path, "/v2/") {
+			return http.StatusUnauthorized, `{"error":"unauthorized"}`
+		}
+		if r.method == "POST" {
+			return http.StatusOK, `{"id":"abc123","desiredStatus":"EXITED"}`
+		}
+		return http.StatusNoContent, ""
+	})
+	fakeRunPod(t, srv)
+	t.Cleanup(func() { now = time.Now })
+	clearProviderEnv(t)
+	t.Setenv("RUNPOD_POD_ID", "abc123")
+	t.Setenv("RUNPOD_API_KEY", "pod-key")
+	p := detectProvider()
+	if rp, ok := p.(*runPod); !ok || !rp.podKey || rp.key != "pod-key" {
+		t.Fatalf("%+v", p)
+	}
+
+	now = func() time.Time { return v1Retire.Add(-time.Hour) }
+	detail, err := p.Destroy(context.Background())
+	if err != nil || !strings.Contains(detail, "terminated through API v1") || !strings.Contains(detail, "2026-11-15") {
+		t.Fatalf("%q %v", detail, err)
+	}
+	if detail, err := p.Stop(context.Background()); err != nil || !strings.Contains(detail, "stopped through API v1") {
+		t.Fatalf("%q %v", detail, err)
+	}
+	g := *got
+	want := []string{"DELETE /v2/pods/abc123", "DELETE /v1/pods/abc123", "POST /v2/pods/abc123/action", "POST /v1/pods/abc123/stop"}
+	if len(g) != len(want) {
+		t.Fatalf("%+v", g)
+	}
+	for i, w := range want {
+		if g[i].method+" "+g[i].path != w || g[i].auth != "Bearer pod-key" {
+			t.Fatalf("call %d: %+v, want %s", i, g[i], w)
+		}
+	}
+	if g[1].body != "" || g[3].body != "" {
+		t.Fatalf("v1 calls carry no body: %+v", g)
+	}
+
+	// on and after the cutoff v1 is never tried: the refusal is the answer
+	*got = nil
+	now = func() time.Time { return v1Retire }
+	if _, err := p.Destroy(context.Background()); err == nil || !strings.Contains(err.Error(), "401") {
+		t.Fatalf("after the cutoff: %v", err)
+	}
+	for _, r := range *got {
+		if !strings.HasPrefix(r.path, "/v2/") {
+			t.Fatalf("v1 called after the cutoff: %+v", *got)
+		}
+	}
+	if len(*got) != 2 {
+		t.Fatalf("terminate, then stop: %+v", *got)
+	}
+
+	// a full key (AITK_RUNPOD_API_KEY) never falls back to v1
+	*got = nil
+	now = func() time.Time { return v1Retire.Add(-time.Hour) }
+	if _, err := (&runPod{id: "abc123", key: "full-key"}).Stop(context.Background()); err == nil {
+		t.Fatal("refused full key stopped")
+	}
+	if g := *got; len(g) != 1 || g[0].path != "/v2/pods/abc123/action" {
+		t.Fatalf("%+v", g)
+	}
+}
+
+func TestQuickPodStopAndDestroy(t *testing.T) {
+	srv, got := fakeAPI(t, func(r recorded) (int, string) {
+		if strings.HasSuffix(r.path, "/destroypod") {
+			return http.StatusOK, `{"message":"Pod destroy command sent","pod_uuid":"a1b2c3d4-e5f6"}`
+		}
+		return http.StatusOK, `{"result":"Pod stop command sent"}`
+	})
+	quickpodAPI = srv.URL
+	t.Cleanup(func() { quickpodAPI = "https://api.quickpod.org" })
+	clearProviderEnv(t)
+	t.Setenv("CONTAINER_LABEL", "a1b2c3d4-e5f6")
+	t.Setenv("QUICKPOD_PORT_8675", "40123")
+	t.Setenv("AITK_QUICKPOD_API_KEY", "qpk_abc.secret")
+	p := detectProvider()
+	if p.Name() != "quickpod" {
+		t.Fatal(p.Name())
+	}
+	detail, err := p.Destroy(context.Background())
+	if err != nil || !strings.Contains(detail, "destroyed") || !strings.Contains(detail, "Pod destroy command sent") {
+		t.Fatalf("%q %v", detail, err)
+	}
+	detail, err = p.Stop(context.Background())
+	if err != nil || !strings.Contains(detail, "stopped") || !strings.Contains(detail, "Pod stop command sent") {
+		t.Fatalf("%q %v", detail, err)
+	}
+	g := *got
+	if len(g) != 2 {
+		t.Fatalf("%+v", g)
+	}
+	for i, path := range []string{"/update/api/destroypod", "/update/api/stoppod"} {
+		r := g[i]
+		if r.method != "GET" || r.path != path || r.query != "pod_uuid=a1b2c3d4-e5f6" || r.apiKey != "qpk_abc.secret" || r.auth != "ApiKey qpk_abc.secret" {
+			t.Fatalf("call %d: %+v", i, r)
+		}
+	}
+
+	// a non-2xx answer is a failure that carries QuickPod's text; a refused
+	// destroy falls back to stop
+	srv2, got2 := fakeAPI(t, func(r recorded) (int, string) {
+		if strings.HasSuffix(r.path, "/destroypod") {
+			return http.StatusForbidden, `{"error":"forbidden"}`
+		}
+		return http.StatusInternalServerError, `{"message":"machine offline"}`
+	})
+	quickpodAPI = srv2.URL
+	if _, err := p.Stop(context.Background()); err == nil || !strings.Contains(err.Error(), "machine offline") {
+		t.Fatalf("%v", err)
+	}
+	if _, err := p.Destroy(context.Background()); err == nil || !strings.Contains(err.Error(), "forbidden") || !strings.Contains(err.Error(), "stop") {
+		t.Fatalf("%v", err)
+	}
+	if n := len(*got2); n != 3 {
+		t.Fatalf("stop, then destroy and its stop fallback: %+v", *got2)
+	}
+	if _, err := (&quickPod{id: "x"}).Stop(context.Background()); err == nil {
+		t.Fatal("no key accepted")
+	}
+
+	// a refused destroy whose stop works is a stop, and says the key may not destroy
+	srv3, got3 := fakeAPI(t, func(r recorded) (int, string) {
+		if strings.HasSuffix(r.path, "/destroypod") {
+			return http.StatusForbidden, `{"error":"forbidden"}`
+		}
+		return http.StatusOK, `{"message":"Pod stop command sent"}`
+	})
+	quickpodAPI = srv3.URL
+	detail, err = p.Destroy(context.Background())
+	if err != nil || !strings.Contains(detail, "stopped") || !strings.Contains(detail, "the API key may not destroy") ||
+		!strings.Contains(detail, "Pod stop command sent") {
+		t.Fatalf("%q %v", detail, err)
+	}
+	g3 := *got3
+	if len(g3) != 2 {
+		t.Fatalf("destroy, then stop: %+v", g3)
+	}
+	for i, path := range []string{"/update/api/destroypod", "/update/api/stoppod"} {
+		r := g3[i]
+		if r.method != "GET" || r.path != path || r.query != "pod_uuid=a1b2c3d4-e5f6" || r.apiKey != "qpk_abc.secret" || r.auth != "ApiKey qpk_abc.secret" {
+			t.Fatalf("call %d: %+v", i, r)
+		}
+	}
+
+	// the explicit choice works without the port mapping; detection needs all three
+	t.Setenv("QUICKPOD_PORT_8675", "")
+	if p := detectProvider(); p.Name() != "exit" {
+		t.Fatalf("without QUICKPOD_PORT_8675: %s", p.Name())
+	}
+	t.Setenv("AITK_WHEN_DONE_PROVIDER", "quickpod")
+	if p := detectProvider(); p.Name() != "quickpod" {
+		t.Fatal(p.Name())
+	}
+}
+
+// QuickPod is detected after RunPod and Vast.ai, so their order is unchanged.
+func TestDetectionOrder(t *testing.T) {
+	clearProviderEnv(t)
+	t.Setenv("CONTAINER_LABEL", "a1b2c3d4")
+	t.Setenv("QUICKPOD_PORT_8675", "40123")
+	t.Setenv("AITK_QUICKPOD_API_KEY", "qpk_abc.secret")
+	t.Setenv("CONTAINER_ID", "4242")
+	t.Setenv("CONTAINER_API_KEY", "inst-key")
+	if p := detectProvider(); p.Name() != "vast" {
+		t.Fatalf("vast and quickpod env: %s", p.Name())
+	}
+	t.Setenv("RUNPOD_POD_ID", "abc123")
+	if p := detectProvider(); p.Name() != "runpod" {
+		t.Fatalf("runpod, vast and quickpod env: %s", p.Name())
+	}
+	t.Setenv("AITK_WHEN_DONE_CMD", "true")
+	if p := detectProvider(); p.Name() != "command" {
+		t.Fatalf("with a command: %s", p.Name())
 	}
 }
 
