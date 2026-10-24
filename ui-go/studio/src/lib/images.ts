@@ -6,7 +6,7 @@
 import { headSize, injectExif, parseTIFF, sniff, type Exif } from './exif';
 import { heifExif } from './heif';
 import type { PhotoMetrics } from './photoTypes';
-import { measureFiles } from './photos';
+import { measureFiles, type WorkOut } from './photos';
 
 export const trainable = /\.(jpe?g|png|webp)$/i;
 const convertible = /\.(avif|heic|heif|bmp|gif|tiff?)$/i;
@@ -16,6 +16,15 @@ export type PrepNote = { file: string; what: 'converted' | 'upright' | 'gray16' 
 
 const stemOf = (name: string) => name.replace(/\.[^.]+$/, '');
 const extOf = (name: string) => (/\.[^.]+$/.exec(name)?.[0] ?? '');
+
+/** name, or name_2.ext, name_3.ext, ... when used has it; the name chosen is added to used. */
+function freeName(name: string, used: Set<string>): string {
+  const stem = stemOf(name), ext = extOf(name);
+  let out = name;
+  for (let k = 2; used.has(out); k++) out = `${stem}_${k}${ext}`;
+  used.add(out);
+  return out;
+}
 
 /** The review.convert name of a file's format (tif is tiff). */
 const formatOf = (name: string) => extOf(name).slice(1).toLowerCase().replace(/^tif$/, 'tiff');
@@ -75,14 +84,27 @@ async function toJpeg(f: File): Promise<File> {
  * 4. a name already in the selection or in opts.taken becomes name_2.ext,
  *    and its caption .txt follows it.
  * Each change is listed in notes.
+ *
+ * opts.onMetrics, while step 2 runs, gets copies of the metrics measured so
+ * far (in the order of the photos) and from, the picked file each was measured
+ * from. Their names are provisional: step 4 run on what is measured so far, so
+ * they never clash with opts.taken or each other, and they equal the final
+ * names once every photo before them is measured. The final names are those
+ * of the result.
  */
 export async function prepareImages(
   files: File[],
-  opts: { taken: Set<string>; serverConverts: string[]; onProgress?(done: number, total: number): void } = { taken: new Set(), serverConverts: [] },
+  opts: {
+    taken: Set<string>;
+    serverConverts: string[];
+    onProgress?(done: number, total: number): void;
+    onMetrics?(metrics: PhotoMetrics[], from: File[]): void;
+  } = { taken: new Set(), serverConverts: [] },
 ): Promise<{ ok: File[]; skipped: string[]; serverConvert: File[]; notes: PrepNote[]; metrics: PhotoMetrics[] }> {
   const notes: PrepNote[] = [];
   const skipped: string[] = [];
   const photos: File[] = [];
+  const from: File[] = []; // the picked file each photo comes from
   const captions: File[] = [];
   let serverConvert: File[] = [];
   const server = new Set(opts.serverConverts.map(s => s.toLowerCase()));
@@ -90,11 +112,14 @@ export async function prepareImages(
   // 1. Formats.
   for (const f of files) {
     if (/\.txt$/i.test(f.name)) captions.push(f);
-    else if (trainable.test(f.name)) photos.push(f);
-    else if (convertible.test(f.name)) {
+    else if (trainable.test(f.name)) {
+      photos.push(f);
+      from.push(f);
+    } else if (convertible.test(f.name)) {
       try {
         const j = await toJpeg(f);
         photos.push(j);
+        from.push(f);
         notes.push({ file: f.name, what: 'converted', to: j.name });
       } catch {
         if (serverConverts(server, f.name)) {
@@ -106,7 +131,24 @@ export async function prepareImages(
   }
 
   // 2 and 3. Measure, with the silent fixes.
-  const results = await measureFiles(photos, (d, t) => opts.onProgress?.(d, t));
+  const measured: (PhotoMetrics | undefined)[] = new Array(photos.length);
+  const onMetrics = opts.onMetrics;
+  const onResult =
+    onMetrics &&
+    ((r: WorkOut) => {
+      if ('error' in r) return;
+      measured[r.id] = r.metrics;
+      const used = new Set(opts.taken);
+      const ms: PhotoMetrics[] = [];
+      const fs: File[] = [];
+      measured.forEach((m, i) => {
+        if (!m) return;
+        ms.push({ ...m, file: freeName(m.file, used) });
+        fs.push(from[i]);
+      });
+      onMetrics(ms, fs);
+    });
+  const results = await measureFiles(photos, (d, t) => opts.onProgress?.(d, t), onResult);
   const metrics: (PhotoMetrics | null)[] = [];
   const ready = photos.map((f, i) => {
     const r = results[i];
@@ -125,10 +167,8 @@ export async function prepareImages(
   const used = new Set(opts.taken);
   const finalStems = new Map<string, string[]>();
   const rename = (f: File): File => {
-    let name = f.name;
-    const stem = stemOf(name), ext = extOf(name);
-    for (let k = 2; used.has(name); k++) name = `${stem}_${k}${ext}`;
-    used.add(name);
+    const stem = stemOf(f.name);
+    const name = freeName(f.name, used);
     finalStems.set(stem, [...(finalStems.get(stem) ?? []), stemOf(name)]);
     if (name === f.name) return f;
     notes.push({ file: f.name, what: 'renamed', to: name });
