@@ -25,6 +25,15 @@ type Error struct {
 	Kind    Kind
 	Status  int    // HTTP status, 0 for network errors
 	Message string // never contains a token or an Authorization header
+
+	// What was asked, for the friendly copy (ErrorCheck). Empty when the
+	// reference did not parse.
+	Repo      string   // familiar repository name: "ghcr.io/geocine/aitoolkit-go"
+	Tag       string   // tag as asked; "" for a digest reference
+	Digest    string   // digest as asked
+	Platforms []string // KindNoPlatform: what the image is built for
+
+	cause error // the network error behind KindUnreachable (errors.Is(err, netguard.ErrBlocked))
 }
 
 func (e *Error) Error() string {
@@ -33,6 +42,9 @@ func (e *Error) Error() string {
 	}
 	return fmt.Sprintf("imagecheck: %s: %s", e.Kind, e.Message)
 }
+
+// Unwrap is the network error behind the failure, if any.
+func (e *Error) Unwrap() error { return e.cause }
 
 // Errorf builds an *Error with no HTTP status.
 func Errorf(kind Kind, format string, args ...any) *Error {
@@ -46,4 +58,12 @@ func KindOf(err error) Kind {
 		return e.Kind
 	}
 	return ""
+}
+
+// withRef fills in what was asked, so the copy can name it.
+func (e *Error) withRef(r Ref) *Error {
+	if e.Repo == "" {
+		e.Repo, e.Tag, e.Digest = r.Name(), r.Tag, r.Digest
+	}
+	return e
 }
