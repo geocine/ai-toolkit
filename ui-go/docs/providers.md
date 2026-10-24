@@ -13,7 +13,10 @@ hand, and what each provider does with your money and your data.
 2. **Set up a template yourself.** Servers → *Set up a template yourself*
    shows the steps below with your token filled in. Start the image at the
    provider by hand, then add its URL and token under Servers → *Add server*.
-   This needs no server at all.
+   This needs no server at all. Nothing filters the hosts for you here, so
+   pick one the image runs on: a driver for CUDA 13.0 or newer (580+) and an
+   RTX 30-series, A100 or newer GPU (docs/deploy.md, "The image"). Each guide
+   below says how in the step where you pick the host.
 
 ## Where calls run and why
 
@@ -68,7 +71,7 @@ Or, with Docker and no build (a large CUDA image; no GPU needed):
 docker run -d --name aitk-server -p 127.0.0.1:8675:8675 \
   -e AI_TOOLKIT_AUTH=<token> -e AITK_CORS_ORIGINS=<studio origin> \
   -e AI_TOOLKIT_GO_DB=/app/ai-toolkit/data/aitk_go.db \
-  -v aitk-control:/app/ai-toolkit/data \
+  -v aitk-server:/app/ai-toolkit/data \
   ghcr.io/geocine/aitoolkit-go:latest
 ```
 
@@ -114,7 +117,7 @@ AITK_CORS_ORIGINS=<your studio origin>
 3. Under Environment Variables, add the variables above.
 4. For gated base models, also add HF_TOKEN = {{ RUNPOD_SECRET_hf_token }} after saving your Hugging Face token as the secret hf_token under Settings → Secrets.
 5. Click Save Template.
-6. Open Pods, click Deploy and pick a GPU. Click Change Template, choose aitk headless and click Deploy On-Demand.
+6. Open Pods, click Deploy, set the CUDA version filter to 13.0 or newer and pick an RTX 30-series, A100 or newer GPU: the image needs a driver for CUDA 13.0 or newer (580+). On an older host the image fails, and the rental still bills. Click Change Template, choose aitk headless and click Deploy On-Demand.
 7. When the pod shows running, open Connect → HTTP Service: the 8675 row links to https://\<pod id>-8675.proxy.runpod.net.
 8. When it shows running, copy its URL and add it on the Servers page with the same token.
 
@@ -150,7 +153,7 @@ Manual template:
 | Template Name | `aitk headless` |  |
 | Image Path:Tag | `ghcr.io/geocine/aitoolkit-go:latest` | The full registry path. Another tag works too. |
 | Select Launch Mode | `docker ENTRYPOINT` | Runs the image as built, which starts the server. |
-| Extra Filters | `direct_port_count >= 1` | Only hosts that can give port 8675 a public port. |
+| Extra Filters | `direct_port_count >= 1 cuda_max_good >= 13.0 compute_cap >= 800` | Only hosts that can give port 8675 a public port, with a driver for CUDA 13.0 or newer (580+) and an RTX 30-series, A100 or newer GPU. |
 | Disk Space | `100` | GB, fixed for the life of the instance. |
 | Template Visibility | `Private` |  |
 
@@ -163,7 +166,7 @@ Docker options:
 1. Open Account → Environment Variables (cloud.vast.ai/account/) and add AI_TOOLKIT_AUTH = \<a long random token>. Vast puts it into every instance, so it stays out of the template. Or, with Template Visibility Private, add -e AI_TOOLKIT_AUTH=\<a long random token> to Docker Options instead. An account-wide AI_TOOLKIT_AUTH also reaches the servers the studio creates for you, which get their own token, so use the template if you also create servers from the studio. Add HF_TOKEN under Account → Environment Variables for gated base models.
 2. Open Templates (cloud.vast.ai/templates/), click + New and stay on the Config tab.
 3. Fill in the fields above and paste the docker options into Docker Options.
-4. Click Create & Use, pick an offer and click RENT.
+4. Click Create & Use, pick an offer and click RENT. The Extra Filters above keep the offers to hosts with a driver for CUDA 13.0 or newer (580+) and an RTX 30-series, A100 or newer GPU. On an older host the image fails, and the rental still bills.
 5. When the instance shows running, open IP Port Info: the line ending in -> 8675/tcp gives the URL http://\<ip>:\<port>. It is plain http only, so the token crosses the internet unencrypted, and a studio served over https cannot call it directly: use the studio the server serves at /studio/.
 6. When it shows running, copy its URL and add it on the Servers page with the same token.
 
@@ -213,7 +216,7 @@ Docker options:
 2. Open Templates and click Create New Template.
 3. Fill in the fields above. Leave Private Docker Repository unticked, and leave Docker Entrypoint Run Options and On Start Script empty.
 4. Paste the docker options into Docker Options. Keep both parts: -p 8675:8675 publishes the port, and AI_TOOLKIT_AUTH keeps the server from starting without a token.
-5. Click Create Template. On GPU Search, pick an offer, choose aitk headless under My Templates and click Create.
+5. Click Create Template. On GPU Search, pick an offer with a max CUDA of 13.0 or newer on an RTX 30-series, A100 or newer GPU: the image needs a driver for CUDA 13.0 or newer (580+). On an older host the image fails, and the rental still bills. Choose aitk headless under My Templates and click Create.
 6. On Pods, wait for running and click Connect. Under Exposed Ports, the 8675 row has an HTTPS link (https://\<pod id>-8675.proxy.quickpod.io/) and an HTTP link (http://\<ip>:\<port>).
 7. When it shows running, copy its URL and add it on the Servers page with the same token.
 
