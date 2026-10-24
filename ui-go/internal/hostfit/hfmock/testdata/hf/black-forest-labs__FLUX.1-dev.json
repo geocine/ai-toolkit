@@ -1,0 +1,182 @@
+[
+ {
+  "type": "file",
+  "path": ".gitattributes",
+  "size": 1655
+ },
+ {
+  "type": "file",
+  "path": "LICENSE.md",
+  "size": 18621
+ },
+ {
+  "type": "file",
+  "path": "README.md",
+  "size": 4421
+ },
+ {
+  "type": "file",
+  "path": "ae.safetensors",
+  "size": 335304388
+ },
+ {
+  "type": "file",
+  "path": "dev_grid.jpg",
+  "size": 1301634
+ },
+ {
+  "type": "file",
+  "path": "flux1-dev.safetensors",
+  "size": 23802932552
+ },
+ {
+  "type": "file",
+  "path": "model_index.json",
+  "size": 536
+ },
+ {
+  "type": "directory",
+  "path": "scheduler",
+  "size": 0
+ },
+ {
+  "type": "file",
+  "path": "scheduler/scheduler_config.json",
+  "size": 273
+ },
+ {
+  "type": "directory",
+  "path": "text_encoder",
+  "size": 0
+ },
+ {
+  "type": "file",
+  "path": "text_encoder/config.json",
+  "size": 613
+ },
+ {
+  "type": "file",
+  "path": "text_encoder/model.safetensors",
+  "size": 246144352
+ },
+ {
+  "type": "directory",
+  "path": "text_encoder_2",
+  "size": 0
+ },
+ {
+  "type": "file",
+  "path": "text_encoder_2/config.json",
+  "size": 782
+ },
+ {
+  "type": "file",
+  "path": "text_encoder_2/model-00001-of-00002.safetensors",
+  "size": 4994582224
+ },
+ {
+  "type": "file",
+  "path": "text_encoder_2/model-00002-of-00002.safetensors",
+  "size": 4530066360
+ },
+ {
+  "type": "file",
+  "path": "text_encoder_2/model.safetensors.index.json",
+  "size": 19885
+ },
+ {
+  "type": "directory",
+  "path": "tokenizer",
+  "size": 0
+ },
+ {
+  "type": "file",
+  "path": "tokenizer/merges.txt",
+  "size": 524619
+ },
+ {
+  "type": "file",
+  "path": "tokenizer/special_tokens_map.json",
+  "size": 588
+ },
+ {
+  "type": "file",
+  "path": "tokenizer/tokenizer_config.json",
+  "size": 705
+ },
+ {
+  "type": "file",
+  "path": "tokenizer/vocab.json",
+  "size": 1059962
+ },
+ {
+  "type": "directory",
+  "path": "tokenizer_2",
+  "size": 0
+ },
+ {
+  "type": "file",
+  "path": "tokenizer_2/special_tokens_map.json",
+  "size": 2543
+ },
+ {
+  "type": "file",
+  "path": "tokenizer_2/spiece.model",
+  "size": 791656
+ },
+ {
+  "type": "file",
+  "path": "tokenizer_2/tokenizer.json",
+  "size": 2424064
+ },
+ {
+  "type": "file",
+  "path": "tokenizer_2/tokenizer_config.json",
+  "size": 20817
+ },
+ {
+  "type": "directory",
+  "path": "transformer",
+  "size": 0
+ },
+ {
+  "type": "file",
+  "path": "transformer/config.json",
+  "size": 378
+ },
+ {
+  "type": "file",
+  "path": "transformer/diffusion_pytorch_model-00001-of-00003.safetensors",
+  "size": 9983040304
+ },
+ {
+  "type": "file",
+  "path": "transformer/diffusion_pytorch_model-00002-of-00003.safetensors",
+  "size": 9949328904
+ },
+ {
+  "type": "file",
+  "path": "transformer/diffusion_pytorch_model-00003-of-00003.safetensors",
+  "size": 3870584832
+ },
+ {
+  "type": "file",
+  "path": "transformer/diffusion_pytorch_model.safetensors.index.json",
+  "size": 121262
+ },
+ {
+  "type": "directory",
+  "path": "vae",
+  "size": 0
+ },
+ {
+  "type": "file",
+  "path": "vae/config.json",
+  "size": 820
+ },
+ {
+  "type": "file",
+  "path": "vae/diffusion_pytorch_model.safetensors",
+  "size": 167666902
+ }
+]

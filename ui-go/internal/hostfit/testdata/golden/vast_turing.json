@@ -1,0 +1,46 @@
+{
+  "compute_cap": {
+    "in": [
+      750,
+      800,
+      860,
+      890,
+      900,
+      1000,
+      1030,
+      1200
+    ]
+  },
+  "cpu_arch": {
+    "eq": "amd64"
+  },
+  "cuda_max_good": {
+    "gte": 13
+  },
+  "disk_space": {
+    "gte": 100
+  },
+  "gpu_arch": {
+    "eq": "nvidia"
+  },
+  "gpu_ram": {
+    "gte": 16384,
+    "lt": 49152
+  },
+  "limit": 50,
+  "num_gpus": {
+    "eq": 1
+  },
+  "order": [
+    [
+      "dph_total",
+      "asc"
+    ]
+  ],
+  "rentable": {
+    "eq": true
+  },
+  "verified": {
+    "eq": true
+  }
+}

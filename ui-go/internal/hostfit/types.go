@@ -48,20 +48,24 @@ type OfferFit struct {
 // apply it client-side.
 type Filter struct {
 	CUDAMin         Version `json:"cuda_min"`
-	SMAllowed       []int   `json:"sm_allowed"`         // known CCs (from the GPU table) that RunsOn(Requires.SM); minus 75 unless AllowTuring
-	Platform        string  `json:"platform"`           // linux/amd64
-	Vendor          string  `json:"vendor"`             // nvidia
-	MinDiskGB       int     `json:"min_disk_gb"`        // Need.DiskGB
-	MinVRAMGB       float64 `json:"min_vram_gb"`        // from the model's "tight" tier when a model is given; 0 otherwise
-	MinInetDownMbps float64 `json:"min_inet_down_mbps"` // 0 unless Policy.Fast (then FastInetDownMbps)
-	MinDiskBWMBps   float64 `json:"min_disk_bw_mbps"`   // 0 unless Policy.Fast (then FastDiskBWMBps)
+	SMAllowed       []int   `json:"sm_allowed"`          // known CCs (from the GPU table) that RunsOn(Requires.SM); minus 75 unless AllowTuring
+	SMHidden        []int   `json:"sm_hidden,omitempty"` // known CCs the image runs that the policy hides (75 unless AllowTuring): a warn when forced
+	Platform        string  `json:"platform"`            // linux/amd64
+	Vendor          string  `json:"vendor"`              // nvidia
+	MinDiskGB       int     `json:"min_disk_gb"`         // Need.DiskGB
+	ImagePeakGB     float64 `json:"image_peak_gb"`       // Need.ImagePeakGB: a disk below it plus headroom cannot even pull the image
+	MinVRAMGB       float64 `json:"min_vram_gb"`         // from the model's "tight" tier when a model is given; 0 otherwise
+	MinInetDownMbps float64 `json:"min_inet_down_mbps"`  // 0 unless Policy.Fast (then FastInetDownMbps)
+	MinDiskBWMBps   float64 `json:"min_disk_bw_mbps"`    // 0 unless Policy.Fast (then FastDiskBWMBps)
 	AllowTuring     bool    `json:"allow_turing"`
+	ShowAll         bool    `json:"show_all"` // keep hosts the image cannot run and hosts below the VRAM floor, badged; the disk and fast-host floors still apply
 }
 
 // Policy is the user's choices that shape a Filter beyond what the image needs.
 type Policy struct {
 	AllowTuring bool // keep sm_75 hosts (hidden by default and warned when forced)
 	Fast        bool // "Fast hosts only": FastInetDownMbps and FastDiskBWMBps
+	ShowAll     bool // keep hosts the image cannot run, badged (offers ?show_all=1)
 }
 
 const (

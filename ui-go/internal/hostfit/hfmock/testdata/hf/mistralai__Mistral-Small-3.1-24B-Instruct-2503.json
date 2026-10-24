@@ -1,0 +1,117 @@
+[
+ {
+  "type": "file",
+  "path": "README.md",
+  "size": 41000
+ },
+ {
+  "type": "file",
+  "path": "SYSTEM_PROMPT.txt",
+  "size": 2400
+ },
+ {
+  "type": "file",
+  "path": "config.json",
+  "size": 1200
+ },
+ {
+  "type": "file",
+  "path": "consolidated.safetensors",
+  "size": 48022000000
+ },
+ {
+  "type": "file",
+  "path": "generation_config.json",
+  "size": 154
+ },
+ {
+  "type": "file",
+  "path": "model-00001-of-00010.safetensors",
+  "size": 4796000000
+ },
+ {
+  "type": "file",
+  "path": "model-00002-of-00010.safetensors",
+  "size": 4796000000
+ },
+ {
+  "type": "file",
+  "path": "model-00003-of-00010.safetensors",
+  "size": 4796000000
+ },
+ {
+  "type": "file",
+  "path": "model-00004-of-00010.safetensors",
+  "size": 4796000000
+ },
+ {
+  "type": "file",
+  "path": "model-00005-of-00010.safetensors",
+  "size": 4796000000
+ },
+ {
+  "type": "file",
+  "path": "model-00006-of-00010.safetensors",
+  "size": 4796000000
+ },
+ {
+  "type": "file",
+  "path": "model-00007-of-00010.safetensors",
+  "size": 4796000000
+ },
+ {
+  "type": "file",
+  "path": "model-00008-of-00010.safetensors",
+  "size": 4796000000
+ },
+ {
+  "type": "file",
+  "path": "model-00009-of-00010.safetensors",
+  "size": 4796000000
+ },
+ {
+  "type": "file",
+  "path": "model-00010-of-00010.safetensors",
+  "size": 4796000000
+ },
+ {
+  "type": "file",
+  "path": "model.safetensors.index.json",
+  "size": 59000
+ },
+ {
+  "type": "file",
+  "path": "params.json",
+  "size": 600
+ },
+ {
+  "type": "file",
+  "path": "preprocessor_config.json",
+  "size": 600
+ },
+ {
+  "type": "file",
+  "path": "processor_config.json",
+  "size": 200
+ },
+ {
+  "type": "file",
+  "path": "special_tokens_map.json",
+  "size": 22000
+ },
+ {
+  "type": "file",
+  "path": "tekken.json",
+  "size": 19399895
+ },
+ {
+  "type": "file",
+  "path": "tokenizer.json",
+  "size": 17078037
+ },
+ {
+  "type": "file",
+  "path": "tokenizer_config.json",
+  "size": 196000
+ }
+]
