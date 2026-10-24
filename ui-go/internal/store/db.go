@@ -7,7 +7,7 @@
 // this server can share one file: DateTime as unix milliseconds, Boolean as
 // 0/1.
 //
-// Controller mode (internal/controller) is the one exception: it creates a
+// The studio API (internal/studioapi) is the one exception: it creates a
 // fresh database from the embedded copy of the schema (schema/), kept equal
 // to upstream by parity/schema_embed_test.go.
 package store

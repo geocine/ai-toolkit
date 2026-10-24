@@ -15,12 +15,12 @@ import (
 	"testing"
 
 	"github.com/geocine/aitoolkit/internal/bg"
-	"github.com/geocine/aitoolkit/internal/controller"
 	"github.com/geocine/aitoolkit/internal/mcpserver"
 	"github.com/geocine/aitoolkit/internal/paths"
 	"github.com/geocine/aitoolkit/internal/server"
 	"github.com/geocine/aitoolkit/internal/state"
 	"github.com/geocine/aitoolkit/internal/store"
+	"github.com/geocine/aitoolkit/internal/studioapi"
 	"github.com/geocine/aitoolkit/internal/testutil"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -34,28 +34,28 @@ var (
 func testMux() *http.ServeMux {
 	muxOnce.Do(func() {
 		theMux = server.NewMux()
-		theMux.Handle("/", controllerRoot())
+		theMux.Handle("/", studioAPIRoot())
 	})
 	return theMux
 }
 
-// Every background loop is reviewed for controller mode: a new loop has to
+// Every background loop is reviewed for studio API mode: a new loop has to
 // be listed as skipped or as safe to run.
-func TestControllerLoopsReviewed(t *testing.T) {
+func TestStudioAPILoopsReviewed(t *testing.T) {
 	testMux()
-	known := append(append([]string{}, controller.SkippedLoops...), controller.RunningLoops...)
+	known := append(append([]string{}, studioapi.SkippedLoops...), studioapi.RunningLoops...)
 	names := bg.Names()
 	if len(names) == 0 {
 		t.Fatal("no loops registered")
 	}
 	for _, n := range names {
 		if !slices.Contains(known, n) {
-			t.Errorf("bg loop %q is neither in controller.SkippedLoops nor in controller.RunningLoops", n)
+			t.Errorf("bg loop %q is neither in studioapi.SkippedLoops nor in studioapi.RunningLoops", n)
 		}
 	}
 }
 
-func TestControllerSmoke(t *testing.T) {
+func TestStudioAPISmoke(t *testing.T) {
 	tmp := testutil.TempDir(t)
 	// a checkout-like place the binary was started from: its datasets must
 	// stay out of sight
@@ -72,12 +72,12 @@ func TestControllerSmoke(t *testing.T) {
 	})
 	paths.SetRoot(tmp)
 
-	for _, k := range []string{"AI_TOOLKIT_AUTH", "AI_TOOLKIT_GO_DB", "AITK_ALLOWED_HOSTS", "AITK_CONTROLLER_DIR", "AITK_PUBLIC_URL"} {
+	for _, k := range []string{"AI_TOOLKIT_AUTH", "AI_TOOLKIT_GO_DB", "AITK_ALLOWED_HOSTS", "AITK_STUDIO_API_DIR", "AITK_PUBLIC_URL"} {
 		t.Setenv(k, "")
 	}
-	t.Cleanup(controller.SetForTest(true))
-	data := filepath.Join(tmp, "controller")
-	dir, err := openController(data)
+	t.Cleanup(studioapi.SetForTest(true))
+	data := filepath.Join(tmp, "studio-api")
+	dir, err := openStudioAPI(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestControllerSmoke(t *testing.T) {
 
 	r := do("GET", "/v1/health", "")
 	var health struct{ Mode string }
-	if json.Unmarshal(r.body, &health); r.code != 200 || health.Mode != "controller" {
+	if json.Unmarshal(r.body, &health); r.code != 200 || health.Mode != "studio-api" {
 		t.Fatalf("health: %d %s", r.code, r.body)
 	}
 	if r := do("GET", "/v1/providers", ""); r.code != 200 {
@@ -137,7 +137,7 @@ func TestControllerSmoke(t *testing.T) {
 	if err := json.Unmarshal(r.body, &sets); r.code != 200 || err != nil || sets.Items == nil || len(sets.Items) != 0 {
 		t.Fatalf("datasets must be the data dir's empty list: %d %s", r.code, r.body)
 	}
-	if r := do("POST", "/v1/jobs", ""); r.code != 409 || errCode(r) != "conflict" || !strings.Contains(string(r.body), "controller") {
+	if r := do("POST", "/v1/jobs", ""); r.code != 409 || errCode(r) != "conflict" || !strings.Contains(string(r.body), "studio API") {
 		t.Fatalf("POST /v1/jobs: %d %s", r.code, r.body)
 	}
 	for _, p := range []string{"/v1/providers/vast/bogus", "/v1/nope"} {
@@ -155,8 +155,8 @@ func TestControllerSmoke(t *testing.T) {
 		t.Errorf("rebinding Host: %d %s", r.code, r.body)
 	}
 
-	// MCP: code mode reaches the controller's routes, and trainer ops get the
-	// controller sentence back
+	// MCP: code mode reaches the studio API's routes, and trainer ops get the
+	// studio API sentence back
 	ctx := context.Background()
 	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
 	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: srv.URL + "/mcp", MaxRetries: -1}, nil)
@@ -194,7 +194,7 @@ func TestControllerSmoke(t *testing.T) {
 		}
 	}
 	listProviders("loopback")
-	if res, text := run(`return await aitk.jobs.create({ name: "x", gpu_ids: "0", config: {} });`); !res.IsError || !strings.Contains(text, "This server is a controller") {
+	if res, text := run(`return await aitk.jobs.create({ name: "x", gpu_ids: "0", config: {} });`); !res.IsError || !strings.Contains(text, "This server is the studio API") {
 		t.Fatalf("jobs.create over MCP: %s", text)
 	}
 	// with a public URL (notification links) the in-process calls carry its

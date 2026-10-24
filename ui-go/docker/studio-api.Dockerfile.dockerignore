@@ -1,4 +1,4 @@
-# Used by BuildKit for ui-go/docker/controller.Dockerfile only. Only ui-go/ is
+# Used by BuildKit for ui-go/docker/studio-api.Dockerfile only. Only ui-go/ is
 # copied, without dependencies, builds or databases.
 *
 !ui-go

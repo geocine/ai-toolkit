@@ -15,11 +15,11 @@ function meta(i: ProviderInstance): string {
 }
 
 /**
- * The aitk-labelled servers on a provider account, as controller sees them,
- * and tracking one again that no server tracks (PLAN §12): after its
- * controller was lost, or it was forgotten while still running.
+ * The aitk-labelled servers on a provider account, as owner sees them, and
+ * tracking one again that no server tracks (PLAN §12): after the server that
+ * created it was lost, or it was forgotten while still running.
  */
-export function FindMachines({ controller, onAdopted }: { controller: Server; onAdopted: (m: Machine, controller: Server) => void }) {
+export function FindMachines({ owner, onAdopted }: { owner: Server; onAdopted: (m: Machine, owner: Server) => void }) {
   const [provs, setProvs] = useState<Provider[] | null>(null);
   const [kind, setKind] = useState<ProviderKind | null>(null);
   const [items, setItems] = useState<ProviderInstance[] | null>(null);
@@ -30,7 +30,7 @@ export function FindMachines({ controller, onAdopted }: { controller: Server; on
     let live = true;
     setProvs(null);
     setError(null);
-    providers(controller).then(
+    providers(owner).then(
       list => {
         if (!live) return;
         const ready = list.filter(p => p.configured);
@@ -42,7 +42,7 @@ export function FindMachines({ controller, onAdopted }: { controller: Server; on
     return () => {
       live = false;
     };
-  }, [controller.id, controller.base, controller.token]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [owner.id, owner.base, owner.token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // only the latest search may fill the list: switching providers quickly
   // must not show the previous provider's servers under the new tab
@@ -52,7 +52,7 @@ export function FindMachines({ controller, onAdopted }: { controller: Server; on
     setLoading(true);
     setError(null);
     try {
-      const list = await instances(controller, k);
+      const list = await instances(owner, k);
       if (n === seq.current) setItems(list);
     } catch (e) {
       if (n !== seq.current) return;
@@ -70,7 +70,7 @@ export function FindMachines({ controller, onAdopted }: { controller: Server; on
   const label = (provs?.find(p => p.kind === kind)?.label ?? (kind && providerNames[kind])) || '';
 
   if (provs && !provs.length)
-    return <p className="quiet-note">{controller.name} has no provider key yet. Add one under Create a GPU server, then search here.</p>;
+    return <p className="quiet-note">{owner.name} has no provider key yet. Add one under Create a GPU server, then search here.</p>;
 
   return (
     <div className="server-list">
@@ -91,7 +91,7 @@ export function FindMachines({ controller, onAdopted }: { controller: Server; on
       </div>
       {kind && (
         <p className="quiet-note">
-          Servers with an <span className="mono">aitk-</span> label on your {label} account, as {controller.name} sees them. One that is not tracked may still be
+          Servers with an <span className="mono">aitk-</span> label on your {label} account, as {owner.name} sees them. One that is not tracked may still be
           billing: track it here, or terminate it in the provider console.
         </p>
       )}
@@ -104,10 +104,10 @@ export function FindMachines({ controller, onAdopted }: { controller: Server; on
               key={i.provider_id}
               item={i}
               kind={kind}
-              controller={controller}
+              owner={owner}
               onAdopted={m => {
                 setItems(list => list?.map(x => (x.provider_id === i.provider_id ? { ...x, machine_id: m.id } : x)) ?? null);
-                onAdopted(m, controller);
+                onAdopted(m, owner);
               }}
             />
           ))}
@@ -120,12 +120,12 @@ export function FindMachines({ controller, onAdopted }: { controller: Server; on
 function InstanceRow({
   item: i,
   kind,
-  controller,
+  owner,
   onAdopted,
 }: {
   item: ProviderInstance;
   kind: ProviderKind;
-  controller: Server;
+  owner: Server;
   onAdopted: (m: Machine) => void;
 }) {
   // QuickPod never echoes the env, and an echo can be a RunPod secret reference
@@ -138,7 +138,7 @@ function InstanceRow({
     setBusy(true);
     setError(null);
     try {
-      onAdopted(await adopt(controller, kind, { provider_id: i.provider_id, ...(withToken ? { token: withToken } : {}) }));
+      onAdopted(await adopt(owner, kind, { provider_id: i.provider_id, ...(withToken ? { token: withToken } : {}) }));
       setAsking(false);
       setToken('');
     } catch (e) {
@@ -161,7 +161,7 @@ function InstanceRow({
         <p className="quiet-note machine-via">
           {i.machine_id ? (
             <>
-              Tracked on {controller.name} as <span className="mono">{i.machine_id}</span>
+              Tracked on {owner.name} as <span className="mono">{i.machine_id}</span>
             </>
           ) : (
             'Not tracked by this server'

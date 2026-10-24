@@ -24,7 +24,7 @@ var (
 )
 
 // SetRoot moves ToolkitRoot to dir and recomputes every path above from it.
-// Controller mode calls it with its data dir before anything opens a file,
+// The studio API calls it with its data dir before anything opens a file,
 // so its folders are the (empty) ones there, never ~/datasets or ~/output
 // next to wherever the binary was started.
 func SetRoot(dir string) {

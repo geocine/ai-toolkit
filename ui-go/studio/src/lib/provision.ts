@@ -1,7 +1,8 @@
-// GPU servers on RunPod, Vast.ai and QuickPod, created through a controller:
+// GPU servers on RunPod, Vast.ai and QuickPod, created through the server that
+// holds your provider keys:
 // any aitk server the studio knows (/v1/providers, /v1/machines; docs/headless.md).
 // The studio never calls a provider itself, and provider keys are sent to the
-// controller once and never kept in the browser.
+// server that holds them once and never kept in the browser.
 import { call, del, get, post, type Items, type Server } from './api';
 import type {
   AdoptRequest,

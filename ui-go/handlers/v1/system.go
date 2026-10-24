@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/geocine/aitoolkit/internal/apicache"
-	"github.com/geocine/aitoolkit/internal/controller"
 	"github.com/geocine/aitoolkit/internal/paths"
+	"github.com/geocine/aitoolkit/internal/studioapi"
 	"github.com/geocine/aitoolkit/internal/sysstats"
 	"github.com/geocine/aitoolkit/internal/v1api"
 )
@@ -65,10 +65,10 @@ func upstreamVersion() *string {
 	return nil
 }
 
-// mode is "controller" on a no-GPU controller (internal/controller), else "server".
+// mode is "studio-api" on the no-GPU studio API (internal/studioapi), else "server".
 func mode() string {
-	if controller.Enabled() {
-		return "controller"
+	if studioapi.Enabled() {
+		return "studio-api"
 	}
 	return "server"
 }

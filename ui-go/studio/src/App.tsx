@@ -1,6 +1,6 @@
 import { Layers, List, Menu, Monitor, Moon, Plus, Server as ServerIcon, Sun, Timer, X } from 'lucide-react';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { ControllerNote } from './components/ControllerNote';
+import { StudioApiNote } from './components/StudioApiNote';
 import { LifeBanner } from './components/LifeBanner';
 import { PageHeader, useLoad } from './components/ui';
 import { get, type Health } from './lib/api';
@@ -42,14 +42,14 @@ type Mode = NonNullable<Health['mode']>;
 const ActiveMode = createContext<{ mode: Mode | null; pending: boolean }>({ mode: null, pending: false });
 
 /**
- * A page that needs the trainer: a controller shows the note instead, under the
+ * A page that needs the trainer: the studio API shows the note instead, under the
  * same nav. Until the first check answers only the header shows, so the page
- * neither flashes nor starts its own loads against a controller.
+ * neither flashes nor starts its own loads against the studio API.
  */
 function Trainer({ title, children }: { title: string; children: ReactNode }) {
   const { mode, pending } = useContext(ActiveMode);
   if (pending) return <PageHeader title={title} />;
-  return mode === 'controller' ? <ControllerNote title={title} /> : <>{children}</>;
+  return mode === 'studio-api' ? <StudioApiNote title={title} /> : <>{children}</>;
 }
 
 /** Reachability of the active server, for the sidebar footer. */

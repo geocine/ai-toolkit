@@ -1,12 +1,12 @@
 // Package relay reverse-proxies /v1/machines/{id}/relay/{path...} to a machine.
 //
 // A studio served over https cannot call a plain-http GPU server (Vast,
-// QuickPod direct), so it goes through the controller instead: the browser
-// leg stays on the controller's origin and token, and the controller dials
-// the machine through the netguard with the machine's own token. Nothing is
-// escalated: a request that did not pass the controller's auth (a public
-// media GET, a signed link) reaches the machine with no credentials and the
-// machine decides.
+// QuickPod direct), so it goes through the server that holds the provider
+// keys instead: the browser leg stays on that server's origin and token, and
+// that server dials the machine through the netguard with the machine's own
+// token. Nothing is escalated: a request that did not pass the relaying
+// server's auth (a public media GET, a signed link) reaches the machine with
+// no credentials and the machine decides.
 package relay
 
 import (
@@ -59,7 +59,7 @@ func transport(simulated bool) http.RoundTripper {
 	return t
 }
 
-// Prefix is the controller path a machine is relayed under.
+// Prefix is the path on the relaying server a machine is relayed under.
 func Prefix(machineID string) string { return "/v1/machines/" + machineID + "/relay" }
 
 // relayPath splits the escaped request path into the machine id segment and
@@ -77,12 +77,12 @@ func escapedInner(r *http.Request, inner string) string {
 }
 
 // stripped are the request headers a client cannot pass to the machine: its
-// own credentials and cookies for the controller, its origin (the machine
+// own credentials and cookies for the relaying server, its origin (the machine
 // needs no CORS), and any forwarding claims (the relay sets its own).
 var stripped = []string{"Authorization", "Cookie", "Origin", "Forwarded", "X-Real-Ip"}
 
 // Serve proxies r to t.BaseURL + "/" + inner. authenticated reports whether
-// the caller passed the controller's Auth (httpx.Authenticated).
+// the caller passed the relaying server's Auth (httpx.Authenticated).
 func Serve(w http.ResponseWriter, r *http.Request, t provision.RelayTarget, inner string, authenticated bool) {
 	if t.BaseURL == "" {
 		v1api.Fail(w, v1api.CodeConflict, "this machine has no address yet")
@@ -101,9 +101,9 @@ func Serve(w http.ResponseWriter, r *http.Request, t provision.RelayTarget, inne
 	}
 	target.RawQuery = r.URL.RawQuery
 	prefix := Prefix(t.MachineID)
-	// The controller's own origin as its clients reach it (AITK_PUBLIC_URL,
+	// The relaying server's own origin as its clients reach it (AITK_PUBLIC_URL,
 	// else what its front proxy says), so the machine's absolute links point
-	// at the controller.
+	// at the relaying server.
 	self, _ := url.Parse(links.Origin(r, os.Getenv("AITK_PUBLIC_URL")))
 
 	p := &httputil.ReverseProxy{
@@ -136,7 +136,7 @@ func Serve(w http.ResponseWriter, r *http.Request, t provision.RelayTarget, inne
 		FlushInterval: -1,
 		ModifyResponse: func(res *http.Response) error {
 			res.Header.Del("Set-Cookie")
-			// The controller's own CORS headers apply; a second set from the
+			// The relaying server's own CORS headers apply; a second set from the
 			// machine would make the browser reject the response.
 			for k := range res.Header {
 				if strings.HasPrefix(http.CanonicalHeaderKey(k), "Access-Control-") {

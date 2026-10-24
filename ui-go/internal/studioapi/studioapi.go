@@ -1,8 +1,8 @@
-// Package controller is the no-GPU mode: this server creates and tracks GPU
-// servers but never trains. main turns it on (--controller or
-// AITK_CONTROLLER), re-roots the data dir, skips the trainer's loops and puts
-// Gate in front of the mux (docs/controller.md).
-package controller
+// Package studioapi is the studio API, the no-GPU mode: this server creates
+// and tracks GPU servers but never trains. main turns it on (--studio-api or
+// AITK_STUDIO_API), re-roots the data dir, skips the trainer's loops and puts
+// Gate in front of the mux (docs/studio-api.md).
+package studioapi
 
 import (
 	"errors"
@@ -20,42 +20,42 @@ import (
 
 var enabled atomic.Bool
 
-// Enable turns controller mode on for the life of the process.
+// Enable turns studio API mode on for the life of the process.
 func Enable() { enabled.Store(true) }
 
-// Enabled reports whether this server is a controller.
+// Enabled reports whether this server is the studio API.
 func Enabled() bool { return enabled.Load() }
 
 // SetForTest switches the mode and returns a restore func for t.Cleanup, so one
-// test enabling controller mode never leaks into the rest of its package.
+// test enabling studio API mode never leaks into the rest of its package.
 func SetForTest(on bool) (restore func()) {
 	prev := enabled.Swap(on)
 	return func() { enabled.Store(prev) }
 }
 
-// FromEnv: AITK_CONTROLLER is 1, true or yes (case-insensitive).
+// FromEnv: AITK_STUDIO_API is 1, true or yes (case-insensitive).
 func FromEnv() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("AITK_CONTROLLER"))) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("AITK_STUDIO_API"))) {
 	case "1", "true", "yes":
 		return true
 	}
 	return false
 }
 
-// DataDir is flag > AITK_CONTROLLER_DIR > os.UserConfigDir()/aitk-controller
-// (Windows %AppData%\aitk-controller, macOS ~/Library/Application Support/aitk-controller,
-// Linux ~/.config/aitk-controller). Created with mode 0700 (chmod'ed to 0700 if it exists).
+// DataDir is flag > AITK_STUDIO_API_DIR > os.UserConfigDir()/aitk-studio-api
+// (Windows %AppData%\aitk-studio-api, macOS ~/Library/Application Support/aitk-studio-api,
+// Linux ~/.config/aitk-studio-api). Created with mode 0700 (chmod'ed to 0700 if it exists).
 func DataDir(flagValue string) (string, error) {
 	dir := strings.TrimSpace(flagValue)
 	if dir == "" {
-		dir = strings.TrimSpace(os.Getenv("AITK_CONTROLLER_DIR"))
+		dir = strings.TrimSpace(os.Getenv("AITK_STUDIO_API_DIR"))
 	}
 	if dir == "" {
 		base, err := os.UserConfigDir()
 		if err != nil {
-			return "", errors.New("controller: no user config dir (" + err.Error() + "); pass --data-dir or set AITK_CONTROLLER_DIR")
+			return "", errors.New("studio API: no user config dir (" + err.Error() + "); pass --data-dir or set AITK_STUDIO_API_DIR")
 		}
-		dir = filepath.Join(base, "aitk-controller")
+		dir = filepath.Join(base, "aitk-studio-api")
 	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
@@ -74,13 +74,13 @@ func DataDir(flagValue string) (string, error) {
 // SkippedLoops are bg loops that need the trainer, job folders or dataset folders.
 var SkippedLoops = []string{"bundles", "bundles-bootstrap", "portable", "lifecycle", "uploads", "uploads-auto", "photocheck-gc"}
 
-// RunningLoops are the bg loops reviewed as safe on a controller. A test fails
+// RunningLoops are the bg loops reviewed as safe on the studio API. A test fails
 // when a registered loop is in neither list, so a new loop cannot slip in unreviewed.
 var RunningLoops = []string{"machines", "notify"}
 
-// BindRefusal is why a controller will not listen on a reachable address
+// BindRefusal is why the studio API will not listen on a reachable address
 // without a token.
-const BindRefusal = "Controller mode on a reachable address holds your provider keys: set AI_TOOLKIT_AUTH, or listen on 127.0.0.1."
+const BindRefusal = "The studio API on a reachable address holds your provider keys: set AI_TOOLKIT_AUTH, or listen on 127.0.0.1."
 
 // CheckBind refuses a non-loopback host without an env token. API keys cannot
 // exist yet on a fresh database, so only AI_TOOLKIT_AUTH counts.
@@ -137,16 +137,16 @@ func hostMatches(entry, host, name string) bool {
 }
 
 // Refusal answers a request that needs the trainer.
-const Refusal = "This server is a controller (no GPU, no trainer): it creates and tracks GPU servers. Do this on a GPU server: add one on the Servers page, or create one with machines.launch."
+const Refusal = "This server is the studio API (no GPU, no trainer): it creates and tracks GPU servers. Do this on a GPU server: add one on the Servers page, or create one with machines.launch."
 
-// HostRefusal answers an open controller reached under a name it does not know.
-const HostRefusal = "This controller only answers on 127.0.0.1 or localhost. Set AITK_ALLOWED_HOSTS to add a name."
+// HostRefusal answers an open studio API reached under a name it does not know.
+const HostRefusal = "This studio API only answers on 127.0.0.1 or localhost. Set AITK_ALLOWED_HOSTS to add a name."
 
 // writeRoots are refused for every method but GET and HEAD: their reads answer
 // from the empty schema and the empty data dir.
 var writeRoots = []string{"/v1/jobs", "/v1/queues", "/v1/datasets", "/v1/bundles", "/v1/uploads", "/v1/lifecycle", "/v1/portable", "/v1/files"}
 
-// Allowed reports whether a request is served in controller mode. It refuses
+// Allowed reports whether a request is served in studio API mode. It refuses
 // only what is known to need the trainer; unknown paths fall through to the
 // mux's not_found.
 func Allowed(method, path string) bool {
@@ -165,7 +165,7 @@ func Allowed(method, path string) bool {
 }
 
 // Gate answers what Allowed refuses, and on an open server (httpx.IsOpen())
-// refuses a Host that HostAllowed rejects (DNS rebinding). Outside controller
+// refuses a Host that HostAllowed rejects (DNS rebinding). Outside studio API
 // mode it is a no-op.
 func Gate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

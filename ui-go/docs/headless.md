@@ -79,8 +79,8 @@ one by one; they expire.
 
 ### System
 - `GET /v1/health` → `{ok, version, upstream_version, started_at, mode}`;
-  `mode` is `"server"`, or `"controller"` when the server runs with
-  `--controller` / `AITK_CONTROLLER=1`
+  `mode` is `"server"`, or `"studio-api"` when the server runs with
+  `--studio-api` / `AITK_STUDIO_API=1`
 - `GET /v1/system` → `{gpus: [...], cpu: {...}, disks: [{path, free, total}], toolkit_root}`
 
 ### Jobs
@@ -677,8 +677,8 @@ This server can rent GPU servers ("machines") that run this image on RunPod,
 Vast.ai and QuickPod (beta), watch them until they answer, and hand out
 their URL and token so the studio or an agent can use them
 (`internal/provision`, one adapter per provider written from its published
-API). Usually a laptop or a small always-on server is the controller and the
-machines do the training. Provider calls never happen on a read of
+API). Usually the studio API (docs/studio-api.md: no GPU, on a laptop, a VPS
+or in Docker) holds the keys and the machines do the training. Provider calls never happen on a read of
 `/v1/providers`; offers and quotes are cached for 30 s.
 
 - **Keys.** One key per provider, stored with `PUT /v1/providers/{kind}`

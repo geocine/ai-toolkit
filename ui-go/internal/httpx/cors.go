@@ -40,7 +40,7 @@ func CORS(next http.Handler) http.Handler {
 			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Content-Range, Last-Event-ID, Range, If-None-Match, Accept, Mcp-Session-Id, Mcp-Protocol-Version")
 			h.Set("Access-Control-Max-Age", "600")
 			// Chrome's private-network preflight: an https page calling a
-			// controller on http://127.0.0.1 asks first
+			// studio API on http://127.0.0.1 asks first
 			if strings.EqualFold(r.Header.Get("Access-Control-Request-Private-Network"), "true") {
 				h.Set("Access-Control-Allow-Private-Network", "true")
 			}

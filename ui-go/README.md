@@ -27,7 +27,7 @@ checked automatically:
 
 The schema is owned by upstream: the Go server never creates or alters tables.
 Create or migrate the database with upstream's Prisma CLI (`npx prisma db push`
-in `ui/`); the Docker image does this on start. Controller mode is the one
+in `ui/`); the Docker image does this on start. The studio API is the one
 exception: it creates its own from an embedded copy of the schema, kept equal
 to upstream's by `go test ./parity/`.
 
@@ -72,9 +72,9 @@ cd ui-go
 go run . --port 8675                   # API + frontend on :8675, queue worker included
 ```
 
-No GPU or checkout? `go run . --controller` runs a controller that only
+No GPU or checkout? `go run . --studio-api` runs the studio API, which only
 creates and tracks GPU servers, with its own databases and the studio at
-`/studio/`: see [docs/controller.md](docs/controller.md).
+`/studio/`: see [docs/studio-api.md](docs/studio-api.md).
 
 For frontend work, run `npm run dev` in `web/` (Vite on :5173, `/api` proxied
 to the Go server on :8675, or `AITK_API`).

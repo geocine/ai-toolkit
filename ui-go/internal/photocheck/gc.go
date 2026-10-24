@@ -21,7 +21,7 @@ const (
 
 // StartGC registers the daily photo-cache GC (bg loop "photocheck-gc"). The
 // photo routes call it from their registration, so it starts with the other
-// loops; controller mode skips it.
+// loops; the studio API skips it.
 func StartGC() {
 	bg.Go("photocheck-gc", func(ctx context.Context) {
 		t := time.NewTimer(gcFirst)

@@ -51,7 +51,7 @@ func TestCORS(t *testing.T) {
 	}
 }
 
-// An https studio calling a controller on http://127.0.0.1 gets Chrome's
+// An https studio calling a studio API on http://127.0.0.1 gets Chrome's
 // private-network preflight answered; other preflights do not carry it.
 func TestCORSPrivateNetwork(t *testing.T) {
 	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusTeapot) })

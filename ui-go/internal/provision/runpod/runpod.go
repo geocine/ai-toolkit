@@ -1,6 +1,6 @@
 // Package runpod is the RunPod adapter. It is written only from RunPod's
 // published REST API v2 OpenAPI (scratchpad spec runpod.md) and runs on the
-// controller: v2 sends no CORS headers, so the studio never calls it.
+// server that holds the provider keys: v2 sends no CORS headers, so the studio never calls it.
 // runpodmock implements the same surface for tests and simulate mode.
 package runpod
 

@@ -15,7 +15,7 @@ import (
 )
 
 // Recovery (PLAN §12): the aitk-labelled instances on a provider account,
-// and adopting one this server does not track (its controller was lost, or
+// and adopting one this server does not track (the server that created it was lost, or
 // it was forgotten with force). The handler asserts Recoverer on Default, so
 // Manager fakes need not implement it.
 

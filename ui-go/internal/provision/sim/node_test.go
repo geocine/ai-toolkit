@@ -140,8 +140,8 @@ func TestNodeAuthPublicRoutes(t *testing.T) {
 
 // /mcp reaches inner with this server's own token, because code mode replays
 // it to this server's outer Auth; every other path gets none.
-func TestNodeMCPCarriesControllerAuth(t *testing.T) {
-	t.Setenv("AI_TOOLKIT_AUTH", "controller_token_0001")
+func TestNodeMCPCarriesServerAuth(t *testing.T) {
+	t.Setenv("AI_TOOLKIT_AUTH", "server_token_0001")
 	base := startNode(t, mockkit.RealClock{}, spec(map[string]string{"AI_TOOLKIT_AUTH": nodeToken}))
 	req, _ := http.NewRequest(http.MethodPost, base+"/mcp", strings.NewReader(`{}`))
 	if res, _ := do(t, req); res.StatusCode != 401 {
@@ -149,7 +149,7 @@ func TestNodeMCPCarriesControllerAuth(t *testing.T) {
 	}
 	req, _ = http.NewRequest(http.MethodPost, base+"/mcp", strings.NewReader(`{}`))
 	req.Header.Set("Authorization", "Bearer "+nodeToken)
-	if res, body := do(t, req); res.StatusCode != 200 || !strings.Contains(body, `"auth":"Bearer controller_token_0001"`) {
+	if res, body := do(t, req); res.StatusCode != 200 || !strings.Contains(body, `"auth":"Bearer server_token_0001"`) {
 		t.Fatalf("/mcp with the node token: %d %s", res.StatusCode, body)
 	}
 	res, body := get(t, base+"/v1/system", map[string]string{"Authorization": "Bearer " + nodeToken})
