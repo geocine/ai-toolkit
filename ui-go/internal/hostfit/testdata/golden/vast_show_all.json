@@ -1,0 +1,28 @@
+{
+  "disk_space": {
+    "gte": 80
+  },
+  "gpu_arch": {
+    "eq": "nvidia"
+  },
+  "gpu_ram": {
+    "gte": 16384,
+    "lt": 49152
+  },
+  "limit": 50,
+  "num_gpus": {
+    "eq": 1
+  },
+  "order": [
+    [
+      "dph_total",
+      "asc"
+    ]
+  ],
+  "rentable": {
+    "eq": true
+  },
+  "verified": {
+    "eq": true
+  }
+}

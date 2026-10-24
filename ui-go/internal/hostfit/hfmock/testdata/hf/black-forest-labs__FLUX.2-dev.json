@@ -1,0 +1,167 @@
+[
+ {
+  "type": "file",
+  "path": ".gitattributes",
+  "size": 1655
+ },
+ {
+  "type": "file",
+  "path": "LICENSE.txt",
+  "size": 18621
+ },
+ {
+  "type": "file",
+  "path": "README.md",
+  "size": 6122
+ },
+ {
+  "type": "file",
+  "path": "ae.safetensors",
+  "size": 336213556
+ },
+ {
+  "type": "file",
+  "path": "flux2-dev.safetensors",
+  "size": 64450000000
+ },
+ {
+  "type": "file",
+  "path": "model_index.json",
+  "size": 512
+ },
+ {
+  "type": "directory",
+  "path": "scheduler",
+  "size": 0
+ },
+ {
+  "type": "file",
+  "path": "scheduler/scheduler_config.json",
+  "size": 486
+ },
+ {
+  "type": "directory",
+  "path": "text_encoder",
+  "size": 0
+ },
+ {
+  "type": "file",
+  "path": "text_encoder/model-00001-of-00010.safetensors",
+  "size": 4800000000
+ },
+ {
+  "type": "file",
+  "path": "text_encoder/model-00002-of-00010.safetensors",
+  "size": 4800000000
+ },
+ {
+  "type": "file",
+  "path": "text_encoder/model-00003-of-00010.safetensors",
+  "size": 4800000000
+ },
+ {
+  "type": "file",
+  "path": "text_encoder/model-00004-of-00010.safetensors",
+  "size": 4800000000
+ },
+ {
+  "type": "file",
+  "path": "text_encoder/model-00005-of-00010.safetensors",
+  "size": 4800000000
+ },
+ {
+  "type": "file",
+  "path": "text_encoder/model-00006-of-00010.safetensors",
+  "size": 4800000000
+ },
+ {
+  "type": "file",
+  "path": "text_encoder/model-00007-of-00010.safetensors",
+  "size": 4800000000
+ },
+ {
+  "type": "file",
+  "path": "text_encoder/model-00008-of-00010.safetensors",
+  "size": 4800000000
+ },
+ {
+  "type": "file",
+  "path": "text_encoder/model-00009-of-00010.safetensors",
+  "size": 4800000000
+ },
+ {
+  "type": "file",
+  "path": "text_encoder/model-00010-of-00010.safetensors",
+  "size": 4800000000
+ },
+ {
+  "type": "file",
+  "path": "text_encoder/model.safetensors.index.json",
+  "size": 121262
+ },
+ {
+  "type": "directory",
+  "path": "transformer",
+  "size": 0
+ },
+ {
+  "type": "file",
+  "path": "transformer/config.json",
+  "size": 512
+ },
+ {
+  "type": "file",
+  "path": "transformer/diffusion_pytorch_model-00001-of-00007.safetensors",
+  "size": 9205714285
+ },
+ {
+  "type": "file",
+  "path": "transformer/diffusion_pytorch_model-00002-of-00007.safetensors",
+  "size": 9205714285
+ },
+ {
+  "type": "file",
+  "path": "transformer/diffusion_pytorch_model-00003-of-00007.safetensors",
+  "size": 9205714285
+ },
+ {
+  "type": "file",
+  "path": "transformer/diffusion_pytorch_model-00004-of-00007.safetensors",
+  "size": 9205714285
+ },
+ {
+  "type": "file",
+  "path": "transformer/diffusion_pytorch_model-00005-of-00007.safetensors",
+  "size": 9205714285
+ },
+ {
+  "type": "file",
+  "path": "transformer/diffusion_pytorch_model-00006-of-00007.safetensors",
+  "size": 9205714285
+ },
+ {
+  "type": "file",
+  "path": "transformer/diffusion_pytorch_model-00007-of-00007.safetensors",
+  "size": 9205714290
+ },
+ {
+  "type": "file",
+  "path": "transformer/diffusion_pytorch_model.safetensors.index.json",
+  "size": 121262
+ },
+ {
+  "type": "directory",
+  "path": "vae",
+  "size": 0
+ },
+ {
+  "type": "file",
+  "path": "vae/config.json",
+  "size": 820
+ },
+ {
+  "type": "file",
+  "path": "vae/diffusion_pytorch_model.safetensors",
+  "size": 168000000
+ }
+]

@@ -1,0 +1,117 @@
+[
+ {
+  "type": "file",
+  "path": ".gitattributes",
+  "size": 1655
+ },
+ {
+  "type": "file",
+  "path": "README.md",
+  "size": 9000
+ },
+ {
+  "type": "file",
+  "path": "model_index.json",
+  "size": 450
+ },
+ {
+  "type": "directory",
+  "path": "scheduler",
+  "size": 0
+ },
+ {
+  "type": "file",
+  "path": "scheduler/scheduler_config.json",
+  "size": 300
+ },
+ {
+  "type": "directory",
+  "path": "text_encoder",
+  "size": 0
+ },
+ {
+  "type": "file",
+  "path": "text_encoder/config.json",
+  "size": 900
+ },
+ {
+  "type": "file",
+  "path": "text_encoder/model-00001-of-00003.safetensors",
+  "size": 3960000000
+ },
+ {
+  "type": "file",
+  "path": "text_encoder/model-00002-of-00003.safetensors",
+  "size": 3990000000
+ },
+ {
+  "type": "file",
+  "path": "text_encoder/model-00003-of-00003.safetensors",
+  "size": 90000000
+ },
+ {
+  "type": "directory",
+  "path": "tokenizer",
+  "size": 0
+ },
+ {
+  "type": "file",
+  "path": "tokenizer/merges.txt",
+  "size": 1671853
+ },
+ {
+  "type": "file",
+  "path": "tokenizer/tokenizer.json",
+  "size": 11422654
+ },
+ {
+  "type": "file",
+  "path": "tokenizer/tokenizer_config.json",
+  "size": 9700
+ },
+ {
+  "type": "file",
+  "path": "tokenizer/vocab.json",
+  "size": 2776833
+ },
+ {
+  "type": "directory",
+  "path": "transformer",
+  "size": 0
+ },
+ {
+  "type": "file",
+  "path": "transformer/diffusion_pytorch_model-00001-of-00003.safetensors",
+  "size": 8196666666
+ },
+ {
+  "type": "file",
+  "path": "transformer/diffusion_pytorch_model-00002-of-00003.safetensors",
+  "size": 8196666666
+ },
+ {
+  "type": "file",
+  "path": "transformer/diffusion_pytorch_model-00003-of-00003.safetensors",
+  "size": 8196666668
+ },
+ {
+  "type": "file",
+  "path": "transformer/diffusion_pytorch_model.safetensors.index.json",
+  "size": 121262
+ },
+ {
+  "type": "directory",
+  "path": "vae",
+  "size": 0
+ },
+ {
+  "type": "file",
+  "path": "vae/config.json",
+  "size": 800
+ },
+ {
+  "type": "file",
+  "path": "vae/diffusion_pytorch_model.safetensors",
+  "size": 167666902
+ }
+]

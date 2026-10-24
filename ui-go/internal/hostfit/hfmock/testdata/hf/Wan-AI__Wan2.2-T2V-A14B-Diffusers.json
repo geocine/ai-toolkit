@@ -1,0 +1,167 @@
+[
+ {
+  "type": "file",
+  "path": ".gitattributes",
+  "size": 1655
+ },
+ {
+  "type": "file",
+  "path": "README.md",
+  "size": 12000
+ },
+ {
+  "type": "file",
+  "path": "model_index.json",
+  "size": 480
+ },
+ {
+  "type": "directory",
+  "path": "scheduler",
+  "size": 0
+ },
+ {
+  "type": "file",
+  "path": "scheduler/scheduler_config.json",
+  "size": 600
+ },
+ {
+  "type": "directory",
+  "path": "text_encoder",
+  "size": 0
+ },
+ {
+  "type": "file",
+  "path": "text_encoder/config.json",
+  "size": 900
+ },
+ {
+  "type": "file",
+  "path": "text_encoder/model-00001-of-00002.safetensors",
+  "size": 9960000000
+ },
+ {
+  "type": "file",
+  "path": "text_encoder/model-00002-of-00002.safetensors",
+  "size": 1400000000
+ },
+ {
+  "type": "directory",
+  "path": "tokenizer",
+  "size": 0
+ },
+ {
+  "type": "file",
+  "path": "tokenizer/special_tokens_map.json",
+  "size": 6600
+ },
+ {
+  "type": "file",
+  "path": "tokenizer/spiece.model",
+  "size": 4548313
+ },
+ {
+  "type": "file",
+  "path": "tokenizer/tokenizer.json",
+  "size": 16837417
+ },
+ {
+  "type": "file",
+  "path": "tokenizer/tokenizer_config.json",
+  "size": 61000
+ },
+ {
+  "type": "directory",
+  "path": "transformer",
+  "size": 0
+ },
+ {
+  "type": "file",
+  "path": "transformer/diffusion_pytorch_model-00001-of-00006.safetensors",
+  "size": 9525000000
+ },
+ {
+  "type": "file",
+  "path": "transformer/diffusion_pytorch_model-00002-of-00006.safetensors",
+  "size": 9525000000
+ },
+ {
+  "type": "file",
+  "path": "transformer/diffusion_pytorch_model-00003-of-00006.safetensors",
+  "size": 9525000000
+ },
+ {
+  "type": "file",
+  "path": "transformer/diffusion_pytorch_model-00004-of-00006.safetensors",
+  "size": 9525000000
+ },
+ {
+  "type": "file",
+  "path": "transformer/diffusion_pytorch_model-00005-of-00006.safetensors",
+  "size": 9525000000
+ },
+ {
+  "type": "file",
+  "path": "transformer/diffusion_pytorch_model-00006-of-00006.safetensors",
+  "size": 9525000000
+ },
+ {
+  "type": "file",
+  "path": "transformer/diffusion_pytorch_model.safetensors.index.json",
+  "size": 121262
+ },
+ {
+  "type": "directory",
+  "path": "transformer_2",
+  "size": 0
+ },
+ {
+  "type": "file",
+  "path": "transformer_2/diffusion_pytorch_model-00001-of-00006.safetensors",
+  "size": 9525000000
+ },
+ {
+  "type": "file",
+  "path": "transformer_2/diffusion_pytorch_model-00002-of-00006.safetensors",
+  "size": 9525000000
+ },
+ {
+  "type": "file",
+  "path": "transformer_2/diffusion_pytorch_model-00003-of-00006.safetensors",
+  "size": 9525000000
+ },
+ {
+  "type": "file",
+  "path": "transformer_2/diffusion_pytorch_model-00004-of-00006.safetensors",
+  "size": 9525000000
+ },
+ {
+  "type": "file",
+  "path": "transformer_2/diffusion_pytorch_model-00005-of-00006.safetensors",
+  "size": 9525000000
+ },
+ {
+  "type": "file",
+  "path": "transformer_2/diffusion_pytorch_model-00006-of-00006.safetensors",
+  "size": 9525000000
+ },
+ {
+  "type": "file",
+  "path": "transformer_2/diffusion_pytorch_model.safetensors.index.json",
+  "size": 121262
+ },
+ {
+  "type": "directory",
+  "path": "vae",
+  "size": 0
+ },
+ {
+  "type": "file",
+  "path": "vae/config.json",
+  "size": 800
+ },
+ {
+  "type": "file",
+  "path": "vae/diffusion_pytorch_model.safetensors",
+  "size": 507591892
+ }
+]
