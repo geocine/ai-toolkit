@@ -4,7 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
-	"encoding/json"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"image"
@@ -19,6 +19,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,11 +31,11 @@ import (
 
 	"github.com/geocine/aitoolkit/internal/collation"
 	"github.com/geocine/aitoolkit/internal/events"
+	"github.com/geocine/aitoolkit/internal/imgmeta"
 	"github.com/geocine/aitoolkit/internal/jobview"
+	"github.com/geocine/aitoolkit/internal/photocheck"
 	"github.com/geocine/aitoolkit/internal/safepath"
 	"github.com/geocine/aitoolkit/internal/settings"
-	"github.com/geocine/aitoolkit/internal/store"
-	"github.com/geocine/aitoolkit/internal/thumbs"
 	"github.com/geocine/aitoolkit/internal/v1api"
 )
 
@@ -113,8 +114,13 @@ func datasetDir(w http.ResponseWriter, r *http.Request, name string, exists bool
 	return dir, true
 }
 
-// walkDataset visits every visible file (hidden files and folders such as
-// .thumbs are skipped), with paths relative to dir using "/".
+// controlsDir holds control images (depth, pose) beside a dataset's photos.
+// The trainer skips it, as it skips dot entries, so it is not dataset content.
+const controlsDir = "_controls"
+
+// walkDataset visits every file the trainer sees, with paths relative to
+// dir using "/": hidden files and folders (.thumbs, .set_aside) and
+// _controls folders are skipped.
 func walkDataset(dir string, fn func(rel string, info fs.FileInfo)) error {
 	return filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -130,6 +136,9 @@ func walkDataset(dir string, fn func(rel string, info fs.FileInfo)) error {
 			return nil
 		}
 		if d.IsDir() {
+			if d.Name() == controlsDir {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		info, err := d.Info()
@@ -231,13 +240,30 @@ func readCaption(file string) *string {
 	return &s
 }
 
+// orientHead is how much of a photo itemOf reads for its EXIF orientation.
+// A JPEG's Exif segment is at most 64 KiB and comes first, and a PNG's eXIf
+// chunk precedes the pixels; a WebP keeps EXIF after the pixels, so a large
+// WebP reports its stored size.
+const orientHead = 64 << 10
+
+// itemOf is one media file of a dataset. An image's width and height are
+// as the trainer sees it: after EXIF orientation, so a portrait phone photo
+// stored sideways reports portrait.
 func itemOf(dir, rel string, info fs.FileInfo) datasetItem {
 	full := filepath.Join(dir, filepath.FromSlash(rel))
 	it := datasetItem{File: rel, Size: info.Size(), Caption: readCaption(full)}
 	if imageExts[strings.ToLower(filepath.Ext(rel))] {
 		if f, err := os.Open(full); err == nil {
-			if cfg, _, err := image.DecodeConfig(f); err == nil {
-				it.Width, it.Height = &cfg.Width, &cfg.Height
+			head := make([]byte, orientHead)
+			n, _ := io.ReadFull(f, head)
+			if _, err := f.Seek(0, io.SeekStart); err == nil {
+				if cfg, _, err := image.DecodeConfig(f); err == nil {
+					w, h := cfg.Width, cfg.Height
+					if o := imgmeta.SniffHead(head[:n]).Exif.Orientation; o >= 5 && o <= 8 {
+						w, h = h, w // 5-8 turn the picture a quarter
+					}
+					it.Width, it.Height = &w, &h
+				}
 			}
 			f.Close()
 		}
@@ -302,12 +328,27 @@ func getDataset(w http.ResponseWriter, r *http.Request) {
 		v1api.Internal(w, r, err)
 		return
 	}
+	pj, err := latestFaceJob(r.Context(), dir)
+	if err != nil {
+		v1api.Internal(w, r, err)
+		return
+	}
 	v1api.OK(w, struct {
 		datasetView
 		Items      []datasetItem `json:"items"`
 		NextCursor any           `json:"next_cursor"`
 		CaptionJob *jobview.Job  `json:"caption_job"`
-	}{v, items, next, cj})
+		PhotoJob   *jobview.Job  `json:"photo_job"`
+	}{v, items, next, cj, pj})
+}
+
+// latestFaceJob is the dataset's newest photo_faces job, or nil.
+func latestFaceJob(ctx context.Context, dir string) (*jobview.Job, error) {
+	j, err := photocheck.LatestFaceJob(ctx, dir)
+	if err != nil || j == nil {
+		return nil, err
+	}
+	return jobview.View(ctx, j)
 }
 
 func deleteDataset(w http.ResponseWriter, r *http.Request) {
@@ -325,7 +366,13 @@ func deleteDataset(w http.ResponseWriter, r *http.Request) {
 		v1api.Fail(w, v1api.CodeConflict, "the dataset is in use by "+strings.Join(users, ", ")+"; stop it first")
 		return
 	}
-	if err := os.RemoveAll(dir); err != nil {
+	// the photo analysis goes with the photos (scores, face similarities,
+	// reference, decisions); it is found by content, so forget it first
+	if err := photocheck.Forget(r.Context(), dir); err != nil {
+		v1api.Internal(w, r, err)
+		return
+	}
+	if err := retryLocked(func() error { return os.RemoveAll(dir) }); err != nil {
 		v1api.Internal(w, r, err)
 		return
 	}
@@ -333,41 +380,17 @@ func deleteDataset(w http.ResponseWriter, r *http.Request) {
 	v1api.NoContent(w)
 }
 
-// jobsUsingDataset names the queued, running or stopping jobs that read dir:
-// training runs through datasets[].folder_path, caption jobs through their ref.
+// jobsUsingDataset names the queued, running or stopping jobs that use dir
+// (datasetJobs): training runs through datasets[].folder_path, caption and
+// face jobs through their ref.
 func jobsUsingDataset(ctx context.Context, dir string) ([]string, error) {
-	jobs, err := store.FindJobs(ctx, store.JobQuery{Where: `"status" IN ('queued', 'running', 'stopping')`})
+	jobs, err := datasetJobs(ctx, dir)
 	if err != nil {
 		return nil, err
 	}
-	clean := filepath.Clean(dir)
 	var out []string
 	for _, j := range jobs {
-		if j.JobRef != nil && filepath.Clean(*j.JobRef) == clean {
-			out = append(out, j.Name)
-			continue
-		}
-		var cfg struct {
-			Config struct {
-				Process []struct {
-					Datasets []struct {
-						FolderPath string `json:"folder_path"`
-					} `json:"datasets"`
-				} `json:"process"`
-			} `json:"config"`
-		}
-		if json.Unmarshal([]byte(j.JobConfig), &cfg) != nil {
-			continue
-		}
-	process:
-		for _, p := range cfg.Config.Process {
-			for _, d := range p.Datasets {
-				if d.FolderPath != "" && filepath.Clean(d.FolderPath) == clean {
-					out = append(out, j.Name)
-					break process
-				}
-			}
-		}
+		out = append(out, j.Name)
 	}
 	return out, nil
 }
@@ -436,18 +459,47 @@ func deleteDatasetFile(w http.ResponseWriter, r *http.Request) {
 		v1api.Fail(w, v1api.CodeNotFound, "no file "+r.PathValue("file")+" in dataset "+name)
 		return
 	}
-	if err := os.Remove(file); err != nil {
+	if err := retryLocked(func() error { return os.Remove(file) }); err != nil {
 		v1api.Internal(w, r, err)
 		return
 	}
 	if isMedia(file) {
 		os.Remove(captionPath(file))
-		base := thumbs.Base(file)
-		os.Remove(base + ".png")
-		os.Remove(base + ".jpg")
+		rel, _ := filepath.Rel(dir, file)
+		photocheck.PurgeDerived(dir, filepath.ToSlash(rel))
 	}
 	changed(r.Context(), name)
 	v1api.NoContent(w)
+}
+
+// retryLocked runs op, and on Windows runs it again for a few seconds while
+// it fails: a file the photo analysis is reading cannot be replaced or
+// removed there until the analysis closes it.
+func retryLocked(op func() error) error {
+	err := op()
+	if runtime.GOOS != "windows" {
+		return err
+	}
+	for deadline := time.Now().Add(3 * time.Second); err != nil && !errors.Is(err, fs.ErrNotExist) && time.Now().Before(deadline); {
+		time.Sleep(50 * time.Millisecond)
+		err = op()
+	}
+	return err
+}
+
+// purgeReplaced drops what was made from the media file at rel when existed
+// says a write just replaced it: its thumbs and the trainer's caches, which
+// still describe the old picture.
+func purgeReplaced(dir, rel string, existed bool) {
+	if existed && isMedia(rel) {
+		photocheck.PurgeDerived(dir, rel)
+	}
+}
+
+// exists reports whether something is at p.
+func exists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }
 
 // writeAtomic writes src to dst through a temp file in dst's folder.
@@ -467,7 +519,7 @@ func writeAtomic(dst string, src io.Reader) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), dst)
+	return retryLocked(func() error { return os.Rename(tmp.Name(), dst) })
 }
 
 // uploadName is the base name of an uploaded file, or "" when unusable.
@@ -479,10 +531,43 @@ func uploadName(raw string) string {
 	return name
 }
 
+// maxUploadCaption is the largest .txt part an on_conflict=rename upload
+// holds in memory until the request's media are saved.
+const maxUploadCaption = 1 << 20
+
+// uploadCaption is a .txt part held back by an on_conflict=rename upload.
+type uploadCaption struct {
+	name string
+	data []byte
+}
+
+// uploadDatasetFiles is POST /v1/datasets/{name}/files?on_conflict=: the
+// multipart files[] parts saved into the dataset. on_conflict says what a
+// taken name does:
+//   - replace (the default): the upload overwrites the file, and the old
+//     photo's thumbs and trainer caches go;
+//   - rename: a different file is saved as <stem>_2<ext> (then _3, ...), as
+//     is a photo whose stem another photo or a caption already uses, and
+//     the same content (sha256) is skipped. Captions (.txt) are written after
+//     the media, so a caption follows its image's new stem when the image was
+//     in the same request; any other caption replaces;
+//   - skip: nothing is overwritten, and a taken name is reported skipped.
+//
+// The answer is a photocheck.UploadResult; every saved photo is queued for
+// analysis.
 func uploadDatasetFiles(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	dir, ok := datasetDir(w, r, name, true)
 	if !ok {
+		return
+	}
+	mode := r.URL.Query().Get("on_conflict")
+	switch mode {
+	case "":
+		mode = "replace"
+	case "replace", "rename", "skip":
+	default:
+		v1api.Fail(w, v1api.CodeInvalidRequest, "on_conflict must be replace, rename or skip")
 		return
 	}
 	mr, err := r.MultipartReader()
@@ -490,7 +575,11 @@ func uploadDatasetFiles(w http.ResponseWriter, r *http.Request) {
 		v1api.Fail(w, v1api.CodeInvalidRequest, "expected multipart/form-data with files[]")
 		return
 	}
-	saved := []string{}
+	res := photocheck.UploadResult{Items: []string{}, Renamed: []photocheck.Renamed{}, Skipped: []string{}}
+	stems := map[string]string{} // rename: an uploaded image's stem -> the stem it is stored under
+	var taken takenStems         // rename: the stems the folder's photos and captions use
+	var captions []uploadCaption
+	parts := 0
 	for {
 		part, err := mr.NextPart()
 		if err == io.EOF {
@@ -505,26 +594,230 @@ func uploadDatasetFiles(w http.ResponseWriter, r *http.Request) {
 			part.Close()
 			continue
 		}
+		parts++
 		fname := uploadName(part.FileName())
 		if fname == "" {
 			part.Close()
 			v1api.Fail(w, v1api.CodeInvalidRequest, "unusable file name "+strconv.Quote(part.FileName()))
 			return
 		}
-		if err := writeAtomic(filepath.Join(dir, fname), part); err != nil {
+		dst := filepath.Join(dir, fname)
+		switch {
+		case mode == "rename" && strings.EqualFold(filepath.Ext(fname), ".txt"):
+			data, err := io.ReadAll(io.LimitReader(part, maxUploadCaption+1))
 			part.Close()
+			if err != nil {
+				v1api.Fail(w, v1api.CodeInvalidRequest, "bad multipart body: "+err.Error())
+				return
+			}
+			if len(data) > maxUploadCaption {
+				v1api.Fail(w, v1api.CodeTooLarge, "caption "+fname+" is larger than 1 MiB")
+				return
+			}
+			captions = append(captions, uploadCaption{fname, data})
+		case mode == "rename":
+			if taken == nil {
+				if taken, err = stemsIn(dir); err != nil {
+					part.Close()
+					v1api.Internal(w, r, err)
+					return
+				}
+			}
+			saved, err := saveRenamed(dir, fname, part, taken)
+			part.Close()
+			if err != nil {
+				v1api.Internal(w, r, err)
+				return
+			}
+			stem := strings.TrimSuffix(fname, filepath.Ext(fname))
+			if _, seen := stems[stem]; !seen {
+				stems[stem] = strings.TrimSuffix(saved.name, filepath.Ext(saved.name))
+			}
+			switch {
+			case saved.same:
+				res.Skipped = append(res.Skipped, fname)
+			case saved.name != fname:
+				res.Items = append(res.Items, saved.name)
+				res.Renamed = append(res.Renamed, photocheck.Renamed{From: fname, To: saved.name})
+			default:
+				res.Items = append(res.Items, fname)
+			}
+		case mode == "skip" && exists(dst):
+			part.Close()
+			res.Skipped = append(res.Skipped, fname)
+		default:
+			existed := exists(dst)
+			err := writeAtomic(dst, part)
+			part.Close()
+			if err != nil {
+				v1api.Internal(w, r, err)
+				return
+			}
+			purgeReplaced(dir, fname, existed)
+			res.Items = append(res.Items, fname)
+		}
+	}
+	for _, c := range captions {
+		target := c.name
+		if stem, ok := stems[strings.TrimSuffix(c.name, filepath.Ext(c.name))]; ok {
+			target = stem + filepath.Ext(c.name)
+		}
+		if err := writeAtomic(filepath.Join(dir, target), bytes.NewReader(c.data)); err != nil {
 			v1api.Internal(w, r, err)
 			return
 		}
-		part.Close()
-		saved = append(saved, fname)
+		res.Items = append(res.Items, target)
+		if target != c.name {
+			res.Renamed = append(res.Renamed, photocheck.Renamed{From: c.name, To: target})
+		}
 	}
-	if len(saved) == 0 {
+	if parts == 0 {
 		v1api.Fail(w, v1api.CodeInvalidRequest, "no files in the request (field files[])")
 		return
 	}
-	changed(r.Context(), name)
-	v1api.Items(w, saved)
+	if len(res.Items) > 0 {
+		photocheck.Warm(dir, res.Items)
+		changed(r.Context(), name)
+	}
+	v1api.OK(w, res)
+}
+
+// renamedFile is where saveRenamed put an upload; same says the dataset
+// already held that content under name, so nothing was written.
+type renamedFile struct {
+	name string
+	same bool
+}
+
+// saveRenamed stores src as fname in dir, or, when fname is taken, as the
+// first free <stem>_2<ext>, <stem>_3<ext>, ... A media name is taken when a
+// file has it or when taken holds its stem (another photo or a caption has
+// it), so the upload never takes another photo's caption or shares one; a
+// name that already holds the same bytes (sha256) ends the search with same
+// set. The name is claimed atomically (claimName), and a saved media name's
+// stem joins taken.
+func saveRenamed(dir, fname string, src io.Reader, taken takenStems) (renamedFile, error) {
+	tmp, err := os.CreateTemp(dir, ".upload-*")
+	if err != nil {
+		return renamedFile{}, err
+	}
+	defer os.Remove(tmp.Name())
+	h := sha256.New()
+	size, err := io.Copy(io.MultiWriter(tmp, h), src)
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return renamedFile{}, err
+	}
+	var sum [sha256.Size]byte
+	h.Sum(sum[:0])
+	ext := filepath.Ext(fname)
+	stem := strings.TrimSuffix(fname, ext)
+	for n := 1; n <= 10000; n++ {
+		cand := fname
+		if n > 1 {
+			cand = stem + "_" + strconv.Itoa(n) + ext
+		}
+		dst := filepath.Join(dir, cand)
+		st, err := os.Stat(dst)
+		switch {
+		case err == nil:
+			if st.Mode().IsRegular() && st.Size() == size && sameContent(dst, sum) {
+				return renamedFile{name: cand, same: true}, nil
+			}
+			continue
+		case !errors.Is(err, fs.ErrNotExist):
+			return renamedFile{}, err
+		case isMedia(cand) && taken.has(cand):
+			continue
+		}
+		err = claimName(tmp.Name(), dst)
+		if errors.Is(err, fs.ErrExist) {
+			continue // written since the Stat
+		}
+		if err != nil {
+			return renamedFile{}, err
+		}
+		if isMedia(cand) {
+			taken.add(cand)
+		}
+		return renamedFile{name: cand}, nil
+	}
+	return renamedFile{}, fmt.Errorf("no free name for %s", fname)
+}
+
+// claimName puts the finished upload at tmp at dst only while nothing is
+// there: a hard link fails with fs.ErrExist when dst appeared since the
+// caller looked, where a rename would replace it. A folder that cannot
+// hold hard links gets an exclusive create and a copy. tmp stays for the
+// caller to remove.
+func claimName(tmp, dst string) error {
+	err := os.Link(tmp, dst)
+	if err == nil || errors.Is(err, fs.ErrExist) {
+		return err
+	}
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	in, err := os.Open(tmp)
+	if err == nil {
+		_, err = io.Copy(out, in)
+		in.Close()
+	}
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		os.Remove(dst)
+	}
+	return err
+}
+
+// takenStems is the stems (lower case, as photocheck compares them) of a
+// folder's photos and captions.
+type takenStems map[string]bool
+
+// stemsIn is the takenStems of dir's own media files and .txt captions;
+// hidden entries and folders are left out.
+func stemsIn(dir string) (takenStems, error) {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	t := takenStems{}
+	for _, e := range ents {
+		if n := e.Name(); !e.IsDir() && !strings.HasPrefix(n, ".") &&
+			(isMedia(n) || strings.EqualFold(filepath.Ext(n), ".txt")) {
+			t.add(n)
+		}
+	}
+	return t, nil
+}
+
+func (t takenStems) add(name string) {
+	t[strings.ToLower(strings.TrimSuffix(name, filepath.Ext(name)))] = true
+}
+
+func (t takenStems) has(name string) bool {
+	return t[strings.ToLower(strings.TrimSuffix(name, filepath.Ext(name)))]
+}
+
+// sameContent reports whether the file at p hashes to sum.
+func sameContent(p string, sum [sha256.Size]byte) bool {
+	f, err := os.Open(p)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return false
+	}
+	var got [sha256.Size]byte
+	h.Sum(got[:0])
+	return got == sum
 }
 
 // Archive limits.
@@ -677,6 +970,7 @@ func uploadDatasetArchive(w http.ResponseWriter, r *http.Request) {
 		v1api.Respond(w, r, err)
 		return
 	}
+	photocheck.Warm(dir, res.Files)
 	changed(r.Context(), name)
 	v1api.OK(w, map[string]any{"added": res.Added, "skipped": res.Skipped})
 }
@@ -713,11 +1007,13 @@ func extractArchive(tmp, dir string) (archiveResult, error) {
 		if err != nil {
 			return res, v1api.Errorf(v1api.CodeInvalidRequest, "corrupt archive entry "+e.f.Name+": "+err.Error())
 		}
+		existed := exists(dst)
 		err = writeAtomic(dst, &limitedReader{r: rc, left: int64(e.f.UncompressedSize64)})
 		rc.Close()
 		if err != nil {
 			return res, v1api.Errorf(v1api.CodeInvalidRequest, "extracting "+e.f.Name+": "+err.Error())
 		}
+		purgeReplaced(dir, e.rel, existed)
 		if !e.f.Modified.IsZero() {
 			os.Chtimes(dst, time.Now(), e.f.Modified)
 		}
@@ -749,11 +1045,14 @@ func putDatasetFile(w http.ResponseWriter, r *http.Request) {
 		v1api.Fail(w, v1api.CodeConflict, "path is a folder")
 		return
 	}
+	existed := exists(file)
 	lr := &io.LimitedReader{R: r.Body, N: maxArchiveBytes + 1}
 	if err := writeAtomic(file, lr); err != nil {
 		v1api.Internal(w, r, err)
 		return
 	}
+	rel = filepath.ToSlash(rel)
+	purgeReplaced(dir, rel, existed)
 	if lr.N <= 0 {
 		os.Remove(file)
 		v1api.Fail(w, v1api.CodeTooLarge, "file is larger than 20 GiB")
@@ -764,8 +1063,9 @@ func putDatasetFile(w http.ResponseWriter, r *http.Request) {
 		v1api.Internal(w, r, err)
 		return
 	}
+	photocheck.Warm(dir, []string{rel})
 	changed(r.Context(), name)
-	v1api.OK(w, itemOf(dir, filepath.ToSlash(rel), info))
+	v1api.OK(w, itemOf(dir, rel, info))
 }
 
 var sniffedExts = map[string]string{"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp",
@@ -842,6 +1142,7 @@ func importDatasetURL(w http.ResponseWriter, r *http.Request) {
 			v1api.Respond(w, r, err)
 			return
 		}
+		photocheck.Warm(dir, res.Files)
 		changed(ctx, name)
 		v1api.OK(w, res)
 		return
@@ -875,16 +1176,19 @@ func importDatasetURL(w http.ResponseWriter, r *http.Request) {
 		fname = strings.TrimSuffix(fname, filepath.Ext(fname)) + ext
 	}
 	dst := filepath.Join(dir, fname)
-	if err := os.Rename(tmp.Name(), dst); err != nil {
+	existed := exists(dst)
+	if err := retryLocked(func() error { return os.Rename(tmp.Name(), dst) }); err != nil {
 		v1api.Internal(w, r, err)
 		return
 	}
+	purgeReplaced(dir, fname, existed)
 	if b.Caption != nil {
 		if err := writeAtomic(captionPath(dst), strings.NewReader(*b.Caption)); err != nil {
 			v1api.Internal(w, r, err)
 			return
 		}
 	}
+	photocheck.Warm(dir, []string{fname})
 	changed(ctx, name)
 	v1api.OK(w, archiveResult{Added: 1, Files: []string{fname}, Skipped: []string{}})
 }
