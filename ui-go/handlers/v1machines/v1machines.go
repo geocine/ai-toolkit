@@ -43,6 +43,8 @@ func Register(mux *http.ServeMux) {
 	httpx.Handle(mux, "GET /v1/providers/{kind}/offers", offers)
 	httpx.Handle(mux, "GET /v1/providers/{kind}/templates", templates)
 	httpx.Handle(mux, "GET /v1/providers/{kind}/setup", setup)
+	httpx.Handle(mux, "GET /v1/providers/{kind}/instances", instances)
+	httpx.Handle(mux, "POST /v1/providers/{kind}/adopt", adopt)
 
 	httpx.Handle(mux, "GET /v1/machines", listMachines)
 	httpx.Handle(mux, "POST /v1/machines", launch)

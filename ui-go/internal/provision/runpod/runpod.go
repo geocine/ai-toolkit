@@ -131,13 +131,14 @@ func (g gpuType) allowed(q provision.OfferQuery, h hostfit.Host) bool {
 }
 
 type podJSON struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	Status       string   `json:"status"`
-	Actions      []string `json:"actions"`
-	DataCenterID *string  `json:"dataCenterId"`
-	Cost         *float64 `json:"cost"`
-	CreatedAt    string   `json:"createdAt"`
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	Status       string            `json:"status"`
+	Actions      []string          `json:"actions"`
+	DataCenterID *string           `json:"dataCenterId"`
+	Cost         *float64          `json:"cost"`
+	CreatedAt    string            `json:"createdAt"`
+	Env          map[string]string `json:"env"` // for adopt only (Instance.Env)
 	GPU          *struct {
 		ID    string `json:"id"`
 		Count int    `json:"count"`
@@ -631,6 +632,7 @@ func (a *Adapter) instance(p podJSON) provision.Instance {
 	if t, err := time.Parse(time.RFC3339, p.CreatedAt); err == nil {
 		inst.CreatedAt = t
 	}
+	inst.Env = p.Env
 	return inst
 }
 

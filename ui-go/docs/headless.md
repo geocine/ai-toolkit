@@ -692,6 +692,13 @@ Shapes (`studio/src/lib/provisionTypes.ts` is the exact contract):
   disk_gb, env: [{name, value, secret, note}], env_block, docker_options,
   fields: [{label, value, note}], steps, url_pattern, console_url, keys_url,
   key_scopes, token?}`.
+- `ProviderInstance = {provider_id, label, status, provider_status, gpu,
+  gpu_count, price_per_hour, machine_id, token_known, created_at}`: one
+  `aitk-` labelled server on the provider account. `status` is the
+  provider's view (never `ready`); `machine_id` is the live machine here that
+  tracks it (null: untracked, and it may still be billing); `token_known`
+  says the provider echoed its `AI_TOOLKIT_AUTH`, so adopting it needs no
+  token; `created_at` is null when the provider does not say.
 
 Providers:
 - `GET /v1/providers` → `{items: [Provider]}` (no provider call)
@@ -710,6 +717,8 @@ Providers:
   provider reports them (an offer that reports neither passes).
 - `GET /v1/providers/{kind}/templates` → `{items: [ProviderTemplate]}` (QuickPod launches need one with `ours` and `publishes_port`)
 - `GET /v1/providers/{kind}/setup?image=&disk_gb=&cors_origin=&generate_token=1` → SetupGuide: the manual instructions for the provider's console (docs/providers.md). It needs no key and never accepts a token; `generate_token=1` fills in a fresh one (returned in `token`), otherwise a placeholder stays.
+- `GET /v1/providers/{kind}/instances` → `{items: [ProviderInstance]}`, newest first: every server on the account whose label starts with `aitk-`, terminated ones left out (one provider call; 400 without a key). Env values are never returned.
+- `POST /v1/providers/{kind}/adopt {provider_id, name?, token?}` → **201** Machine: tracks an untracked instance from that list here. Guarded.
 
 Machines (`{id}` is a machine id or the name of a live machine):
 - `GET /v1/machines?active=1` → `{items: [Machine]}` newest first (`active`: not ended)
@@ -810,9 +819,10 @@ the checks are in `error.details`), 429 `rate_limited` with `Retry-After`
 not answer). Provider messages are passed through with any key redacted.
 
 **Open-server guard.** On a server without `AI_TOOLKIT_AUTH` and without API
-keys, `PUT /v1/providers/{kind}`, `POST /v1/machines`, `.../start`,
-`.../link` and the relay answer 403 `forbidden` ("Set AI_TOOLKIT_AUTH on this
-server before it can rent GPUs for you.") unless the request comes straight
+keys, `PUT /v1/providers/{kind}`, `POST /v1/providers/{kind}/adopt`,
+`POST /v1/machines`, `.../start`, `.../link` and the relay answer 403
+`forbidden` ("Set AI_TOOLKIT_AUTH on this server before it can rent GPUs for
+you.") unless the request comes straight
 from this machine (a loopback peer and no `X-Forwarded-For`, `X-Real-IP` or
 `Forwarded` header). Code mode over `/mcp` counts as the MCP client's own
 connection: an agent on this machine needs no token, one connecting from
@@ -839,6 +849,31 @@ private address is refused unless the machine is simulated. Each request
 costs two hops, and this server's `AITK_CORS_ORIGINS` applies. The relay has
 no `aitk` op: agents use `machines.link` and talk to the machine (or its
 `/mcp`) directly.
+
+**Finding and adopting servers.** Machines live in this server's database.
+If it is lost (or a machine was forgotten with `force=1`), the machines keep
+running and billing at the provider under their `aitk-` labels. On any
+server with the same provider key, `GET /v1/providers/{kind}/instances` lists
+them and `POST /v1/providers/{kind}/adopt` tracks one again:
+- the token comes from the provider's echo of the instance env
+  (`AI_TOOLKIT_AUTH` in the RunPod pod `env` or Vast's `extra_env`) unless
+  `token` is given. QuickPod returns no env, so `token` is required there,
+  as it is when an echo is a RunPod secret reference
+  (`{{ RUNPOD_SECRET_... }}`): 400 `invalid_request` without it. A wrong
+  token gives the machine `token_mismatch`; `PATCH` the right one in;
+- the machine gets back the id it was launched with (its `AITK_MACHINE_ID`,
+  else the one its label was made from) when no row here has it, so a
+  studio entry that pointed at it works again; `when_done` and
+  `copied_remote` come from `AITK_WHEN_DONE` and `AITK_SYNC_REMOTE`, and
+  `self_destroy_key` from whether an `AITK_*_API_KEY` is set; no other env
+  value (tokens, keys) is stored, only the env names in `env_keys`. `image`
+  and `disk_gb` were not recorded and stay empty;
+- `name` defaults to `<gpu> on <provider>`; `created_at` is the adoption, so
+  the 20-minute ready timeout counts from then. It is probed at once and
+  watched like any other machine;
+- 404 `not_found` for an id that is not an `aitk-` server on the account,
+  409 `conflict` when a live machine here already tracks it. `max_running`
+  does not apply: the server already bills.
 
 ### GPU recommendation
 

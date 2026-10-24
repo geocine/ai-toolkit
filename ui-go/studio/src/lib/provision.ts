@@ -4,6 +4,7 @@
 // controller once and never kept in the browser.
 import { call, del, get, post, type Items, type Server } from './api';
 import type {
+  AdoptRequest,
   GpuRecommendation,
   LaunchRequest,
   Machine,
@@ -13,6 +14,7 @@ import type {
   Offer,
   OfferQuery,
   Provider,
+  ProviderInstance,
   ProviderKind,
   ProviderTemplate,
   ProviderTest,
@@ -64,6 +66,13 @@ export const templates = async (s: Server, kind: ProviderKind) => (await get<Ite
 /** The manual template guide. It never takes a token; the studio fills it in. */
 export const setup = (s: Server, kind: ProviderKind, o: { image?: string; disk_gb?: number; cors_origin?: string; generate_token?: boolean } = {}) =>
   get<SetupGuide>(s, `/v1/providers/${k(kind)}/setup${query(o)}`);
+/**
+ * Every aitk-labelled server on the provider account, newest first, also the
+ * ones no server tracks any more (machine_id null). One provider call.
+ */
+export const instances = async (s: Server, kind: ProviderKind) => (await get<Items<ProviderInstance>>(s, `/v1/providers/${k(kind)}/instances`)).items;
+/** Tracks an untracked instance on s. token is needed unless token_known (always on QuickPod). */
+export const adopt = (s: Server, kind: ProviderKind, req: AdoptRequest) => post<Machine>(s, `/v1/providers/${k(kind)}/adopt`, req);
 
 /** Newest first; active=true leaves out ended machines. */
 export const machines = async (s: Server, active = false, signal?: AbortSignal) =>
