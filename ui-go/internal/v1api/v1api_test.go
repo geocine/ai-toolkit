@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestFailStatus(t *testing.T) {
@@ -18,6 +19,11 @@ func TestFailStatus(t *testing.T) {
 		CodeImageBlocked:   422,
 		CodeRemoteFailed:   502,
 		"no_such_code":     500,
+
+		CodeProviderAuth:       400,
+		CodeInsufficientCredit: 402,
+		CodeNoCapacity:         409,
+		CodeRateLimited:        429,
 	}
 	for code, want := range cases {
 		rec := httptest.NewRecorder()
@@ -86,5 +92,18 @@ func TestRespondProblem(t *testing.T) {
 	Respond(rec, req, errors.New("boom"))
 	if rec.Code != 500 {
 		t.Fatalf("plain error: %d", rec.Code)
+	}
+}
+
+func TestFailAfter(t *testing.T) {
+	for _, c := range []struct {
+		after time.Duration
+		want  string
+	}{{12 * time.Second, "12"}, {1500 * time.Millisecond, "2"}, {200 * time.Millisecond, "1"}, {0, ""}} {
+		rec := httptest.NewRecorder()
+		FailAfter(rec, CodeRateLimited, "slow down", c.after)
+		if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") != c.want {
+			t.Errorf("after %v: %d Retry-After %q, want %q", c.after, rec.Code, rec.Header().Get("Retry-After"), c.want)
+		}
 	}
 }

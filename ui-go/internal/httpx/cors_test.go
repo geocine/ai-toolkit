@@ -92,3 +92,14 @@ func TestCrossSiteWritesRefused(t *testing.T) {
 		t.Errorf("with a token: %d", got)
 	}
 }
+
+func TestIsOpen(t *testing.T) {
+	t.Setenv("AI_TOOLKIT_AUTH", "")
+	if !IsOpen() {
+		t.Fatal("no token and no keys: open")
+	}
+	t.Setenv("AI_TOOLKIT_AUTH", "secret")
+	if IsOpen() {
+		t.Fatal("a token closes the server")
+	}
+}

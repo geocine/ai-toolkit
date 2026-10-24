@@ -29,6 +29,9 @@ const (
 	JobAttempt    = "job.attempt"
 	UploadState   = "upload.state"
 	DatasetChange = "dataset.changed"
+
+	MachineState   = "machine.state"   // data: provision.Machine
+	MachineDeleted = "machine.deleted" // data: {"id"}
 )
 
 // Event is one entry of the log.
