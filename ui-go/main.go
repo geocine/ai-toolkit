@@ -23,6 +23,7 @@ import (
 	"github.com/geocine/aitoolkit/internal/bootstrap"
 	"github.com/geocine/aitoolkit/internal/events"
 	"github.com/geocine/aitoolkit/internal/httpx"
+	"github.com/geocine/aitoolkit/internal/imagecheck"
 	"github.com/geocine/aitoolkit/internal/lifecycle"
 	"github.com/geocine/aitoolkit/internal/mcpserver"
 	"github.com/geocine/aitoolkit/internal/notify"
@@ -38,6 +39,9 @@ import (
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == worker.RelayArg {
 		os.Exit(worker.RunRelay(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "image-check" {
+		os.Exit(imagecheck.RunCLI(os.Args[2:]))
 	}
 
 	defaultPort := 8675
