@@ -117,7 +117,12 @@ type rawOffer struct {
 		InetDown          float64  `json:"inet_down"`           // Mbps-like; unit UNCONFIRMED, 0 = not reported
 		DiskBW            float64  `json:"disk_bw"`             // unit UNCONFIRMED, 0 = not reported
 	} `json:"_machines"`
+
+	raw map[string]any // the row as listed, for hostfit.FromQuickPod
 }
+
+// host is the row's host facts (driver, CUDA, disk, bandwidth).
+func (r rawOffer) host() hostfit.Host { return hostfit.FromQuickPod(r.raw) }
 
 type rawTemplate struct {
 	UUID          string `json:"template_uuid"`
@@ -309,6 +314,15 @@ func rentable(ctx context.Context) ([]rawOffer, error) {
 	if err := decode(b, &rows, ""); err != nil {
 		return nil, err
 	}
+	var raws []map[string]any
+	if err := decode(b, &raws, ""); err != nil {
+		return nil, err
+	}
+	for i := range rows {
+		if i < len(raws) {
+			rows[i].raw = raws[i]
+		}
+	}
 	return rows, nil
 }
 
@@ -413,10 +427,15 @@ func (adapter) Offers(ctx context.Context, key string, q provision.OfferQuery) (
 		if !keep(r, q, disk, count) {
 			continue
 		}
+		h := r.host()
+		if !provision.KeepOffer(h, q) { // /rentable has no server-side filters
+			continue
+		}
 		o := offerOf(r, disk)
 		if q.MaxPrice > 0 && o.PricePerHour > q.MaxPrice {
 			continue
 		}
+		provision.DecorateOffer(&o, h, q)
 		out = append(out, o)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -458,7 +477,9 @@ func (adapter) Quote(ctx context.Context, key, offerID string, q provision.Offer
 		return provision.Offer{}, provision.Errorf(provision.QuickPod, provision.ClassInvalid, 0,
 			"%d GB of disk is more than this offer's %d GB", disk, r.MaxDiskSize)
 	}
-	return offerOf(rows[i], disk), nil
+	o := offerOf(rows[i], disk)
+	provision.DecorateOffer(&o, rows[i].host(), q)
+	return o, nil
 }
 
 // ---- templates ----

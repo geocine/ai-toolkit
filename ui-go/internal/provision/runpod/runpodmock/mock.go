@@ -142,6 +142,7 @@ type pod struct {
 	env                               map[string]string
 	minCuda                           string
 	allowedCuda                       []string
+	pullFail                          string  // PullFailText at create
 	price                             float64 // $/h while it holds a GPU
 	faults                            mockkit.Faults
 	created                           time.Time
@@ -165,6 +166,12 @@ type caller struct {
 type Mock struct {
 	Rec *mockkit.Recorder
 	URL string // set by Start
+	// PullFailText makes the image pull of pods created from now on fail:
+	// the text goes into the system log stream ("Error response from
+	// daemon: ... <text>") and the pod goes to ERROR once allocated
+	// (IMAGE-PLAN §7.3). "manifest unknown" and "denied" are the two
+	// shapes the service classifies.
+	PullFailText string
 
 	o       mockkit.Options
 	handler http.Handler
@@ -693,7 +700,7 @@ func (m *Mock) createPod(w http.ResponseWriter, r *http.Request) {
 	}
 	p := &pod{id: newPodID(), name: *req.Name, image: req.Image, gpuID: g.ID, cloud: cloud, dc: dc, count: count, disk: disk, seq: m.seq,
 		ports: slices.Clone(req.Ports), env: cloneEnv(req.Env), minCuda: g.MinCudaVersion, allowedCuda: slices.Clone(g.AllowedCudaVersions),
-		price: price, faults: c.faults, created: now, mode: modeCreate, base: now}
+		pullFail: m.PullFailText, price: price, faults: c.faults, created: now, mode: modeCreate, base: now}
 	if p.ports == nil {
 		p.ports = []string{}
 	}
@@ -894,6 +901,10 @@ func logLines(p *pod, st string) []logLine {
 	if st == Provisioning {
 		return out
 	}
+	if p.pullFail != "" {
+		return append(out, logLine{t, "system", "Error response from daemon: pull " + p.image + ": " + p.pullFail},
+			logLine{t, "system", "Container exited with an error"})
+	}
 	out = append(out, logLine{t, "system", "Image pulled"}, logLine{t, "system", "Container started"})
 	if p.startedAt != nil {
 		out = append(out, logLine{*p.startedAt, "container", "aitk server listening on :8675"})
@@ -997,6 +1008,10 @@ func (m *Mock) settle(p *pod, now time.Time) string {
 	case modeCreate:
 		st = []string{Provisioning, Starting, Running}[mockkit.Phase(now, p.base, f.Scale(d.Provision), f.Scale(d.Start))]
 		runAt = p.base.Add(f.Scale(d.Provision) + f.Scale(d.Start))
+		if p.pullFail != "" && st != Provisioning {
+			stopNode(p)
+			return Errored // the pull failed: the container never starts
+		}
 	case modeStart:
 		st = []string{Starting, Running}[mockkit.Phase(now, p.base, f.Scale(d.Start))]
 		runAt = p.base.Add(f.Scale(d.Start))

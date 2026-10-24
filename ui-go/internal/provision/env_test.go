@@ -162,6 +162,13 @@ func TestEnvPassthroughRules(t *testing.T) {
 			t.Errorf("%s refused: %v", k, err)
 		}
 	}
+	// HF_HOME moves the model cache onto a volume (IMAGE-PLAN §3.4, RunPod)
+	const cache = "/workspace/.cache/huggingface"
+	for _, k := range allKinds {
+		if env, _, err := e.build(k, LaunchRequest{Env: map[string]string{"HF_HOME": cache}}); err != nil || env["HF_HOME"] != cache {
+			t.Errorf("%s: HF_HOME refused: %v", k, err)
+		}
+	}
 }
 
 func TestEnvLimits(t *testing.T) {

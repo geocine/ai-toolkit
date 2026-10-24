@@ -106,7 +106,7 @@ func TestOffersMapping(t *testing.T) {
 		t.Fatalf("price %v stopped %v", o.PricePerHour, o.StoppedPricePerHour)
 	}
 	if o.Reliability == nil || *o.Reliability != 0.982958 || o.Location != "US, Indiana, Carmel" ||
-		o.MaxDiskGB == nil || *o.MaxDiskGB != 444 || !o.HTTPS || o.Availability != "available" || o.Host != nil || o.Fit != nil {
+		o.MaxDiskGB == nil || *o.MaxDiskGB != 444 || !o.HTTPS || o.Availability != "available" || o.Host == nil || o.Fit != nil {
 		t.Fatalf("offer fields %+v", o)
 	}
 	if got[1].VRAMGB != 24 || got[1].PricePerHour != 0.195 || got[2].GPU != "RTX A6000" || got[2].VRAMGB != 48 {

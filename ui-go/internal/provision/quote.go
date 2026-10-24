@@ -5,6 +5,8 @@ import (
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/geocine/aitoolkit/internal/v1api"
 )
 
 // cacheTTL is how long an offers list or a quote is reused. Offers and the
@@ -47,6 +49,7 @@ func offersKeyFor(k Kind, fp string, q OfferQuery) offersKey {
 }
 
 // quoteKey: one offer at one disk size and GPU count (PLAN §5 Launch step 6).
+// The host is what is cached; Service.Quote judges each caller's image on it.
 type quoteKey struct {
 	kind     Kind
 	key      string
@@ -141,6 +144,8 @@ func (s *Service) dropOffers(k Kind) {
 }
 
 // Offers lists k's offers, reusing an identical query's answer for 30 s.
+// Each fresh call reads the image once (cached by the image check) and
+// hands the adapter its host filter, so every offer carries host and fit.
 func (s *Service) Offers(ctx context.Context, k Kind, q OfferQuery) ([]Offer, error) {
 	c, key, err := requireKey(ctx, k)
 	if err != nil {
@@ -148,7 +153,7 @@ func (s *Service) Offers(ctx context.Context, k Kind, q OfferQuery) ([]Offer, er
 	}
 	ck := offersKeyFor(k, keyFingerprint(WireKey(key)), q)
 	offers, err := load(ctx, &s.cache.mu, &s.cache.offers, &s.cache.offersFly, ck, s.now, func(ctx context.Context) ([]Offer, error) {
-		o, err := c.Offers(ctx, WireKey(key), q)
+		o, err := c.Offers(ctx, WireKey(key), withImageFilter(ctx, q))
 		s.noteRetry(k, err)
 		if o == nil && err == nil {
 			o = []Offer{}
@@ -161,13 +166,22 @@ func (s *Service) Offers(ctx context.Context, k Kind, q OfferQuery) ([]Offer, er
 	return slices.Clone(offers), nil
 }
 
-// Quote re-reads one offer through the 30 s quote cache.
+// Quote re-reads one offer through the 30 s quote cache, with its host
+// and fit for q.Image.
 func (s *Service) Quote(ctx context.Context, k Kind, offerID string, q OfferQuery) (Offer, error) {
 	c, key, err := requireKey(ctx, k)
 	if err != nil {
 		return Offer{}, err
 	}
-	return s.quote(ctx, c, key, offerID, q)
+	if q.Filter == nil {
+		q = withImageFilter(ctx, q)
+	}
+	o, err := s.quote(ctx, c, key, offerID, q)
+	if err == nil && o.Host != nil {
+		// the cache is keyed on the host only: judge this caller's image and model
+		DecorateOffer(&o, *o.Host, q)
+	}
+	return o, err
 }
 
 func (s *Service) quote(ctx context.Context, c Cloud, key, offerID string, q OfferQuery) (Offer, error) {
@@ -182,8 +196,22 @@ func (s *Service) quote(ctx context.Context, c Cloud, key, offerID string, q Off
 }
 
 // priceRose is the 409 a launch gets when the offer now costs more than the
-// caller agreed to.
+// caller agreed to; details.price_per_hour is the new price.
 func priceRose(k Kind, price, limit float64) error {
-	return Errorf(k, ClassConflict, 0,
-		"The price is now $%.2f/h, above your limit of $%.2f/h. Check the offer and try again.", price, limit)
+	return &priceRoseError{err: Errorf(k, ClassConflict, 0,
+		"The price is now $%.2f/h, above your limit of $%.2f/h. Check the offer and try again.", price, limit), price: price}
+}
+
+// priceRoseError is the adapter-shaped conflict plus the new price.
+type priceRoseError struct {
+	err   *Error
+	price float64
+}
+
+func (e *priceRoseError) Error() string { return e.err.Error() }
+func (e *priceRoseError) Unwrap() error { return e.err }
+
+// V1Details is the 409 body with the new price (v1machines.DetailedError).
+func (e *priceRoseError) V1Details() (code, message string, details any) {
+	return v1api.CodeConflict, e.err.Message, map[string]any{"price_per_hour": e.price}
 }

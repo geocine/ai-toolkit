@@ -148,7 +148,7 @@ func TestOffersBodyAndMapping(t *testing.T) {
 	if o.GPU != "RTX 4090" || o.GPUCount != 1 || o.VRAMGB != 24 || !near(o.PricePerHour, 0.44+0.2*100/720) ||
 		o.StoppedPricePerHour == nil || !near(*o.StoppedPricePerHour, 0.2*100/720) || o.Location != "Türkiye, TR" ||
 		o.Reliability == nil || !near(*o.Reliability, 0.8812925) || o.MaxDiskGB == nil || *o.MaxDiskGB != 638 ||
-		o.Availability != "available" || o.HTTPS || o.Provider != provision.Vast || o.Host != nil || o.Fit != nil {
+		o.Availability != "available" || o.HTTPS || o.Provider != provision.Vast || o.Host == nil || o.Fit != nil {
 		t.Fatalf("offer %+v", o)
 	}
 	for i := 1; i < len(offers); i++ {

@@ -34,6 +34,27 @@ import (
 //go:embed testdata/bundles.json
 var bundlesJSON []byte
 
+// liveJSON is the image-filter fixture (IMAGE-PLAN §7.3): the 61 offers of a
+// live keyless search (scratchpad provision/vast_offers.json, IPs scrubbed
+// to 203.0.113.x, made rentable and verified) plus synthetic rows 91000001
+// to 91000007: driver_vers null on a CUDA 13.3 host, a stale driver_vers, a
+// V100 with cuda_max_good 13.0, a compute_cap 243 junk row, an arm64 GH200,
+// a 30 GB disk and a 73 Mbps host.
+//
+//go:embed testdata/bundles_live.json
+var liveJSON []byte
+
+// LiveOffers are the rows of the image-filter fixture, for AddOffers.
+func LiveOffers() []map[string]any {
+	var fx struct {
+		Offers []map[string]any `json:"offers"`
+	}
+	if err := json.Unmarshal(liveJSON, &fx); err != nil {
+		panic("vastmock: bad live fixture: " + err.Error())
+	}
+	return fx.Offers
+}
+
 const (
 	userID        = 123456
 	keylessCap    = 64  // keyless searches return at most 64 rows (IMG §0.2)
@@ -137,6 +158,15 @@ func New(o mockkit.Options) *Mock {
 		},
 	}
 	return m
+}
+
+// AddOffers lists more offer rows (LiveOffers) after the fixture's.
+func (m *Mock) AddOffers(rows ...map[string]any) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, r := range rows {
+		m.offers = append(m.offers, maps.Clone(r))
+	}
 }
 
 // Handler serves the mock API (recorded).
@@ -342,6 +372,14 @@ func (m *Mock) bundles(w http.ResponseWriter, r *http.Request, keyless bool) {
 	if err != nil || q == nil {
 		fail(w, http.StatusBadRequest, "invalid_request", "Invalid json body")
 		return
+	}
+	// A tripwire: driver_vers and driver_version are null or stale on many
+	// hosts, so a search that filters on them drops good hosts (IMG §3.4).
+	for _, k := range []string{"driver_vers", "driver_version"} {
+		if _, has := q[k]; has {
+			fail(w, http.StatusBadRequest, "invalid_request", "vastmock: never filter on "+k)
+			return
+		}
 	}
 	if t, has := q["type"]; has {
 		if s, _ := t.(string); !slices.Contains(searchTypes, s) {
