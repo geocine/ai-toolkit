@@ -46,6 +46,124 @@ Disks can be ephemeral: training state lives on the remote. Mount
 `/root/.cache/huggingface` only to keep base models across restarts on the
 same machine.
 
+## The image
+
+`ghcr.io/geocine/aitoolkit-go` is a **public** GHCR package, so hosts pull it
+without a login. There is one flavor, `cu130`: linux/amd64 only, on
+`nvidia/cuda:13.0.3-runtime-ubuntu24.04` with torch `2.13.0+cu130`, about
+6.5 GB to download and 13.7 GB unpacked.
+
+While the package is missing or private, the studio says "The server image
+ghcr.io/geocine/aitoolkit-go isn't published yet, or it's still private." and
+GPU servers cannot start it. Offers and the suggested GPU still work: hosts
+are judged against the image's built-in requirements (the ones below).
+
+**Tags**
+| Tag | Moves | Use |
+|---|---|---|
+| `:<sha>` | never | One build: the short commit (`git rev-parse --short HEAD`), the same value as `version` in `/v1/health`. GPU servers created from the studio run this tag. |
+| `:latest` | every build | The newest build. Fine for `docker run`. A launch from the studio resolves it to its `:<sha>` first, because RunPod caches `:latest`. |
+| `:cu130` | every build | The newest build of the cu130 flavor: the same as `latest` today, and the slot a second flavor would sit beside. |
+| `:<version>` (`0.13.34`) | every build | Upstream's `version.py`, as a friendly name. Every fork build on that version overwrites it. |
+| `:<yymmddHHMM>` | never | The build time, kept for older scripts. |
+
+A hand-made template can pin `:<sha>` to stay on one build. A `:<sha>` is
+never moved: `build_and_push.sh --push` refuses to push one that already
+exists with a different image unless `ALLOW_RETAG=1`.
+
+**Labels.** The Go layer says what hosts the image runs on. Every value is
+read from the freshly built base, never typed by hand. The image check reads
+the labels first. An image without them (an older tag, `ostris/aitoolkit`,
+your own build) is judged from its `NVIDIA_REQUIRE_CUDA` env and a built-in
+table instead.
+| Label (`io.github.geocine.aitk.`) | Example | Meaning |
+|---|---|---|
+| `server` | `go` | Runs the Go server the studio talks to: only such an image can be launched from the studio. |
+| `api` | `1` | The `/v1` major version. Another value is a warning. |
+| `revision`, `upstream` | `f53a407`, `c22f21fa958a` | The build (its `:<sha>` tag) and the upstream commit of the base. |
+| `flavor`, `torch` | `cu130`, `2.13.0+cu130` | torch's CUDA build. |
+| `cuda` | `13.0` | The CUDA floor, from the base's `NVIDIA_REQUIRE_CUDA`. Hosts are gated on this. |
+| `driver_min` | `580` | The driver branch for that CUDA, for display. |
+| `sm`, `ptx` | `75,80,86,90,100,120`, empty | GPU architectures torch has kernels (and PTX) for. |
+| `sm.flash_attn` | `80,90,100,120` | The architectures flash-attn has kernels for. |
+| `platform`, `port`, `health` | `linux/amd64`, `8675`, `/v1/health` | |
+| `size.base_unpacked` | `13689223168` | The base's unpacked bytes, for the disk need. |
+| `schema` | `1` | Bumped when a label changes meaning. |
+
+The standard `org.opencontainers.image.*` labels are set too: `title`,
+`version` (upstream's version, replacing Ubuntu's `24.04` inherited from the
+base), `revision` (the full commit), `created` (the commit time in UTC),
+`source` (links the package to `github.com/geocine/ai-toolkit`) and
+`base.name`. Read them with
+`docker image inspect -f '{{json .Config.Labels}}' ghcr.io/geocine/aitoolkit-go:<sha>`,
+or without pulling with `aitk-server image-check` (below).
+
+**Host requirements** (the cu130 build). The server checks these before it
+rents a host and again at launch (docs/headless.md, "Images and hosts").
+| | Needs | Otherwise |
+|---|---|---|
+| CPU | amd64 | arm64 hosts (GH200, GB10) are blocked. |
+| GPU vendor | NVIDIA | AMD (MI300X) is blocked: there is no ROCm build. |
+| GPU | sm_80 or newer: A100, A30, RTX 30-series, RTX A2000-A6000, A10, A40, RTX 40-series, L4, L40, L40S, RTX Ada cards, H100, H200, B200, B300, RTX 50-series, RTX PRO Blackwell | sm_75 (T4, RTX 20-series, GTX 16-series) runs torch but not flash attention and has no native bf16: hidden from offers, a warning when shown. sm_70 and older (V100, Titan V, P100, GTX 10-series) have no kernels and are blocked. The B300 runs the sm_100 kernels and is not yet tested. |
+| Driver | CUDA 13.0 or newer: driver branch 580 or newer | Blocked on every GPU, data-center cards too: the image ships CUDA's forward-compatibility libraries, but they are not verified with it. A driver that cannot be read is a warning. On RunPod, RunPod itself places the pod on a CUDA 13.0 host. |
+| Disk | 22 GB just for the image (6.5 GB download + 13.7 GB unpacked + 2 GB) | Blocked below that. The disk a launch asks for is (image + model + 15 GB for checkpoints and caches) × 1.1, rounded up to 10 GB, at least 40 GB, and 100 GB when the model is not known (FLUX.1-dev: 80 GB). Less is a warning. |
+| Download | nothing | The pull time is estimated from the host's reported speed: about 3 minutes at 1376 Mbps, 25 at 73 Mbps. Over 10 minutes is a warning. |
+
+After a launch, what a pre-check cannot see is checked on the machine: a
+pull far slower than predicted (3× the estimate, at least 15 minutes) is
+`pull_slow`; a failed pull is classified from the provider's text (tag
+missing, private, wrong platform, disk full, driver too old) as
+`image_pull_failed`; a ready server whose `version` is not the build asked
+for gets a warning (the host had an older copy cached); and the server's
+CUDA self-check runs one tiny kernel on every GPU (`cuda_failed` when it
+cannot).
+
+### Building and publishing
+
+```bash
+ui-go/scripts/build_and_push.sh            # upstream's base, then the Go layer with its labels
+ui-go/scripts/build_and_push.sh --push     # push <sha>, <timestamp>, <version>, cu130, latest; then verify <sha>
+ui-go/scripts/build_and_push.sh --verify   # verify the pushed <sha> of HEAD again, without building
+bash ui-go/scripts/testdata/build_and_push_test.sh   # the script's own tests: fake docker, offline
+```
+
+Both builds are linux/amd64. The script probes the base once (torch, its
+CUDA and kernel targets, flash-attn) and fails when the base does not look
+as the labels expect: no CUDA build of torch, no kernel list, or a CUDA or
+flash-attn version it has no table entry for. `IMAGE`, `UPSTREAM_REF`,
+`REBUILD_BASE=1`, `BASE_INSTALLER=uv` and `ALLOW_RETAG=1` adjust it (header
+of the script).
+
+Publishing the first time:
+1. On an amd64 machine with Docker (and buildx, for the `:<sha>` guard), run
+   `build_and_push.sh --push`. GHCR creates the package **private**, so the
+   verify step fails with "denied" and the settings URL.
+2. Open `https://github.com/users/geocine/packages/container/aitoolkit-go/settings`
+   and set the visibility to Public.
+3. Run `build_and_push.sh --verify`. It runs `image-check --require-go`
+   inside the pushed image and must exit 0.
+
+Push again whenever the server changes. A GPU server created from the
+studio runs the controller's own build when that `:<sha>` is published, and
+the newest build otherwise (it then says so).
+
+### Checking an image
+
+```bash
+aitk-server image-check [--require-go] [--platform linux/amd64] [--host-json host.json] [--json] <image>
+docker run --rm --entrypoint /app/ai-toolkit/ui-go/aitk-server ghcr.io/geocine/aitoolkit-go:<sha> \
+  image-check --require-go ghcr.io/geocine/aitoolkit-go:<sha>
+```
+
+It reads the image's manifest, config and labels from the registry (an
+anonymous pull, no layers downloaded) and prints what the image needs and
+every check. `--host-json` also checks it against a host (`HostFacts`,
+docs/headless.md), `--require-go` blocks when the `sm` label is missing, and
+`go run . image-check ...` works from `ui-go/`. Exit 0 when nothing blocks,
+1 on a block or an error, 2 when anonymous pulls are denied (private or
+missing). Only GHCR and Docker Hub are read; other registries are never
+contacted.
+
 ## Environment
 
 **Access**
@@ -114,6 +232,8 @@ same machine.
 | `AITK_PROVISION_READY_TIMEOUT` (`20m`) | When a machine that never answered is marked failed. It is not terminated and still bills. |
 | `AITK_PROVISION_SIMULATE` (`0`) | `1` answers every provider from in-process mocks: no credits, no provider calls. Local testing only. |
 | `AITK_PROVISION_SIMULATE_DELAY` (`15s`) | How long a simulated machine takes to come up. |
+| `AITK_PROVISION_SIMULATE_REGISTRY` (unset) | `real` keeps simulate's mock providers but checks images against the real public registries and sizes models from Hugging Face (anonymous reads), instead of the in-process mocks. |
+| `AITK_IMAGECHECK_ALLOW_LOOPBACK_PROXY` (`0`) | `1` lets the image check go through an `HTTPS_PROXY` or `HTTP_PROXY` on this machine. It otherwise dials public addresses only. |
 
 **Server** (rarely needed)
 `PORT` (8675), `AI_TOOLKIT_UI_DIR` (frontend dir), `MODELS_PATH`,

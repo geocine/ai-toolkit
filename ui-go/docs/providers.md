@@ -206,6 +206,45 @@ Docker options:
 URL: `https://<pod id>-8675.proxy.quickpod.io/`
 <!-- /guide:quickpod -->
 
+## Which hosts are listed
+
+*Create a GPU server* lists only hosts that can run the image you launch:
+an NVIDIA amd64 GPU from the RTX 30-series and A100 on, a driver for CUDA
+13.0 or newer, and enough disk (docs/deploy.md, "The image"). Each provider
+filters as far as its API allows, and the controller does the rest, so every
+offer carries the same `fit` whichever provider it comes from:
+
+| Provider | The provider filters | The controller filters |
+|---|---|---|
+| RunPod | The pod is created with `gpu.minCudaVersion` `13.0`, so RunPod places it only on a host whose driver runs the image. | GPU types the image cannot run are left out of the catalog. A GPU with no free CUDA 13.0 host right now is a warning. RunPod reports no download or disk speed. |
+| Vast.ai | The search sends `gpu_arch`, `cpu_arch`, `cuda_max_good >= 13.0`, `compute_cap` (the GPU architectures the image runs), `disk_space` (the disk need), plus `gpu_ram` when a model is chosen and `inet_down` and `disk_bw` for fast hosts. Never `driver_vers`: it is empty or stale on many hosts. | The GPU name, and the same checks again on each row. |
+| QuickPod | Nothing: `/rentable` takes no filters. | Everything: amd64, NVIDIA, a GPU the image runs, `max_cuda` (or the driver version) at least 13.0, and `max_disk_size` at least the disk need. A host whose CUDA version is unknown stays, with a warning. |
+
+The filters above the list:
+- **What will you train?** (`model`) sets the VRAM floor (the smallest size
+  the model fits, such as 24 GB for FLUX.1 with 8-bit), a VRAM badge on each
+  offer, and the disk need.
+- **Fast hosts only** (`fast`) keeps hosts with at least 500 Mbps download
+  and 300 MB/s disk. A host that reports no speed passes. At 500 Mbps the
+  image takes about 5 minutes to download and unpack, at 73 Mbps about 25.
+- **Show all hosts** (`show_all`) also lists the hosts the image cannot run,
+  marked *Won't run here* and not selectable, and the sm_75 GPUs (T4, RTX
+  20-series), which run without flash attention, with a warning.
+
+Each offer shows its fit as a dot and one line ("Driver too old (CUDA
+12.8)", "≈ 3 min to pull"), and the disk defaults to the disk need. The Image
+row under Configure says which build the server will run: the controller's
+own build when it is published, else the newest, pinned to its `:<sha>` tag.
+On QuickPod it checks the template's image instead. A launch repeats every
+check and is refused (`image_blocked`) before any provider call when the
+host cannot run the image.
+
+The suggested GPU (*Best value*, *Best speed*) comes from the smallest VRAM
+tier the model fits (24, 32, 48, 80 GB and up), among one-GPU offers with a
+CUDA 13.0 driver, a supported GPU, enough disk, at least 500 Mbps and
+300 MB/s where reported, and reliability of 95 % or more:
+[docs/headless.md, "GPU recommendation"](headless.md#gpu-recommendation).
+
 ## Money guards
 
 - Every launch names a ceiling, `max_price_per_hour` (the studio sends the
