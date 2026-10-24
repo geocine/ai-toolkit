@@ -10,5 +10,6 @@ func init() {
 		op{"POST", "/v1/datasets/{name}/photos/fix", "datasets", "Photo fixes (set aside, restore, keep the best N, convert, ...); preview unless apply, 409 while a training or caption job uses the dataset", nil, "object", 200, "object"},
 		op{"PUT", "/v1/datasets/{name}/photos/settings", "datasets", "Subject kind, the reference photo and per-photo decisions; returns the new review", nil, "object", 200, "object"},
 		op{"DELETE", "/v1/datasets/{name}/photos/analysis", "datasets", "Forget the dataset's photo analysis (the photos stay)", nil, "", 204, ""},
+		op{"POST", "/v1/datasets/{name}/photos/faces", "datasets", "Check faces: queues a photo_faces job on the cpu queue (body {text?}); 409 while one runs for the dataset", nil, "object", 201, "Job"},
 	)
 }
