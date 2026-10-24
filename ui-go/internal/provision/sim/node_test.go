@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/geocine/aitoolkit/internal/imagecheck/registrymock"
 	"github.com/geocine/aitoolkit/internal/links"
 	"github.com/geocine/aitoolkit/internal/provision/mockkit"
 	"github.com/geocine/aitoolkit/internal/state"
@@ -272,5 +273,101 @@ func TestNodeStopClosesListener(t *testing.T) {
 	stop() // idempotent
 	if _, err := http.Get(base + "/v1/health"); err == nil {
 		t.Fatal("the node still answers after stop")
+	}
+}
+
+type nodeCudaCheck struct {
+	OK       bool     `json:"ok"`
+	Torch    string   `json:"torch"`
+	ArchList []string `json:"arch_list"`
+	Devices  []struct {
+		Index      int    `json:"index"`
+		Name       string `json:"name"`
+		Capability string `json:"capability"`
+		Driver     string `json:"driver"`
+	} `json:"devices"`
+	Error   *string `json:"error"`
+	Failure *string `json:"failure"`
+}
+
+// The node answers GET /v1/system/cuda itself (inner would run this host's
+// Python), behind its token, with one device per GPU and the failure the
+// fault asks for.
+func TestNodeCUDA(t *testing.T) {
+	auth := map[string]string{"Authorization": "Bearer " + nodeToken}
+	for _, tc := range []struct {
+		fault, failure, msg, driver string
+	}{
+		{mockkit.CUDAOK, "", "", "580.95.05"},
+		{mockkit.CUDANoKernel, "no_kernel_image", "no kernel image is available", "580.95.05"},
+		{mockkit.CUDAOldDriver, "driver_too_old", "driver on your system is too old", "535.104.05"},
+	} {
+		s := spec(map[string]string{"AI_TOOLKIT_AUTH": nodeToken})
+		s.GPUCount = 2
+		s = s.WithFaults(mockkit.Faults{CUDA: tc.fault})
+		base := startNode(t, mockkit.RealClock{}, s)
+		if res, _ := get(t, base+"/v1/system/cuda", nil); res.StatusCode != 401 {
+			t.Fatalf("%q: no token: %d", tc.fault, res.StatusCode)
+		}
+		res, body := get(t, base+"/v1/system/cuda?refresh=1", auth)
+		var c nodeCudaCheck
+		if res.StatusCode != 200 || json.Unmarshal([]byte(body), &c) != nil {
+			t.Fatalf("%q: %d %s", tc.fault, res.StatusCode, body)
+		}
+		if c.OK != (tc.fault == mockkit.CUDAOK) || c.Torch == "" || len(c.ArchList) == 0 || len(c.Devices) != 2 {
+			t.Fatalf("%q: %s", tc.fault, body)
+		}
+		for i, d := range c.Devices {
+			if d.Index != i || d.Name != "RTX 4090" || d.Capability != "8.9" || d.Driver != tc.driver {
+				t.Fatalf("%q: device %d %+v", tc.fault, i, d)
+			}
+		}
+		if tc.failure == "" {
+			if c.Failure != nil || c.Error != nil {
+				t.Fatalf("ok node: %s", body)
+			}
+			continue
+		}
+		if c.Failure == nil || *c.Failure != tc.failure || c.Error == nil || !strings.Contains(*c.Error, tc.msg) {
+			t.Fatalf("%q: %s", tc.fault, body)
+		}
+	}
+	// not while the app is still starting
+	clock := mockkit.NewFakeClock(time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC))
+	s := spec(map[string]string{"AI_TOOLKIT_AUTH": nodeToken})
+	s.AppDelay = time.Second
+	if res, _ := get(t, startNode(t, clock, s)+"/v1/system/cuda", auth); res.StatusCode != 503 {
+		t.Fatalf("during AppDelay: %d", res.StatusCode)
+	}
+}
+
+// /v1/health reports the build the launch ref names, the simulated
+// registry's build for a moving tag or a digest, and an older one with
+// Faults.StaleImage; the rest of inner's answer is kept.
+func TestNodeHealthVersion(t *testing.T) {
+	for _, tc := range []struct {
+		image string
+		stale bool
+		want  string
+	}{
+		{"", false, "test"}, // no launch ref: inner's own version
+		{"ghcr.io/geocine/aitoolkit-go:f53a407", false, "f53a407"},
+		{"ghcr.io/geocine/aitoolkit-go:c126c12", false, "c126c12"},
+		{"ghcr.io/geocine/aitoolkit-go:latest", false, registrymock.Revision},
+		{"ghcr.io/geocine/aitoolkit-go@sha256:" + strings.Repeat("ab", 32), false, registrymock.Revision},
+		{"ghcr.io/geocine/aitoolkit-go:f53a407", true, StaleVersion},
+		{"", true, StaleVersion},
+	} {
+		s := spec(map[string]string{"AI_TOOLKIT_AUTH": nodeToken})
+		s.Image = tc.image
+		s = s.WithFaults(mockkit.Faults{StaleImage: tc.stale})
+		res, body := get(t, startNode(t, mockkit.RealClock{}, s)+"/v1/health", nil)
+		var h map[string]any
+		if res.StatusCode != 200 || json.Unmarshal([]byte(body), &h) != nil || h["version"] != tc.want || h["ok"] != true {
+			t.Fatalf("%q stale=%v: %d %s, want version %q", tc.image, tc.stale, res.StatusCode, body, tc.want)
+		}
+	}
+	if StaleVersion == registrymock.Revision {
+		t.Fatal("StaleVersion must differ from the published build")
 	}
 }
