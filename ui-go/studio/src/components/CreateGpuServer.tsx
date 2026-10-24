@@ -3,12 +3,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, get, type Items, type Remote, type Server, type Settings } from '../lib/api';
 import type { NotifyConfig } from '../lib/lifecycle';
 import { perHour, providerNames } from '../lib/machines';
-import { launch, offers as listOffers, providers, removeKey, setKey, templates as listTemplates, testKey } from '../lib/provision';
-import type { Machine, Offer, OfferQuery, Provider, ProviderKind, ProviderTemplate, WhenDone } from '../lib/provisionTypes';
+import { launch, offers as listOffers, providers, recommend, recommendAll, removeKey, setKey, templates as listTemplates, testKey } from '../lib/provision';
+import type { GpuRecommendation, Machine, Offer, OfferQuery, Provider, ProviderKind, ProviderTemplate, RecommendQuery, WhenDone } from '../lib/provisionTypes';
 import { archName, checkImage, DEFAULT_IMAGE, gb, imageTag, minutes, modelArchs, recommendImage, type ImageCheckRequest, type ImageRecommendRequest } from '../lib/serverImage';
 import type { CheckAction, ImageCheck, ImageCheckItem, ImageRecommendation, ImageRequirements } from '../lib/serverImageTypes';
 import { Dialog } from './Dialog';
 import { FitBadge, VramBadge } from './FitBadge';
+import { GpuPicks, pickBadge, pickLine } from './GpuPicks';
 import { ImageDialog } from './ImageDialog';
 import { CheckList, diskBreakdown, diskParts, ImageRow, imageName } from './ImageRow';
 import { Callout, Empty, ErrorNote, useLoad } from './ui';
@@ -246,8 +247,12 @@ function CreateForm({
   // template's, the picked one, or what images.recommend picks with no host
   // (this server's build when it is published, else latest). The row's own
   // recommend follows the chosen offer, so it cannot feed the offers query.
+  // It also settles the image for the cross-provider line, so that line asks
+  // once with the image, not first without it, on QuickPod too.
+  const configuredKinds = list.filter(x => x.configured).map(x => x.kind);
+  const wantCross = configuredKinds.length >= 2;
   const [baseRec, setBaseRec] = useState<Answer<ImageRecommendation> | null>(null);
-  const wantBase = !!p && configured && !fromTemplate;
+  const wantBase = (!!p && configured && !fromTemplate) || wantCross;
   useEffect(() => {
     if (!wantBase || baseRec?.key === s.id) return;
     let live = true;
@@ -308,11 +313,110 @@ function CreateForm({
     }, 400);
     return () => clearTimeout(t);
   }, [s.id, p?.kind, configured, qKey, offersSettled, refresh]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // GPU picks (MASTER §5.1.5): the recommender's best value and best speed,
+  // judged against the same image as the offers, with the model and the Disk
+  // and Cloud filters, not the search text or Min VRAM. They are for one GPU,
+  // so a count above 1 leaves them out.
+  const [userChose, setUserChose] = useState(false); // once set, refreshes never move the selection
+  const wantPicks = !!p && configured && offersSettled && (!caps?.count_choice || count === 1);
+  const pickQ: RecommendQuery = {
+    model: arch || undefined,
+    image: offersImage || undefined,
+    disk_gb: diskOk ? diskGb : undefined,
+    cloud: caps?.cloud_choice ? cloud : undefined,
+  };
+  const pickKey = JSON.stringify([s.id, p?.kind, pickQ]);
+  const [picks, setPicks] = useState<(Answer<GpuRecommendation> & { kind: ProviderKind }) | null>(null);
+  const pickSeq = useRef(0);
   useEffect(() => {
-    setOfferId(null);
-    setOfferList(null); // another provider's offers never show under this one
-  }, [p?.kind]);
-  const offer = offerList?.find(o => o.id === offerId) ?? null;
+    if (!wantPicks || !p) return;
+    const n = ++pickSeq.current;
+    const k = p.kind;
+    const t = setTimeout(() => {
+      recommend(s, k, pickQ).then(
+        data => n === pickSeq.current && setPicks({ key: pickKey, kind: k, data, error: null }),
+        error => n === pickSeq.current && setPicks({ key: pickKey, kind: k, data: null, error }),
+      );
+    }, 400);
+    return () => clearTimeout(t);
+  }, [pickKey, wantPicks, refresh]); // eslint-disable-line react-hooks/exhaustive-deps
+  const picksNow = picks?.key === pickKey ? picks : null;
+  // while new picks load, the last ones for this provider stay on screen
+  const picksShown = !wantPicks ? null : (picksNow ?? (picks?.kind === p?.kind ? picks : null));
+  const gpuRec = picksShown?.data ?? null;
+
+  // Best value across every configured provider, for the Provider step
+  const crossSettled = picked != null || !!baseNow;
+  const crossQ: RecommendQuery = {
+    model: arch || undefined,
+    // the Image row's image off QuickPod (a template's image is for QuickPod only)
+    image: (picked ?? baseNow?.data?.choice?.image) || undefined,
+    disk_gb: diskOk ? diskGb : undefined,
+    cloud: cloud === 'community' ? cloud : undefined,
+  };
+  const crossKey = JSON.stringify([s.id, configuredKinds, crossQ]);
+  const [cross, setCross] = useState<Answer<GpuRecommendation> | null>(null);
+  const crossSeq = useRef(0);
+  useEffect(() => {
+    if (!wantCross || !crossSettled) return;
+    const n = ++crossSeq.current;
+    const t = setTimeout(() => {
+      recommendAll(s, crossQ).then(
+        data => n === crossSeq.current && setCross({ key: crossKey, data, error: null }),
+        // a quiet line: an error leaves it out
+        error => n === crossSeq.current && setCross({ key: crossKey, data: null, error }),
+      );
+    }, 400);
+    return () => clearTimeout(t);
+  }, [crossKey, wantCross, crossSettled]); // eslint-disable-line react-hooks/exhaustive-deps
+  const crossValue = wantCross && cross?.key === crossKey ? (cross.data?.value ?? null) : null;
+  // the offer Use it chose; it may be in neither the list nor the provider's picks
+  const [crossChosen, setCrossChosen] = useState<Offer | null>(null);
+  const pendingCross = useRef<Offer | null>(null);
+  const takeCross = (o: Offer) => {
+    setCount(1); // the picks are for one GPU
+    if (o.provider === p?.kind) {
+      setOfferId(o.id);
+      setUserChose(true);
+      setCrossChosen(o);
+      return;
+    }
+    pendingCross.current = o;
+    setKind(o.provider);
+  };
+
+  // One effect, so the provider reset always runs before the preselection: a
+  // provider whose picks are already settled (back from a provider with no
+  // key, or within the debounce) still gets its value pick selected.
+  const shownKind = useRef<ProviderKind | null | undefined>(undefined);
+  useEffect(() => {
+    let chose = userChose;
+    if (shownKind.current !== p?.kind) {
+      shownKind.current = p?.kind;
+      // a new provider starts from its own default pick, unless Use it switched to it
+      const o = pendingCross.current?.provider === p?.kind ? pendingCross.current : null;
+      pendingCross.current = null;
+      setOfferId(o?.id ?? null);
+      setUserChose(!!o);
+      setCrossChosen(o);
+      setOfferList(null); // another provider's offers never show under this one
+      chose = !!o;
+    }
+    // the default is the value pick of each settled answer, and none when it has none
+    if (!chose && picksNow) setOfferId(picksNow.data?.value?.offer.id ?? null);
+  }, [p?.kind, picksNow, userChose]);
+  const chooseOffer = (id: string) => {
+    setOfferId(id);
+    setUserChose(true);
+  };
+  // the picks' offers (the Pick carries each whole) beside the list, so a
+  // selected pick outside the visible list is pinned first instead of lost
+  const extra = [gpuRec?.value?.offer, gpuRec?.speed?.offer, crossChosen].filter(
+    (o): o is Offer => !!o && o.provider === p?.kind && (!caps?.count_choice || count === 1),
+  );
+  const offer = offerList?.find(o => o.id === offerId) ?? extra.find(o => o.id === offerId) ?? null;
+  const pinned = offer && !offerList?.some(o => o.id === offer.id) ? offer : null;
   // a 409's new quote; it holds while the list (cached 30 s) still shows the price it replaced
   const [requote, setRequote] = useState<{ id: string; was: number; price: number } | null>(null);
   const offerPrice = !offer ? 0 : requote?.id === offer.id && requote.was === offer.price_per_hour ? requote.price : offer.price_per_hour;
@@ -486,6 +590,7 @@ function CreateForm({
         break;
       case 'pick_gpu':
         setOfferId(null);
+        setUserChose(true);
         offersAnchor.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         break;
       case 'edit_template':
@@ -531,6 +636,7 @@ function CreateForm({
       if (code === 'no_capacity') {
         setProblem({ text: 'That offer was just taken. Pick another.' });
         setOfferId(null);
+        setUserChose(true); // the picks may still name it until the cache turns
         setRefresh(r => r + 1);
       } else if (code === 'conflict' && msg.includes('$')) {
         // the price moved: the button and the cap take the new quote
@@ -622,6 +728,16 @@ function CreateForm({
                   </button>
                 ))}
               </div>
+              {crossValue && (
+                <p className="pick-cross">
+                  <span>Best value across your providers: {pickLine(crossValue.offer)}</span>
+                  {!(crossValue.offer.provider === kind && crossValue.offer.id === offerId) && (
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => takeCross(crossValue.offer)}>
+                      Use it
+                    </button>
+                  )}
+                </p>
+              )}
               {p.unconfirmed.length > 0 && (
                 <details className="create-unverified">
                   <summary>What is not verified</summary>
@@ -741,6 +857,13 @@ function CreateForm({
               )}
             </div>
             <div ref={offersAnchor} className="offer-block">
+              <GpuPicks
+                rec={gpuRec}
+                loading={wantPicks && !picksNow}
+                error={picksShown?.error ?? null}
+                selectedOfferId={offer?.id ?? null}
+                onPick={o => chooseOffer(o.id)}
+              />
               <OfferHeader
                 offers={offerList}
                 showAll={showAll}
@@ -753,9 +876,11 @@ function CreateForm({
                 offers={offerList}
                 loading={offersLoading && !offerList}
                 error={offerError}
-                selected={offerId}
-                onSelect={setOfferId}
+                selected={offer?.id ?? null}
+                onSelect={chooseOffer}
                 model={arch ? archName(arch) : ''}
+                pinned={pinned}
+                badge={id => pickBadge(gpuRec, id)}
               />
             </div>
 
@@ -1044,6 +1169,8 @@ function OfferList({
   selected,
   onSelect,
   model,
+  pinned,
+  badge,
 }: {
   kind: ProviderKind;
   offers: Offer[] | null;
@@ -1053,9 +1180,13 @@ function OfferList({
   onSelect: (id: string) => void;
   /** The display name of the model being trained, '' when not chosen. */
   model: string;
+  /** A selected pick the list does not show (its filters differ): it goes first. */
+  pinned: Offer | null;
+  /** The pick an offer stands for ("Recommended", "Best speed"), or ''. */
+  badge: (id: string) => string;
 }) {
-  if (error) return <ErrorNote error={error} />;
-  if (loading || !offers)
+  if (error && !pinned) return <ErrorNote error={error} />;
+  if ((loading || !offers) && !pinned)
     return (
       <div className="offer-list" aria-busy="true">
         {[0, 1, 2].map(i => (
@@ -1063,53 +1194,60 @@ function OfferList({
         ))}
       </div>
     );
-  if (!offers.length) return <p className="quiet-note offer-empty">No offers match. Loosen the filters.</p>;
+  const rest = loading || error ? [] : (offers ?? []);
+  if (!rest.length && !pinned) return <p className="quiet-note offer-empty">No offers match. Loosen the filters.</p>;
   return (
-    <div className="offer-list" role="radiogroup" aria-label="Offers">
-      {offers.map(o => {
-        const on = o.id === selected;
-        const fit = o.fit;
-        const blocked = fit?.level === 'block';
-        const facts = [
-          fit?.pull_min != null ? `≈ ${minutes(fit.pull_min)} to download` : '',
-          model && fit && vramLine[fit.vram] ? vramLine[fit.vram](model) : '',
-          o.location || (kind === 'runpod' ? `${providerNames.runpod} picks the data center` : ''),
-          o.reliability != null ? `${Math.round(o.reliability * 100)}% reliable` : '',
-          availability[o.availability] ?? '',
-          o.https ? 'https' : 'plain http',
-        ].filter(Boolean);
-        return (
-          <button
-            key={o.id}
-            type="button"
-            role="radio"
-            aria-checked={on}
-            aria-disabled={blocked || undefined}
-            disabled={blocked}
-            title={blocked ? fit?.summary : undefined}
-            className={on ? 'offer is-selected' : blocked ? 'offer is-blocked' : 'offer'}
-            onClick={() => !blocked && onSelect(o.id)}
-          >
-            <span className="offer-main">
-              <span className="offer-gpu">
-                {o.gpu}
-                {o.gpu_count > 1 ? ` × ${o.gpu_count}` : ''}
-                <VramBadge gb={o.vram_gb} verdict={fit?.vram} model={model} />
+    <>
+      <div className="offer-list" role="radiogroup" aria-label="Offers">
+        {(pinned ? [pinned, ...rest] : rest).map(o => {
+          const on = o.id === selected;
+          const tag = badge(o.id) || (o === pinned ? 'Recommended' : '');
+          const fit = o.fit;
+          const blocked = fit?.level === 'block';
+          const facts = [
+            fit?.pull_min != null ? `≈ ${minutes(fit.pull_min)} to download` : '',
+            model && fit && vramLine[fit.vram] ? vramLine[fit.vram](model) : '',
+            o.location || (kind === 'runpod' ? `${providerNames.runpod} picks the data center` : ''),
+            o.reliability != null ? `${Math.round(o.reliability * 100)}% reliable` : '',
+            availability[o.availability] ?? '',
+            o.https ? 'https' : 'plain http',
+          ].filter(Boolean);
+          return (
+            <button
+              key={o.id}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              aria-disabled={blocked || undefined}
+              disabled={blocked}
+              title={blocked ? fit?.summary : undefined}
+              className={on ? 'offer is-selected' : blocked ? 'offer is-blocked' : 'offer'}
+              onClick={() => !blocked && onSelect(o.id)}
+            >
+              <span className="offer-main">
+                <span className="offer-gpu">
+                  {o.gpu}
+                  {o.gpu_count > 1 ? ` × ${o.gpu_count}` : ''}
+                  <VramBadge gb={o.vram_gb} verdict={fit?.vram} model={model} />
+                  {tag && <span className="badge tone-accent">{tag}</span>}
+                </span>
+                <span className="offer-facts">{facts.join(' · ')}</span>
+                {blocked && fit?.summary && <span className="offer-why">{fit.summary}</span>}
               </span>
-              <span className="offer-facts">{facts.join(' · ')}</span>
-              {blocked && fit?.summary && <span className="offer-why">{fit.summary}</span>}
-            </span>
-            <span className="offer-price">
-              <span className="offer-rate">{perHour(o.price_per_hour)}</span>
-              {o.stopped_price_per_hour != null && <span className="offer-stopped">{perHour(o.stopped_price_per_hour)} stopped</span>}
-            </span>
-            <span className="offer-fit">
-              <FitBadge fit={fit} />
-            </span>
-          </button>
-        );
-      })}
-    </div>
+              <span className="offer-price">
+                <span className="offer-rate">{perHour(o.price_per_hour)}</span>
+                {o.stopped_price_per_hour != null && <span className="offer-stopped">{perHour(o.stopped_price_per_hour)} stopped</span>}
+              </span>
+              <span className="offer-fit">
+                <FitBadge fit={fit} />
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {/* the pinned pick stands alone while the list loads, fails or is empty */}
+      {pinned && error ? <ErrorNote error={error} /> : pinned && !loading && offers && !offers.length ? <p className="quiet-note offer-empty">No other offers match. Loosen the filters.</p> : null}
+    </>
   );
 }
 

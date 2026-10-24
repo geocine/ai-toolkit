@@ -4216,3 +4216,138 @@ a.runs-row:hover {
     align-items: flex-start;
   }
 }
+
+/* gpu picks: the recommender's best value and best speed above the offers (MASTER §5.1.5) */
+
+.picks {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.picks .callout {
+  margin: 0;
+}
+
+.pick-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px;
+}
+
+.pick {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-width: 0;
+  min-height: 84px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--ease), background-color var(--ease);
+}
+
+.pick:hover {
+  border-color: var(--border-strong);
+}
+
+.pick.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.pick:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* the last picks stay while new ones load, dimmed */
+.picks[aria-busy='true'] .pick-list {
+  opacity: 0.6;
+}
+
+.pick.is-skeleton {
+  cursor: default;
+  background: var(--surface-2);
+  animation: pulse 1.8s ease-in-out infinite;
+}
+
+.pick-title {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  font-weight: 600;
+}
+
+.pick-reason {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.pick-meta {
+  font-size: 12px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.pick-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.pick-cross {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.pick-cross .btn {
+  margin-right: -10px;
+}
+
+.pick-tiers .table {
+  font-variant-numeric: tabular-nums;
+}
+
+.pick-tiers .table th,
+.pick-tiers .table td {
+  padding: 0 12px;
+}
+
+.pick-tiers .pick-tiers-why {
+  white-space: normal;
+  color: var(--text-2);
+}
+
+@media (max-width: 767px) {
+  .pick-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pick-tiers .table td {
+    height: auto;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pick.is-skeleton {
+    animation: none;
+  }
+}
