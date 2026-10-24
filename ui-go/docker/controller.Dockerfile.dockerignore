@@ -1,0 +1,8 @@
+# Used by BuildKit for ui-go/docker/controller.Dockerfile only. Only ui-go/ is
+# copied, without dependencies, builds or databases.
+*
+!ui-go
+ui-go/**/node_modules
+ui-go/**/dist
+ui-go/**/*.db*
+ui-go/aitk-server*
