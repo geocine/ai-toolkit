@@ -47,6 +47,18 @@ func FaceModelsDir(modelsPath string) string {
 	return filepath.Join(modelsPath, pyjob.ModelsSubdir)
 }
 
+// FaceModelsConfig is config.process[0].models of a face check: the pinned
+// models by key plus dir, the folder they go in. The worker sets it again
+// when the job starts, so a stored config (an imported one, say) never
+// chooses what the job downloads or where it writes it.
+func FaceModelsConfig(modelsDir string) map[string]any {
+	models := map[string]any{"dir": modelsDir}
+	for key, m := range pyjob.Models {
+		models[key] = m
+	}
+	return models
+}
+
 // FaceDownload is how many bytes a face check still has to fetch into
 // modelsDir before its first photo. A file of the pinned size counts as
 // there; the job itself checks the sha256 and fetches it again when it
@@ -139,10 +151,7 @@ func BuildFaceJobConfig(dir, name string, files []FileRef, text bool, modelsDir 
 	if len(files) > MaxFaceJob {
 		return nil, fmt.Errorf("face check: %d photos, at most %d", len(files), MaxFaceJob)
 	}
-	models := map[string]any{"dir": modelsDir}
-	for key, m := range pyjob.Models {
-		models[key] = m
-	}
+	models := FaceModelsConfig(modelsDir)
 	p := faceProcess{
 		Type:       pyjob.ProcessType,
 		Algo:       FaceAlgo,

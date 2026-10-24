@@ -477,3 +477,49 @@ func TestBundleSaver(t *testing.T) {
 		t.Fatalf("not re-pushed: %d bytes", st3.Size())
 	}
 }
+
+// TestBundleImportRefusesFaceCheck: a bundle whose manifest says photo_faces
+// is refused, so a shared bundle cannot get this server's face check script
+// run with a config it wrote (its models url and folder).
+func TestBundleImportRefusesFaceCheck(t *testing.T) {
+	e := setup(t)
+	id := bundleFixture(t, e)
+	r := e.do(t, "GET", "/v1/jobs/"+id+"/bundle", nil, nil)
+	want(t, r, 200, "")
+	zr, err := zip.NewReader(bytes.NewReader(r.body), int64(len(r.body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b bytes.Buffer
+	zw := zip.NewWriter(&b)
+	for _, f := range zr.File {
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var data bytes.Buffer
+		data.ReadFrom(rc)
+		rc.Close()
+		out := data.Bytes()
+		if f.Name == "aitk_bundle.json" {
+			var m map[string]any
+			if err := json.Unmarshal(out, &m); err != nil {
+				t.Fatal(err)
+			}
+			m["type"] = "photo_faces"
+			out, _ = json.Marshal(m)
+		}
+		w, _ := zw.Create(f.Name)
+		w.Write(out)
+	}
+	zw.Close()
+	up := e.upload(t, b.Bytes(), b.Len())
+	r = e.call(t, "POST", "/v1/bundles/imports", map[string]any{"upload_id": up, "name": "faces2", "start": true})
+	want(t, r, 400, "invalid_request")
+	if !strings.Contains(string(r.body), "face check") {
+		t.Fatalf("refusal: %s", r.body)
+	}
+	if j, _ := store.FindFirstJob(context.Background(), store.JobQuery{Where: `"name" = ?`, Args: []any{"faces2"}}); j != nil {
+		t.Fatalf("a face check was imported: %+v", j)
+	}
+}

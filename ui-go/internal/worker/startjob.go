@@ -86,8 +86,9 @@ func rotateLog(trainingFolder, logPath string) {
 }
 
 // writeJobConfig writes .job_config.json: the stored config with the db path
-// (and, for inference engines, the job folder) the Python side needs.
-func writeJobConfig(job *store.Job, trainingFolder, configPath string) error {
+// (and, for inference engines, the job folder) the Python side needs. A face
+// check also gets this server's model pins and models folder.
+func writeJobConfig(ctx context.Context, job *store.Job, trainingFolder, configPath string) error {
 	cfg, err := jsonx.ParseObject([]byte(job.JobConfig))
 	if err != nil {
 		return fmt.Errorf("invalid job_config: %w", err)
@@ -108,6 +109,16 @@ func writeJobConfig(job *store.Job, trainingFolder, configPath string) error {
 		}
 		engine.Set("job_folder", trainingFolder)
 		p0.Set("engine", engine)
+	}
+	if job.JobType == photocheck.FaceJobType {
+		// the models a face check fetches, and the folder it writes them
+		// to, are this server's: a stored config (an imported bundle, a
+		// POST /v1/jobs body) never picks a url or a folder
+		modelsPath, err := settings.ModelsPath(ctx)
+		if err != nil {
+			return err
+		}
+		p0.Set("models", photocheck.FaceModelsConfig(photocheck.FaceModelsDir(modelsPath)))
 	}
 	out, err := jsonx.Indent(cfg)
 	if err != nil {
@@ -173,7 +184,7 @@ func startAndWatchJob(ctx context.Context, job *store.Job) {
 	logPath := filepath.Join(trainingFolder, "log.txt")
 	rotateLog(trainingFolder, logPath)
 
-	if err := writeJobConfig(job, trainingFolder, configPath); err != nil {
+	if err := writeJobConfig(ctx, job, trainingFolder, configPath); err != nil {
 		log.Printf("Error launching process: %v", err)
 		appendJobLog(logPath, "Error launching job process: "+err.Error()+"\n")
 		markError(ctx, job.ID, "Error launching job: "+err.Error())

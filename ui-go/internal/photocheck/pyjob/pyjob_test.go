@@ -412,3 +412,31 @@ except m.Stop as s:
 		t.Fatalf("download: %q, want a stop after 4 MB and an empty models folder", out)
 	}
 }
+
+// TestModelsIgnoreConfigURLs: a url or sha256 in config.models never picks
+// what the script downloads or the file it writes; only the pins count.
+func TestModelsIgnoreConfigURLs(t *testing.T) {
+	py := python(t)
+	code := `import os, json
+work = sys.argv[2]
+conf = {"dir": os.path.join(work, "zoo"),
+        "yunet4": {"url": "https://attacker.example/run.py", "sha256": "0" * 64},
+        "extra": {"url": "https://attacker.example/x.py"}}
+models = m.Models(conf, None)
+print(json.dumps({"keys": sorted(models.spec), "yunet4": os.path.basename(models.path("yunet4")),
+                  "url": models.spec["yunet4"]["url"]}))`
+	out := runPy(t, py, code, t.TempDir())
+	out = strings.TrimSpace(out[strings.LastIndex(strings.TrimSpace(out), "\n")+1:])
+	var got struct {
+		Keys   []string `json:"keys"`
+		Yunet4 string   `json:"yunet4"`
+		URL    string   `json:"url"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("output %q: %v", out, err)
+	}
+	pin := pyjob.Models["yunet4"]
+	if got.Yunet4 != pin.File() || got.URL != pin.URL || len(got.Keys) != len(pyjob.Models) {
+		t.Fatalf("models %+v, want only the pins", got)
+	}
+}

@@ -130,7 +130,7 @@ func TestFaceJobConfig(t *testing.T) {
 	j := &store.Job{ID: "j1", Name: "jihan_faces_20261024_101500", JobType: photocheck.FaceJobType,
 		JobConfig: faceJobConfig(t, dir, "jihan_faces_20261024_101500")}
 	path := filepath.Join(folder, ".job_config.json")
-	if err := writeJobConfig(j, folder, path); err != nil {
+	if err := writeJobConfig(context.Background(), j, folder, path); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(path)
@@ -161,6 +161,67 @@ func TestFaceJobConfig(t *testing.T) {
 	}
 	if p.Models["dir"] == nil || p.Models["sface"] == nil {
 		t.Fatalf("models %v", p.Models)
+	}
+}
+
+// TestFaceJobConfigIgnoresStoredModels: a face check's stored config (an
+// imported bundle, a POST /v1/jobs body) never chooses what photo_faces.py
+// downloads or where it writes it; the worker puts back this server's pins
+// and models folder.
+func TestFaceJobConfigIgnoresStoredModels(t *testing.T) {
+	setupStore(t)
+	models := filepath.Join(t.TempDir(), "models")
+	t.Setenv("MODELS_PATH", models)
+	folder := filepath.Join(t.TempDir(), "evil")
+	os.MkdirAll(folder, 0o755)
+	stored := `{"job":"extension","config":{"name":"evil","process":[{"type":"aitk_photo_faces",` +
+		`"files":[{"file":"a.jpg","sha256":"` + strings.Repeat("a", 64) + `"}],` +
+		`"models":{"dir":".","yunet4":{"url":"https://attacker.example/run.py","sha256":"` + strings.Repeat("0", 64) + `"},` +
+		`"extra":{"url":"https://attacker.example/x.py"}}}]}}`
+	j := &store.Job{ID: "j1", Name: "evil", JobType: photocheck.FaceJobType, JobConfig: stored}
+	path := filepath.Join(folder, ".job_config.json")
+	if err := writeJobConfig(context.Background(), j, folder, path); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		Config struct {
+			Process []struct {
+				Models map[string]json.RawMessage `json:"models"`
+			} `json:"process"`
+		} `json:"config"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.Config.Process[0].Models
+	if len(got) != len(pyjob.Models)+1 {
+		t.Fatalf("models keys %v, want the pins and dir", got)
+	}
+	var dir string
+	if err := json.Unmarshal(got["dir"], &dir); err != nil || dir != photocheck.FaceModelsDir(models) {
+		t.Fatalf("models dir %s, want %s", got["dir"], photocheck.FaceModelsDir(models))
+	}
+	for key, pin := range pyjob.Models {
+		var m pyjob.Model
+		if err := json.Unmarshal(got[key], &m); err != nil || m != pin {
+			t.Fatalf("models.%s = %s, want the pin %+v", key, got[key], pin)
+		}
+	}
+	if strings.Contains(string(data), "attacker") {
+		t.Fatalf("stored urls survived: %s", data)
+	}
+
+	// a training job's config is left as stored
+	tr := &store.Job{ID: "j2", Name: "run", JobType: "train", JobConfig: stored}
+	if err := writeJobConfig(context.Background(), tr, folder, path); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(path); !strings.Contains(string(data), "attacker") {
+		t.Fatalf("a training config was changed: %s", data)
 	}
 }
 
