@@ -327,32 +327,72 @@ func searchBody(q provision.OfferQuery) map[string]any {
 	return b
 }
 
-func search(ctx context.Context, key string, body map[string]any) ([]bundle, error) {
+// row is one search result: the fields the offer needs, and the raw row
+// hostfit reads the host facts from.
+type row struct {
+	bundle
+	raw map[string]any
+}
+
+// offer is the row's offer, decorated with its host and fit for q.
+func (r row) offer(q provision.OfferQuery) provision.Offer {
+	o := r.bundle.offer()
+	provision.DecorateOffer(&o, hostfit.FromVast(r.raw), q)
+	return o
+}
+
+func search(ctx context.Context, key string, body map[string]any) ([]row, error) {
 	var out struct {
-		Offers []bundle `json:"offers"`
+		Offers []json.RawMessage `json:"offers"`
 	}
 	if err := call(ctx, EpSearch, opSearch, key, http.MethodPost, "/api/v0/bundles/", nil, body, &out); err != nil {
 		return nil, err
 	}
-	return out.Offers, nil
+	rows := make([]row, 0, len(out.Offers))
+	for _, b := range out.Offers {
+		var r row
+		if json.Unmarshal(b, &r.bundle) != nil || json.Unmarshal(b, &r.raw) != nil {
+			return nil, provision.Errorf(provision.Vast, provision.ClassUnavailable, 200, "unreadable offer in the search answer")
+		}
+		rows = append(rows, r)
+	}
+	return rows, nil
 }
 
+// queryBody is searchBody with the service's image filter merged in
+// (hostfit.VastQuery: cuda_max_good, compute_cap, cpu_arch, gpu_arch,
+// disk_space and, with a model or Fast, gpu_ram and the bandwidth floors;
+// never driver_vers).
+func queryBody(q provision.OfferQuery) map[string]any {
+	b := searchBody(q)
+	if q.Filter != nil {
+		b = hostfit.VastQuery(*q.Filter, b)
+	}
+	return b
+}
+
+// Offers searches with the image filter server-side, then applies the GPU
+// substring, the filter again client-side (Vast's answer is trusted for
+// nothing the image needs) and the limit.
 func (adapter) Offers(ctx context.Context, key string, q provision.OfferQuery) ([]provision.Offer, error) {
-	rows, err := search(ctx, key, searchBody(q))
+	rows, err := search(ctx, key, queryBody(q))
 	if err != nil {
 		return nil, err
 	}
 	gpu := strings.ToLower(strings.TrimSpace(q.GPU))
 	limit := limitOf(q)
 	out := make([]provision.Offer, 0, min(len(rows), limit))
-	for _, b := range rows {
-		if b.Rented != nil && *b.Rented { // vast-cli filters rented rows client-side too
+	for _, r := range rows {
+		if r.Rented != nil && *r.Rented { // vast-cli filters rented rows client-side too
 			continue
 		}
-		if gpu != "" && !strings.Contains(strings.ToLower(b.GPUName), gpu) {
+		if gpu != "" && !strings.Contains(strings.ToLower(r.GPUName), gpu) {
 			continue
 		}
-		out = append(out, b.offer())
+		if !provision.KeepOffer(hostfit.FromVast(r.raw), q) {
+			continue
+		}
+		out = append(out, r.offer(q))
 		if len(out) == limit {
 			break
 		}
@@ -375,9 +415,9 @@ func (adapter) Quote(ctx context.Context, key, offerID string, q provision.Offer
 	if err != nil {
 		return provision.Offer{}, err
 	}
-	for _, b := range rows {
-		if b.ID == id && (b.Rented == nil || !*b.Rented) {
-			return b.offer(), nil
+	for _, r := range rows {
+		if r.ID == id && (r.Rented == nil || !*r.Rented) {
+			return r.offer(q), nil
 		}
 	}
 	return provision.Offer{}, provision.Errorf(provision.Vast, provision.ClassCapacity, 0, "offer %d is no longer available", id)

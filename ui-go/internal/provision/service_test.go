@@ -16,7 +16,9 @@ import (
 	"github.com/geocine/aitoolkit/internal/events"
 	"github.com/geocine/aitoolkit/internal/hostfit"
 	"github.com/geocine/aitoolkit/internal/imagecheck"
+	"github.com/geocine/aitoolkit/internal/imagecheck/registrymock"
 	"github.com/geocine/aitoolkit/internal/notify"
+	"github.com/geocine/aitoolkit/internal/provision/imagetest"
 	"github.com/geocine/aitoolkit/internal/provision/mockkit"
 	"github.com/geocine/aitoolkit/internal/state"
 	"github.com/geocine/aitoolkit/internal/testutil"
@@ -45,6 +47,7 @@ type stubCloud struct {
 	noID      bool // QuickPod: create returns no id; the pod is found by label
 	insts     map[string]*Instance
 	launched  []LaunchSpec
+	queries   []OfferQuery // what Offers and Quote received, in order
 	keys      []string
 	calls     map[string]int
 	next      int
@@ -90,12 +93,16 @@ func (c *stubCloud) Verify(_ context.Context, key string) (Account, error) {
 }
 func (c *stubCloud) Offers(_ context.Context, key string, q OfferQuery) ([]Offer, error) {
 	c.count("Offers", key)
+	c.mu.Lock()
+	c.queries = append(c.queries, q)
+	c.mu.Unlock()
 	return slices.Clone(c.offers), c.offersErr
 }
 func (c *stubCloud) Quote(_ context.Context, key, offerID string, q OfferQuery) (Offer, error) {
 	c.count("Quote", key)
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.queries = append(c.queries, q)
 	o := c.quote
 	o.ID = offerID
 	return o, c.quoteErr
@@ -209,11 +216,12 @@ func (c *stubCloud) remove(id string) {
 }
 
 type fakeProber struct {
-	mu     sync.Mutex
-	down   bool
-	open   bool
-	accept string // "" accepts every token
-	calls  int
+	mu      sync.Mutex
+	down    bool
+	open    bool
+	accept  string // "" accepts every token
+	version string // the /v1/health version
+	calls   int
 }
 
 func (p *fakeProber) Probe(_ context.Context, eps []Endpoint, token string, _ bool) ProbeResult {
@@ -227,7 +235,7 @@ func (p *fakeProber) Probe(_ context.Context, eps []Endpoint, token string, _ bo
 		return ProbeResult{BaseURL: eps[0].URL, Health: true, TokenRejected: true}
 	}
 	enforced := !p.open
-	return ProbeResult{BaseURL: eps[0].URL, Health: true, TokenOK: true, AuthEnforced: &enforced}
+	return ProbeResult{BaseURL: eps[0].URL, Health: true, TokenOK: true, AuthEnforced: &enforced, Version: p.version}
 }
 
 func (p *fakeProber) setDown(v bool) { p.mu.Lock(); p.down = v; p.mu.Unlock() }
@@ -241,11 +249,42 @@ type testEnv struct {
 	clock  *mockkit.FakeClock
 	clouds map[Kind]*stubCloud
 	prober *fakeProber
+	images *imagetest.Env
+	cuda   *fakeCUDA
 	hf     string
 	sinks  notify.Config
 }
 
+// fakeCUDA answers the machine's GET /v1/system/cuda (ok unless set).
+type fakeCUDA struct {
+	mu    sync.Mutex
+	res   cudaResult
+	err   error
+	set   bool
+	calls int
+}
+
+func (f *fakeCUDA) check(_ context.Context, base, token string, _ bool) (cudaResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	if !f.set {
+		return cudaResult{Found: true, OK: true}, nil
+	}
+	return f.res, f.err
+}
+
+func (f *fakeCUDA) answer(res cudaResult, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.res, f.err, f.set = res, err, true
+}
+
 var t0 = time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
+
+// pinnedImage is what a launch of DefaultImage sends: the :latest the
+// registry mock publishes, pinned to its build tag.
+const pinnedImage = "ghcr.io/geocine/aitoolkit-go:" + registrymock.Revision
 
 // newEnv opens a fresh fork database and installs stub adapters for all
 // three kinds, a fake prober and a fake clock.
@@ -263,18 +302,21 @@ func newEnv(t *testing.T) *testEnv {
 	Simulated.Store(false)
 	t.Cleanup(func() { Simulated.Store(wasSim) })
 
-	e := &testEnv{t: t, ctx: context.Background(), clock: mockkit.NewFakeClock(t0), clouds: map[Kind]*stubCloud{}, prober: &fakeProber{}}
+	e := &testEnv{t: t, ctx: context.Background(), clock: mockkit.NewFakeClock(t0), clouds: map[Kind]*stubCloud{}, prober: &fakeProber{},
+		images: imagetest.Use(t, imagetest.Options{}), cuda: &fakeCUDA{}}
 	for _, k := range allKinds {
 		c := newStub(k)
 		e.clouds[k] = c
 		t.Cleanup(SetForTest(c))
 	}
-	oldProber, oldHF, oldNotify := DefaultProber, hfToken, notifyConfig
+	oldProber, oldHF, oldNotify, oldCUDA := DefaultProber, hfToken, notifyConfig, cudaCheck
 	DefaultProber = e.prober
 	hfToken = func(context.Context) (string, error) { return e.hf, nil }
 	notifyConfig = func() notify.Config { return e.sinks }
-	t.Cleanup(func() { DefaultProber, hfToken, notifyConfig = oldProber, oldHF, oldNotify })
+	cudaCheck = e.cuda.check
+	t.Cleanup(func() { DefaultProber, hfToken, notifyConfig, cudaCheck = oldProber, oldHF, oldNotify, oldCUDA })
 	e.s = &Service{Now: e.clock.Now}
+	t.Cleanup(e.s.WaitChecks) // before the database closes
 	return e
 }
 
@@ -313,11 +355,16 @@ func (e *testEnv) launch(k Kind, mod func(*LaunchRequest)) Machine {
 	return m
 }
 
-// refresh advances past the 5 s Get cache and re-reads id from its provider.
+// refresh advances past the 5 s Get cache, re-reads id from its provider
+// and waits for the checks that started (a machine's CUDA check).
 func (e *testEnv) refresh(id string) Machine {
 	e.t.Helper()
 	e.clock.Advance(6 * time.Second)
-	m, err := e.s.Get(e.ctx, id, true)
+	if _, err := e.s.Get(e.ctx, id, true); err != nil {
+		e.t.Fatal(err)
+	}
+	e.s.WaitChecks()
+	m, err := e.s.Get(e.ctx, id, false)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -608,12 +655,13 @@ func TestLaunchCreates(t *testing.T) {
 	if m.Status != StatusCreating || m.ProviderID != "pod1" || m.Name != "RTX 4090 on RunPod" || m.GPU != "RTX 4090" ||
 		m.Label != LabelFor(m.ID) || !strings.HasPrefix(m.ID, "mch_") || m.DiskGB != DefaultDiskGB || m.Image != DefaultImage ||
 		m.WhenDone != WhenKeep || m.PricePerHour == nil || *m.PricePerHour != 0.45 || m.RelayPath != "/v1/machines/"+m.ID+"/relay" ||
-		m.ImageDigest != nil || m.ImageLaunchRef != nil || m.ImageWarnings == nil || m.Warnings == nil || m.Simulated {
+		m.ImageDigest == nil || m.ImageLaunchRef == nil || *m.ImageLaunchRef != pinnedImage || len(m.ImageWarnings) != 0 ||
+		m.Warnings == nil || m.Simulated {
 		t.Fatalf("machine %+v", m)
 	}
 	spec := e.clouds[RunPod].launched[0]
 	tok := e.row(m.ID).Token
-	if spec.Label != m.Label || spec.Image != DefaultImage || spec.DiskGB != DefaultDiskGB || spec.OfferID != "offer-1" ||
+	if spec.Label != m.Label || spec.Image != pinnedImage || spec.DiskGB != DefaultDiskGB || spec.OfferID != "offer-1" ||
 		spec.Env["AI_TOOLKIT_AUTH"] != tok || !strings.HasPrefix(tok, "aitk_") || spec.Env["AITK_MACHINE_ID"] != m.ID ||
 		spec.Env["AITK_CORS_ORIGINS"] != "https://studio.example.com" {
 		t.Fatalf("spec %+v", spec)

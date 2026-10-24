@@ -30,13 +30,51 @@ import (
 //go:embed testdata/rentable.json
 var rentableJSON []byte
 
+// liveJSON is the image-filter fixture (IMAGE-PLAN §7.3): the rest of the
+// live 18-offer /rentable shape (max_cuda "13.1\n", "" and "13.0";
+// driver_vers float-encoded or "0"; IPs scrubbed) plus a GTX 1660 SUPER row,
+// a 30 GB max_disk_size row and a CUDA 12.8 (R570) row the image blocks, all
+// made online and free.
+//
+//go:embed testdata/rentable_live.json
+var liveJSON []byte
+
+// LiveOffers are the rows of the image-filter fixture, for AddOffers.
+func LiveOffers() []map[string]any {
+	var rows []map[string]any
+	if err := json.Unmarshal(liveJSON, &rows); err != nil {
+		panic("quickpodmock: bad live fixture: " + err.Error())
+	}
+	return rows
+}
+
+// AddOffers lists more /rentable rows (LiveOffers) after the fixture's.
+func (m *Mock) AddOffers(rows ...map[string]any) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.offers = append(m.offers, rows...)
+}
+
 // Seeded templates (spec: PLAN §6.3 mock). The aitk template publishes 8675
 // and carries a fallback token, as the setup guide tells users to do.
 const (
 	AitkTemplateUUID  = "5e1f9f29-aitk-4c1e-9d6a-000000008675"
 	OtherTemplateUUID = "17dc5ed1-69b8-4239-a678-31e8fa14d858"
 	TemplateToken     = "template-token-0000"
+	// AitkTemplateImage is the aitk template's image: path with the tag in
+	// it and an empty version_tag, so it follows :latest.
+	AitkTemplateImage = "ghcr.io/geocine/aitoolkit-go:latest"
+	// PinnedTemplateUUID is PinnedTemplate's id.
+	PinnedTemplateUUID = "5e1f9f29-aitk-4c1e-9d6a-00000000f53a"
 )
+
+// PinnedTemplate is an aitk template pinned to build in version_tag, as the
+// studio's "edit the template's version tag" fix leaves it (simulate seeds
+// it with registrymock's revision).
+func PinnedTemplate(build string) Template {
+	return Template{UUID: PinnedTemplateUUID, Name: "aitk headless (pinned)", ImagePath: "ghcr.io/geocine/aitoolkit-go",
+		VersionTag: build, DockerOptions: "-p 8675:8675 -e AI_TOOLKIT_AUTH=" + TemplateToken}
+}
 
 // minRuntime is the credit a create or start needs: two hours of compute
 // (insufficient_credit's minimum_runtime_minutes, spec: quickpod.md §3).
@@ -118,7 +156,7 @@ func New(o mockkit.Options) *Mock {
 		credit:       o.Credit,
 		nextID:       41000,
 		templates: []Template{
-			{UUID: AitkTemplateUUID, Name: "aitk headless", ImagePath: "ghcr.io/geocine/aitoolkit-go:latest",
+			{UUID: AitkTemplateUUID, Name: "aitk headless", ImagePath: AitkTemplateImage,
 				DockerOptions: "-p 8675:8675 -e AI_TOOLKIT_AUTH=" + TemplateToken},
 			{UUID: OtherTemplateUUID, Name: "FluxGym", ImagePath: "quickpod/fluxgym", VersionTag: "latest",
 				DockerOptions: "-p 7860:7860", Public: true},

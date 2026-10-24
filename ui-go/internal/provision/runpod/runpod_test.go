@@ -154,7 +154,7 @@ func TestOffersQueryPriceAndMapping(t *testing.T) {
 	if o.ID != "NVIDIA GeForce RTX 4090|SECURE|1" || o.Provider != provision.RunPod || o.VRAMGB != 24 || o.GPUCount != 1 ||
 		o.PricePerHour != round4(0.44+disk) || o.StoppedPricePerHour == nil || *o.StoppedPricePerHour != 0 ||
 		o.Availability != "high" || o.Location != "" || o.Reliability != nil || o.MaxDiskGB != nil || !o.HTTPS || o.Cloud != "secure" ||
-		o.Host != nil || o.Fit != nil {
+		o.Host == nil || o.Fit != nil {
 		t.Fatalf("4090 offer %+v", o)
 	}
 

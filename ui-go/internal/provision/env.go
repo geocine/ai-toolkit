@@ -21,7 +21,8 @@ var (
 	notifyConfig = notify.Current
 )
 
-// passthroughKey is what LaunchRequest.env may set.
+// passthroughKey is what LaunchRequest.env may set. HF_* includes HF_HOME,
+// which puts the model cache on a volume (IMAGE-PLAN §3.4).
 var passthroughKey = regexp.MustCompile(`^(AITK_[A-Z0-9_]{1,60}|HF_[A-Z0-9_]{1,60}|HUGGING_FACE_HUB_TOKEN|TZ)$`)
 
 // QuickPod carries env inside one docker_options string ("-e K=V ..."), so

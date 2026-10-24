@@ -20,6 +20,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/geocine/aitoolkit/internal/hostfit"
+	"github.com/geocine/aitoolkit/internal/imagecheck"
+	"github.com/geocine/aitoolkit/internal/imagecheck/registrymock"
 	"github.com/geocine/aitoolkit/internal/provision"
 	"github.com/geocine/aitoolkit/internal/provision/mockkit"
 	"github.com/geocine/aitoolkit/internal/provision/quickpod"
@@ -66,9 +69,12 @@ func Delays() mockkit.Delays {
 }
 
 // Start turns simulate mode on: provision.Simulated, a fresh sim secret, the
-// three mocks on 127.0.0.1:0 and the adapters pointed at them. inner is the
-// handler simulated nodes serve (this server below Auth). stop, also run when
-// ctx ends, closes the mocks and their nodes and puts the adapters back.
+// three mocks on 127.0.0.1:0 and the adapters pointed at them, and the image
+// check and model sizer on in-process registry and Hugging Face mocks
+// (unless AITK_PROVISION_SIMULATE_REGISTRY=real, which reads the public
+// registries and Hugging Face anonymously). inner is the handler simulated
+// nodes serve (this server below Auth). stop, also run when ctx ends, closes
+// the mocks and their nodes and puts the adapters back.
 func Start(ctx context.Context, inner http.Handler) (stop func(), err error) {
 	return start(ctx, inner, mockkit.RealClock{}, Delays())
 }
@@ -81,9 +87,25 @@ type saved struct {
 	vastLogs         func(string) bool
 	qpAPI            string
 	qpProxy          bool
+	images           *imagecheck.Client
+	sizer            *hostfit.ModelSizer
+}
+
+// RealRegistry reports AITK_PROVISION_SIMULATE_REGISTRY=real: simulate
+// then checks images against the real public registries.
+func RealRegistry() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("AITK_PROVISION_SIMULATE_REGISTRY")), "real")
 }
 
 var running sync.Mutex // one simulate session at a time (tests start and stop several)
+
+// active is the running session's mocks, for this package's tests (a
+// runpodmock PullFailText, for one).
+var active struct {
+	rp *runpodmock.Mock
+	vm *vastmock.Mock
+	qm *quickpodmock.Mock
+}
 
 func start(ctx context.Context, inner http.Handler, clock mockkit.Clock, delays mockkit.Delays) (func(), error) {
 	if inner == nil {
@@ -98,10 +120,23 @@ func start(ctx context.Context, inner http.Handler, clock mockkit.Clock, delays 
 
 	opts := mockkit.Options{Clock: clock, Delays: delays, SimSecret: secret, Node: factory(inner, clock)}
 	rp, vm, qm := runpodmock.New(opts), vastmock.New(opts), quickpodmock.New(opts)
+	// The live-shaped rows the image blocks (an old driver, a V100, arm64, a
+	// 30 GB disk, a slow link), so Show all has something to refuse, and a
+	// template pinned to a build (IMAGE-PLAN §7.3).
+	vm.AddOffers(vastmock.LiveOffers()...)
+	qm.AddOffers(quickpodmock.LiveOffers()...)
+	qm.AddTemplate(quickpodmock.PinnedTemplate(registrymock.Revision))
 	rpURL, vmURL, qmURL := rp.Start(), vm.Start(), qm.Start()
+	active.rp, active.vm, active.qm = rp, vm, qm
 	vastHost := strings.TrimPrefix(vmURL, "http://")
 
-	old := saved{runpod.API, runpod.GraphQL, runpod.ProxyURL, vast.API, vast.LogsHostAllowed, quickpod.API, quickpod.UseProxy}
+	old := saved{runpod.API, runpod.GraphQL, runpod.ProxyURL, vast.API, vast.LogsHostAllowed, quickpod.API, quickpod.UseProxy,
+		imagecheck.Default, hostfit.DefaultSizer}
+	if !RealRegistry() {
+		// imagecheck never imports provision: simulate wires both here.
+		imagecheck.Init(true)
+		hostfit.InitSizer(true)
+	}
 	provision.SetSimSecret(secret)
 	provision.Simulated.Store(true)
 	runpod.API, runpod.GraphQL = rpURL, rpURL+"/graphql"
@@ -125,6 +160,8 @@ func start(ctx context.Context, inner http.Handler, clock mockkit.Clock, delays 
 			runpod.API, runpod.GraphQL, runpod.ProxyURL = old.rpAPI, old.rpGraphQL, old.rpProxy
 			vast.API, vast.LogsHostAllowed = old.vastAPI, old.vastLogs
 			quickpod.API, quickpod.UseProxy = old.qpAPI, old.qpProxy
+			imagecheck.Default, hostfit.DefaultSizer = old.images, old.sizer
+			active.rp, active.vm, active.qm = nil, nil, nil
 			provision.Simulated.Store(false)
 			provision.SetSimSecret("")
 			running.Unlock()

@@ -2,6 +2,7 @@ package sim
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"path/filepath"
 	"slices"
@@ -10,7 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/geocine/aitoolkit/internal/hostfit"
+	"github.com/geocine/aitoolkit/internal/imagecheck"
+	"github.com/geocine/aitoolkit/internal/imagecheck/registrymock"
 	"github.com/geocine/aitoolkit/internal/provision"
+	"github.com/geocine/aitoolkit/internal/provision/imagetest"
 	"github.com/geocine/aitoolkit/internal/provision/mockkit"
 	"github.com/geocine/aitoolkit/internal/provision/quickpod/quickpodmock"
 	"github.com/geocine/aitoolkit/internal/provision/vast"
@@ -59,6 +64,7 @@ func newSim(t *testing.T) *simEnv {
 	oldNow := svc.Now
 	svc.Now = clock.Now
 	t.Cleanup(func() { svc.Now = oldNow })
+	t.Cleanup(svc.WaitChecks) // before the database closes
 	return &simEnv{t: t, ctx: context.Background(), clock: clock, svc: svc}
 }
 
@@ -127,6 +133,7 @@ func (e *simEnv) until(id string, steps int, what string, ok func(provision.Mach
 	for range steps {
 		e.clock.Advance(10 * time.Second)
 		e.svc.Tick(e.ctx)
+		e.svc.WaitChecks() // a machine's CUDA check runs in the background
 		var err error
 		if m, err = e.svc.Get(e.ctx, id, false); err != nil {
 			e.t.Fatal(err)
@@ -144,6 +151,13 @@ func deref(p *provision.Problem) string {
 		return ""
 	}
 	return string(*p)
+}
+
+func deref2(s *string) string {
+	if s == nil {
+		return "<nil>"
+	}
+	return *s
 }
 
 func ready(m provision.Machine) bool { return m.Status == provision.StatusReady && m.Problem == nil }
@@ -358,5 +372,192 @@ func TestDelays(t *testing.T) {
 		if Enabled() != want {
 			t.Errorf("AITK_PROVISION_SIMULATE=%q: %v", v, !want)
 		}
+	}
+}
+
+// tripwire fails the test on any request through http.DefaultTransport to a
+// host that is not loopback: simulate checks images against registrymock.
+type tripwire struct {
+	t    *testing.T
+	next http.RoundTripper
+}
+
+func (w tripwire) RoundTrip(r *http.Request) (*http.Response, error) {
+	if h := r.URL.Hostname(); h != "127.0.0.1" && h != "::1" && h != "localhost" {
+		w.t.Errorf("simulate reached %s", r.URL.Host)
+		return nil, errors.New("tripwire: " + r.URL.Host)
+	}
+	return w.next.RoundTrip(r)
+}
+
+func useTripwire(t *testing.T) {
+	old := http.DefaultTransport
+	http.DefaultTransport = tripwire{t, old}
+	t.Cleanup(func() { http.DefaultTransport = old })
+}
+
+// Simulate reads the default image from the in-process registry: the image
+// check passes, offers carry host and fit, and a launch pins the build and
+// goes ready, with nothing leaving the machine.
+func TestSimImageCheckOffline(t *testing.T) {
+	useTripwire(t)
+	e := newSim(t)
+	if imagecheck.Default == nil {
+		t.Fatal("simulate did not set the image check")
+	}
+	img, err := provision.ImageChecker().Inspect(e.ctx, provision.DefaultImage, "", false)
+	if err != nil || img.Revision != registrymock.Revision || !img.GoServer {
+		t.Fatalf("inspect %v: %+v", err, img)
+	}
+	if hostfit.DefaultSizer == nil {
+		t.Fatal("simulate did not set the model sizer")
+	}
+	for _, k := range kinds {
+		t.Run(string(k), func(t *testing.T) {
+			if err := e.setKey(k, ""); err != nil {
+				t.Fatal(err)
+			}
+			offers, err := e.svc.Offers(e.ctx, k, provision.OfferQuery{})
+			if err != nil || len(offers) == 0 {
+				t.Fatalf("offers %d %v", len(offers), err)
+			}
+			for _, o := range offers {
+				if o.Host == nil || o.Fit == nil || o.Fit.Level == imagecheck.LevelBlock {
+					t.Fatalf("offer %s host %+v fit %+v", o.ID, o.Host, o.Fit)
+				}
+			}
+			m := e.mustLaunch(k, "")
+			want := imagecheck.DefaultRepo + ":" + registrymock.Revision
+			if k == provision.QuickPod {
+				want = quickpodmock.AitkTemplateImage // the template's image, as it is
+			}
+			if m.ImageLaunchRef == nil || *m.ImageLaunchRef != want {
+				t.Fatalf("launch ref %v, want %s", deref2(m.ImageLaunchRef), want)
+			}
+			if m.ImageDigest == nil {
+				t.Fatal("no image digest")
+			}
+			m = e.until(m.ID, 6, "ready", ready)
+			if len(m.Warnings) != 0 {
+				t.Fatalf("warnings %v", m.Warnings)
+			}
+		})
+	}
+}
+
+// Simulate lists the live-shaped hosts the image can't run, so Show all
+// has refused rows to show, and QuickPod has a template pinned to a build.
+func TestSimShowAllBlocks(t *testing.T) {
+	useTripwire(t)
+	e := newSim(t)
+	for _, k := range []provision.Kind{provision.Vast, provision.QuickPod} {
+		t.Run(string(k), func(t *testing.T) {
+			if err := e.setKey(k, ""); err != nil {
+				t.Fatal(err)
+			}
+			blocks := func(q provision.OfferQuery) int {
+				offers, err := e.svc.Offers(e.ctx, k, q)
+				if err != nil || len(offers) == 0 {
+					t.Fatalf("offers %d %v", len(offers), err)
+				}
+				n := 0
+				for _, o := range offers {
+					if o.Fit != nil && o.Fit.Level == imagecheck.LevelBlock {
+						n++
+					}
+				}
+				return n
+			}
+			if n := blocks(provision.OfferQuery{}); n != 0 {
+				t.Fatalf("%d blocked offers without show_all", n)
+			}
+			if n := blocks(provision.OfferQuery{ShowAll: true, Limit: 100}); n == 0 {
+				t.Fatal("show_all lists no offer the image blocks")
+			}
+		})
+	}
+	ts, err := e.svc.Templates(e.ctx, provision.QuickPod)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned := imagecheck.DefaultRepo + ":" + registrymock.Revision
+	if !slices.ContainsFunc(ts, func(t provision.Template) bool { return t.ID == quickpodmock.PinnedTemplateUUID && t.Image == pinned }) {
+		t.Fatalf("no template pinned to %s among %+v", pinned, ts)
+	}
+}
+
+func TestSimImageFaults(t *testing.T) {
+	for _, k := range kinds {
+		t.Run(string(k)+" nokernel", func(t *testing.T) {
+			e := newSim(t)
+			m := e.mustLaunch(k, "sim_nokernel")
+			m = e.until(m.ID, 6, "cuda_failed", problem(provision.ProblemCUDAFailed))
+			if m.Status != provision.StatusReady || !strings.Contains(m.Detail, "PyTorch build") {
+				t.Fatalf("%s %q", m.Status, m.Detail)
+			}
+		})
+	}
+	t.Run("runpod olddriver", func(t *testing.T) {
+		e := newSim(t)
+		m := e.mustLaunch(provision.RunPod, "sim_olddriver")
+		m = e.until(m.ID, 6, "cuda_failed", problem(provision.ProblemCUDAFailed))
+		if !strings.Contains(m.Detail, "driver is too old") {
+			t.Fatalf("detail %q", m.Detail)
+		}
+	})
+	t.Run("runpod stale", func(t *testing.T) {
+		e := newSim(t)
+		m := e.mustLaunch(provision.RunPod, "sim_stale")
+		m = e.until(m.ID, 6, "ready", ready)
+		if !slices.ContainsFunc(m.Warnings, func(w string) bool {
+			return strings.Contains(w, "running build "+StaleVersion) && strings.Contains(w, registrymock.Revision)
+		}) {
+			t.Fatalf("warnings %v", m.Warnings)
+		}
+	})
+	t.Run("runpod pull denied", func(t *testing.T) {
+		e := newSim(t)
+		active.rp.PullFailText = "denied: requested access to the resource is denied"
+		m := e.mustLaunch(provision.RunPod, "")
+		m = e.until(m.ID, 6, "image_pull_failed", problem(provision.ProblemImagePullFailed))
+		if m.Status != provision.StatusFailed || !strings.Contains(m.Detail, "isn't published yet") {
+			t.Fatalf("%s %q", m.Status, m.Detail)
+		}
+	})
+	t.Run("runpod manifest unknown", func(t *testing.T) {
+		e := newSim(t)
+		active.rp.PullFailText = "manifest unknown"
+		m := e.mustLaunch(provision.RunPod, "")
+		m = e.until(m.ID, 6, "image_pull_failed", problem(provision.ProblemImagePullFailed))
+		if !strings.Contains(m.Detail, "couldn't find the image tag") {
+			t.Fatalf("detail %q", m.Detail)
+		}
+	})
+}
+
+// Before the default image is published (D-1, D-17), offers are still
+// judged from its built-in requirements and launches are refused.
+func TestSimImageUnpublished(t *testing.T) {
+	e := newSim(t)
+	imagetest.Use(t, imagetest.Options{Unpublished: true})
+	if err := e.setKey(provision.Vast, ""); err != nil {
+		t.Fatal(err)
+	}
+	offers, err := e.svc.Offers(e.ctx, provision.Vast, provision.OfferQuery{})
+	if err != nil || len(offers) == 0 {
+		t.Fatalf("offers %d %v", len(offers), err)
+	}
+	for _, o := range offers {
+		if o.Host == nil || o.Fit == nil || slices.Contains(o.Fit.Codes, "image_denied") {
+			t.Fatalf("offer %s fit %+v", o.ID, o.Fit)
+		}
+	}
+	_, err = e.launch(provision.Vast, "")
+	var b *provision.ImageBlockedError
+	if !errors.As(err, &b) || !strings.Contains(b.Message, "isn't published yet") {
+		t.Fatalf("launch: %v", err)
+	}
+	if n := len(active.vm.Instances()); n != 0 {
+		t.Fatalf("%d instances created", n)
 	}
 }

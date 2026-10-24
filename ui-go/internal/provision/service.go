@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/geocine/aitoolkit/internal/events"
+	"github.com/geocine/aitoolkit/internal/hostfit"
 	"github.com/geocine/aitoolkit/internal/state"
 	"github.com/geocine/aitoolkit/internal/v1api"
 )
@@ -38,6 +39,8 @@ type Service struct {
 	refreshed map[string]time.Time   // last refresh per machine: watcher due times and the 5 s Get cache
 	seen      map[string]bool        // listed or read at its provider at least once
 	pausedTil map[Kind]time.Time     // a Retry-After pauses the watcher for that provider
+	cudaTries map[string]int         // CUDA checks asked of a ready machine (or cudaSettled, cudaRunning)
+	checks    sync.WaitGroup         // background CUDA checks
 }
 
 func init() { Default = &Service{} }
@@ -182,6 +185,7 @@ func (s *Service) paused(k Kind, now time.Time) bool {
 func (s *Service) forgetMachine(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	delete(s.cudaTries, id)
 	delete(s.refreshed, id)
 	delete(s.seen, id)
 	delete(s.machineMu, id)
@@ -362,6 +366,12 @@ func defaultName(ctx context.Context, k Kind, o Offer, count int) (string, error
 	return "", conflict("too many servers named " + strconv.Quote(base))
 }
 
+// The disk_gb a launch may ask for.
+const (
+	minDiskGB = 20
+	maxDiskGB = 2000
+)
+
 // Launch rents the offer and starts the image (PLAN §5 Launch, in order).
 // It returns as soon as the provider accepted the create; the watcher takes
 // the machine from creating to ready.
@@ -415,10 +425,7 @@ func (s *Service) Launch(ctx context.Context, req LaunchRequest, origin string) 
 	if len(req.Image) > 1024 || strings.ContainsFunc(req.Image, unicode.IsSpace) {
 		return Machine{}, false, bad("image must be one reference without spaces, at most 1024 characters")
 	}
-	if req.DiskGB == 0 {
-		req.DiskGB = DefaultDiskGB
-	}
-	if req.DiskGB < 20 || req.DiskGB > 2000 {
+	if req.DiskGB != 0 && (req.DiskGB < minDiskGB || req.DiskGB > maxDiskGB) {
 		return Machine{}, false, bad("disk_gb must be 20 to 2000")
 	}
 	if req.GPUCount == 0 {
@@ -437,6 +444,7 @@ func (s *Service) Launch(ctx context.Context, req LaunchRequest, origin string) 
 	} else {
 		req.Cloud = ""
 	}
+	image := req.Image // what runs: on QuickPod the template's image (createpod has no image field)
 	if k == QuickPod {
 		if req.TemplateID == "" {
 			return Machine{}, false, bad("template_id is required on QuickPod: pick one of your templates")
@@ -446,8 +454,12 @@ func (s *Service) Launch(ctx context.Context, req LaunchRequest, origin string) 
 			s.noteRetry(k, err)
 			return Machine{}, false, scrub(err, key)
 		}
-		if !slices.ContainsFunc(ts, func(t Template) bool { return t.ID == req.TemplateID }) {
+		i := slices.IndexFunc(ts, func(t Template) bool { return t.ID == req.TemplateID })
+		if i < 0 {
 			return Machine{}, false, bad("template_id " + strconv.Quote(req.TemplateID) + " isn't one of your QuickPod templates")
+		}
+		if ts[i].Image != "" {
+			image = ts[i].Image
 		}
 	}
 	if len(req.CORSOrigins) == 0 && origin != "" && originRe.MatchString(origin) {
@@ -486,16 +498,48 @@ func (s *Service) Launch(ctx context.Context, req LaunchRequest, origin string) 
 		return Machine{}, false, conflict(fmt.Sprintf("%d %s %s already running; terminate one or raise max_running", n, Label(k), verb))
 	}
 
+	// image: read once, so the disk default and the re-check agree (IMAGE-PLAN §4.5)
+	view := inspectImage(ctx, image, nil)
+	diskDefault := req.DiskGB == 0
+	if diskDefault {
+		req.DiskGB = min(max(view.need.DiskGB, minDiskGB), maxDiskGB)
+	}
+
 	// quote
-	offer, err := s.quote(ctx, c, key, req.OfferID, OfferQuery{DiskGB: req.DiskGB, GPUCount: req.GPUCount, Cloud: req.Cloud})
+	q := OfferQuery{DiskGB: req.DiskGB, GPUCount: req.GPUCount, Cloud: req.Cloud}
+	if view.img != nil {
+		f := hostfit.FilterFor(view.img.Requires, view.need, nil, hostfit.Policy{})
+		q.Filter, q.ImageInfo = &f, view.img
+	}
+	offer, err := s.quote(ctx, c, key, req.OfferID, q)
+	if err != nil && diskDefault && ClassOf(err) == ClassInvalid {
+		// QuickPod refuses a disk above the offer's maximum: read the maximum
+		// at the smallest disk and cap below. Any other refusal stands.
+		probe := q
+		probe.DiskGB = minDiskGB
+		if p, perr := s.quote(ctx, c, key, req.OfferID, probe); perr == nil && p.MaxDiskGB != nil && req.DiskGB > *p.MaxDiskGB {
+			offer, err = p, nil
+		}
+	}
 	if err != nil {
 		return Machine{}, false, err
+	}
+	if offer.MaxDiskGB != nil && req.DiskGB > *offer.MaxDiskGB {
+		if !diskDefault || *offer.MaxDiskGB < minDiskGB {
+			return Machine{}, false, bad(fmt.Sprintf("disk_gb %d is more than this offer's %d GB", req.DiskGB, *offer.MaxDiskGB))
+		}
+		// the need does not fit: ask for what the host has (disk_model warns, disk_image blocks)
+		req.DiskGB, q.DiskGB = *offer.MaxDiskGB, *offer.MaxDiskGB
+		if offer, err = s.quote(ctx, c, key, req.OfferID, q); err != nil {
+			return Machine{}, false, err
+		}
 	}
 	if offer.PricePerHour > req.MaxPricePerHour {
 		return Machine{}, false, priceRose(k, offer.PricePerHour, req.MaxPricePerHour)
 	}
-	if offer.MaxDiskGB != nil && req.DiskGB > *offer.MaxDiskGB {
-		return Machine{}, false, bad(fmt.Sprintf("disk_gb %d is more than this offer's %d GB", req.DiskGB, *offer.MaxDiskGB))
+	li, err := checkLaunchImage(ctx, k, view, offer, req.DiskGB, req.SkipImageCheck, s.now())
+	if err != nil {
+		return Machine{}, false, err
 	}
 	count := offer.GPUCount
 	if count <= 0 {
@@ -521,6 +565,7 @@ func (s *Service) Launch(ctx context.Context, req LaunchRequest, origin string) 
 	if whenWarn != "" {
 		warnings = append([]string{whenWarn}, warnings...)
 	}
+	warnings = append(warnings, li.machine...)
 	envKeys := make([]string, 0, len(env))
 	for name := range env {
 		envKeys = append(envKeys, name)
@@ -533,10 +578,12 @@ func (s *Service) Launch(ctx context.Context, req LaunchRequest, origin string) 
 	r := &row{
 		ID: id, Provider: k, Label: LabelFor(id), Name: req.Name, Token: token, Status: StatusCreating,
 		Spec: machineSpec{
-			Offer: offer, GPUCount: count, Cloud: req.Cloud, DiskGB: req.DiskGB, Image: req.Image,
+			Offer: offer, GPUCount: count, Cloud: req.Cloud, DiskGB: req.DiskGB, Image: image,
 			TemplateID: req.TemplateID, WhenDone: req.WhenDone, SelfDestroyKey: req.SelfDestroyKey,
 			CopiedRemote: req.CopyRemote, EnvKeys: envKeys, Warnings: warnings,
+			ImageCheck: li.snapshot, ImageWarnings: li.warnings, PullS: li.pullS,
 		},
+		ImageLaunchRef: li.launchRef, ImageDigest: li.digest,
 		Price: &price, StoppedPrice: offer.StoppedPricePerHour, Simulated: sim, CreatedAt: now, UpdatedAt: now,
 	}
 	// the id the create used: QuickPod finds its pod by offer id and label
@@ -558,8 +605,8 @@ func (s *Service) Launch(ctx context.Context, req LaunchRequest, origin string) 
 	// launch
 	unlock := s.lockMachine(id)
 	defer unlock()
-	ref, err := c.Launch(lctx, WireKey(key), LaunchSpec{
-		Label: r.Label, OfferID: req.OfferID, Image: req.Image, DiskGB: req.DiskGB, TemplateID: req.TemplateID, Env: env,
+	ref, err := c.Launch(WithLaunchCUDA(lctx, li.cudaMin), WireKey(key), LaunchSpec{
+		Label: r.Label, OfferID: req.OfferID, Image: li.launchRef, DiskGB: req.DiskGB, TemplateID: req.TemplateID, Env: env,
 	})
 	before := *r
 	if err != nil {
@@ -1044,6 +1091,11 @@ func (s *Service) applyInstance(ctx context.Context, r *row, inst Instance, befo
 		if detail == "" {
 			detail = Label(r.Provider) + " reports " + strconv.Quote(inst.ProviderStatus)
 		}
+		if before.Problem == ProblemImagePullFailed || before.Problem == ProblemCUDAFailed {
+			problem, detail = before.Problem, before.Detail // classified when it failed
+		} else if p, d, ok := s.classifyFailure(ctx, r, inst, before); ok {
+			problem, detail = p, d
+		}
 	case StatusUnknown:
 		detail = Label(r.Provider) + " reports " + strconv.Quote(inst.ProviderStatus)
 	default: // creating, starting, stopping
@@ -1063,9 +1115,39 @@ func (s *Service) applyInstance(ctx context.Context, r *row, inst Instance, befo
 			s.applyProbe(ctx, r, before, now)
 		}
 	}
-	if r.Problem == "" && foreign {
-		r.Problem, r.Detail = before.Problem, before.Detail
+	if r.Problem == "" && foreign && !(before.Problem == ProblemPullSlow && status != StatusCreating && status != StatusStarting) {
+		r.Problem, r.Detail = before.Problem, before.Detail // a pull that finished is no longer slow
 	}
+}
+
+// classifyFailure names why a machine failed from the provider's text
+// (status, detail, then once the log tail): a pull the provider could not
+// make (image_pull_failed) or a CUDA failure (cuda_failed), with the copy of
+// IMAGE-PLAN §4.6. ok is false when nothing known matches.
+func (s *Service) classifyFailure(ctx context.Context, r *row, inst Instance, before row) (Problem, string, bool) {
+	text := inst.ProviderStatus + " " + inst.Detail
+	if p, d, ok := failureDetail(text, r.ImageLaunchRef, r.Spec.DiskGB); ok {
+		return p, d, true
+	}
+	if before.Status == StatusFailed || r.ProviderID == "" {
+		return "", "", false // the log tail is read once, when the machine fails
+	}
+	c, ok := Lookup(r.Provider)
+	if !ok {
+		return "", "", false
+	}
+	key, source, err := storedKey(ctx, r.Provider)
+	if err != nil || source == "" {
+		return "", "", false
+	}
+	unlock := s.lockKind(r.Provider)
+	logs, err := c.Logs(ctx, WireKey(key), r.ProviderID, 100)
+	unlock()
+	if err != nil {
+		s.noteRetry(r.Provider, err)
+		return "", "", false
+	}
+	return failureDetail(logs, r.ImageLaunchRef, r.Spec.DiskGB)
 }
 
 // applyProbe asks the machine whether it is ready (r.Status is running).
@@ -1086,11 +1168,15 @@ func (s *Service) applyProbe(ctx context.Context, r *row, before row, now time.T
 		if r.BaseURL == "" && len(eps) > 0 {
 			r.BaseURL = eps[0].URL
 		}
-		if res.AuthEnforced != nil && !*res.AuthEnforced {
+		switch {
+		case res.AuthEnforced != nil && !*res.AuthEnforced:
 			r.Problem, r.Detail = ProblemOpenServer, detailOpen
-		} else {
+		case before.Problem == ProblemCUDAFailed:
+			r.Problem, r.Detail = before.Problem, before.Detail // a token change does not fix the GPU
+		default:
 			r.Problem, r.Detail = "", ""
 		}
+		s.afterReady(ctx, r, res)
 	case res.TokenRejected:
 		r.Problem, r.Detail = ProblemTokenMismatch, detailMismatch
 	case wasReady:
@@ -1104,10 +1190,85 @@ func (s *Service) applyProbe(ctx context.Context, r *row, before row, now time.T
 	}
 }
 
-// applyTimeouts: never ready 20 min after the create is failed/not_ready_timeout
-// (still refreshed, and it recovers if it answers later).
+// afterReady runs the checks a pre-launch check cannot make, on a machine
+// that just answered with its token (IMAGE-PLAN §4.4, §4.6): the build it
+// runs against the one the launch pinned (a warning), and once its CUDA
+// self-check (cuda_failed when the trainer's CUDA does not run there). The
+// CUDA check runs in the background: importing torch on a cold disk takes
+// up to the machine's 90 s bound, and no refresh waits for it.
+func (s *Service) afterReady(ctx context.Context, r *row, res ProbeResult) {
+	if want := expectedBuild(r); want != "" && res.Version != "" && !sameBuild(res.Version, want) {
+		if w := buildWarning(res.Version, want); !slices.Contains(r.Spec.Warnings, w) {
+			r.Spec.Warnings = append(slices.Clone(r.Spec.Warnings), w)
+		}
+	}
+	if r.Problem != "" || r.BaseURL == "" {
+		return
+	}
+	s.mu.Lock()
+	if s.cudaTries == nil {
+		s.cudaTries = map[string]int{}
+	}
+	tries := s.cudaTries[r.ID]
+	if tries < 0 || tries >= cudaTries {
+		s.mu.Unlock()
+		return
+	}
+	s.cudaTries[r.ID] = cudaRunning
+	s.mu.Unlock()
+	id, base, token, simulated := r.ID, r.BaseURL, r.Token, r.Simulated
+	bctx := context.WithoutCancel(ctx)
+	s.checks.Add(1)
+	go func() {
+		defer s.checks.Done()
+		cr, err := cudaCheck(bctx, base, token, simulated)
+		settled := err == nil && (!cr.Found || cr.OK || cr.Failure == nil || *cr.Failure != "timeout")
+		s.mu.Lock()
+		if settled {
+			s.cudaTries[id] = cudaSettled
+		} else {
+			s.cudaTries[id] = tries + 1 // asked again on the next refresh that finds it ready
+		}
+		s.mu.Unlock()
+		if !settled || !cr.Found || cr.OK {
+			return
+		}
+		s.withRow(bctx, id, func(r *row) error {
+			if r.Status != StatusReady || r.Problem != "" || r.BaseURL != base {
+				return nil // it moved on meanwhile
+			}
+			before := *r
+			r.Problem, r.Detail = ProblemCUDAFailed, cudaDetail(cr)
+			return s.save(bctx, r, before)
+		})
+	}()
+}
+
+// cudaTries states besides a count of the calls made.
+const (
+	cudaSettled = -1 // answered (ok, failed, or an image without the route)
+	cudaRunning = -2 // a check is in flight
+)
+
+// WaitChecks waits for the background checks started so far (tests and
+// the simulate e2e, before they read a machine).
+func (s *Service) WaitChecks() { s.checks.Wait() }
+
+// applyTimeouts: never ready 20 min (plus the host's predicted pull) after
+// the create is failed/not_ready_timeout (still refreshed, and it recovers
+// if it answers later). A machine with a predicted pull that is still
+// allocating or pulling long after it gets pull_slow instead (the pull
+// watchdog, IMAGE-PLAN §4.6).
 func (s *Service) applyTimeouts(r *row, now time.Time) {
 	if r.EndedAt != nil || r.ReadyAt != nil {
+		return
+	}
+	pulling := r.Status == StatusCreating || r.Status == StatusStarting
+	if r.Spec.PullS > 0 && pulling {
+		// the host's predicted pull decides: pull_slow, never not_ready, while it pulls
+		if r.Problem == "" && now.Sub(time.UnixMilli(r.CreatedAt)) > pullSlowAfter(r.Spec.PullS) {
+			r.Problem, r.Detail = ProblemPullSlow, pullSlowDetail(r.Provider)
+		}
 		return
 	}
 	switch r.Status {
@@ -1121,7 +1282,7 @@ func (s *Service) applyTimeouts(r *row, now time.Time) {
 	if r.Status == StatusFailed && r.Problem == "" {
 		return
 	}
-	if now.Sub(time.UnixMilli(r.CreatedAt)) > readyTimeout() {
+	if now.Sub(time.UnixMilli(r.CreatedAt)) > readyTimeout()+time.Duration(r.Spec.PullS*float64(time.Second)) {
 		r.Status, r.Problem, r.Detail = StatusFailed, ProblemNotReady, detailNotReady
 	}
 }

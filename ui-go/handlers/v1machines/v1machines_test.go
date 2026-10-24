@@ -20,7 +20,11 @@ import (
 	"github.com/geocine/aitoolkit/internal/httpx"
 	"github.com/geocine/aitoolkit/internal/mcpserver"
 	"github.com/geocine/aitoolkit/internal/provision"
+	"github.com/geocine/aitoolkit/internal/provision/imagetest"
+	"github.com/geocine/aitoolkit/internal/provision/mockkit"
 	"github.com/geocine/aitoolkit/internal/provision/sim"
+	"github.com/geocine/aitoolkit/internal/provision/vast"
+	"github.com/geocine/aitoolkit/internal/provision/vast/vastmock"
 	"github.com/geocine/aitoolkit/internal/state"
 	"github.com/geocine/aitoolkit/internal/testutil"
 	"github.com/geocine/aitoolkit/internal/v1api"
@@ -638,6 +642,64 @@ return { configured: providers.find(p => p.kind === "runpod").configured, n: off
 		}
 		if strings.Contains(b.body, out.Token) && !strings.HasSuffix(b.path, "/link") {
 			t.Errorf("%s leaked the machine token: %s", b.path, b.body)
+		}
+	}
+}
+
+// nowClock paces the Vast limiter without waiting.
+type nowClock struct{}
+
+func (nowClock) Now() time.Time                             { return time.Now() }
+func (nowClock) Sleep(context.Context, time.Duration) error { return nil }
+
+// The offers route with image= runs the image check (registrymock through
+// imagetest) and sends the image's host filter to Vast, server-side; every
+// offer comes back with host and fit.
+func TestOffersImageFilterReachesVast(t *testing.T) {
+	openState(t)
+	imagetest.Use(t, imagetest.Options{})
+	m := vastmock.New(mockkit.Options{})
+	t.Cleanup(m.Close)
+	oldAPI, oldPace := vast.API, vast.Pace
+	vast.API, vast.Pace = m.Start(), vast.NewLimiter(nowClock{})
+	t.Cleanup(func() { vast.API, vast.Pace = oldAPI, oldPace })
+	t.Setenv(provision.EnvKeyName(provision.Vast), "vast-key-for-the-offers-test")
+	old := provision.Default
+	provision.Default = &provision.Service{}
+	t.Cleanup(func() { provision.Default = old })
+	mux := http.NewServeMux()
+	Register(mux)
+
+	w := call(t, mux, "GET", "/v1/providers/vast/offers?image=ghcr.io/geocine/aitoolkit-go:latest&model=flux&fast=1", "")
+	if w.Code != 200 {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	var body map[string]any
+	for _, r := range m.Rec.Requests() {
+		if r.Method == "POST" && strings.HasPrefix(r.Path, "/api/v0/bundles") {
+			if err := json.Unmarshal(r.Body, &body); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	got, _ := json.Marshal(map[string]any{"cuda": body["cuda_max_good"], "cc": body["compute_cap"], "arch": body["cpu_arch"],
+		"disk": body["disk_space"], "inet": body["inet_down"]})
+	want := `{"arch":{"eq":"amd64"},"cc":{"in":[800,860,890,900,1000,1030,1200]},"cuda":{"gte":13},"disk":{"gte":80},"inet":{"gte":500}}`
+	if string(got) != want {
+		t.Fatalf("Vast filter %s\nwant %s", got, want)
+	}
+	if _, has := body["driver_vers"]; has {
+		t.Fatal("driver_vers sent")
+	}
+	var out struct {
+		Items []provision.Offer `json:"items"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || len(out.Items) == 0 {
+		t.Fatalf("offers %s (%v)", w.Body, err)
+	}
+	for _, o := range out.Items {
+		if o.Host == nil || o.Fit == nil || o.Fit.VRAM == "" {
+			t.Fatalf("offer %s host %+v fit %+v", o.ID, o.Host, o.Fit)
 		}
 	}
 }

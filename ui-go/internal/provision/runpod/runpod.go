@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/geocine/aitoolkit/internal/hostfit"
 	"github.com/geocine/aitoolkit/internal/provision"
 )
 
@@ -87,6 +88,7 @@ func (a *Adapter) Info() provision.KindInfo {
 type gpuType struct {
 	ID           string  `json:"id"`
 	Name         string  `json:"name"`
+	Manufacturer string  `json:"manufacturer"`
 	Memory       float64 `json:"memory"` // VRAM GB
 	Secure       bool    `json:"secure"`
 	Community    bool    `json:"community"`
@@ -99,6 +101,33 @@ type gpuType struct {
 		Secure    int `json:"secure"`
 		Community int `json:"community"`
 	} `json:"maxCount"`
+	CUDAVersions []hostfit.RunPodCUDAVersion `json:"cudaVersions"` // with include=AVAILABILITY
+}
+
+// host is the type's host facts for q: RunPod places the pod on a host at
+// the image's CUDA floor (gpu.minCudaVersion), so the floor is a placement
+// rule, not a host filter.
+func (g gpuType) host(q provision.OfferQuery) hostfit.Host {
+	cudaMin := ""
+	if q.Filter != nil {
+		cudaMin = hostfit.RunPodGPUConfig(*q.Filter)
+	}
+	return hostfit.FromRunPodGPU(hostfit.RunPodGPUType{ID: g.ID, Name: g.Name, Manufacturer: g.Manufacturer,
+		Memory: g.Memory, CUDAVersions: g.CUDAVersions}, cudaMin)
+}
+
+// allowed applies q's image filter to a catalog type: a GPU the image's
+// build cannot run (or the policy hides) and, with a model, one below its
+// VRAM floor are dropped unless ShowAll, where the fit badges them.
+func (g gpuType) allowed(q provision.OfferQuery, h hostfit.Host) bool {
+	f := q.Filter
+	if f == nil || f.ShowAll {
+		return true
+	}
+	if ok, _ := hostfit.RunPodAllowedType(*f, g.ID); !ok {
+		return false
+	}
+	return f.MinVRAMGB <= 0 || h.VRAMGB <= 0 || h.VRAMGB >= f.MinVRAMGB
 }
 
 type podJSON struct {
@@ -357,6 +386,11 @@ func (a *Adapter) Offers(ctx context.Context, key string, q provision.OfferQuery
 			q.MaxPrice > 0 && o.PricePerHour > q.MaxPrice:
 			continue
 		}
+		h := g.host(q)
+		if !g.allowed(q, h) {
+			continue
+		}
+		provision.DecorateOffer(&o, h, q)
 		out = append(out, o)
 	}
 	slices.SortStableFunc(out, func(x, y provision.Offer) int {
@@ -404,6 +438,7 @@ func (a *Adapter) Quote(ctx context.Context, key, offerID string, q provision.Of
 		return provision.Offer{}, provision.Errorf(provision.RunPod, provision.ClassCapacity, res.Status,
 			"no %d× %s free on %s cloud right now", count, name, strings.ToLower(cloud))
 	}
+	provision.DecorateOffer(&o, g.host(q), q)
 	return o, nil
 }
 
@@ -456,9 +491,12 @@ func httpPort() string { return strconv.Itoa(provision.Port) + "/http" }
 
 // ---- pods ----
 
+// gpuConfig is CreateGpuConfig. minCudaVersion is the image's CUDA floor
+// and allowedCudaVersions is never sent: RunPod answers 400 when both are.
 type gpuConfig struct {
-	ID    string `json:"id"`
-	Count int    `json:"count"`
+	ID             string `json:"id"`
+	Count          int    `json:"count"`
+	MinCudaVersion string `json:"minCudaVersion,omitempty"`
 }
 
 // createBody is the whole POST /v2/pods body: the API rejects any field it
@@ -485,7 +523,7 @@ func (a *Adapter) Launch(ctx context.Context, key string, s provision.LaunchSpec
 		}
 	}
 	res, err := a.do(ctx, key, req{method: http.MethodPost, path: "/v2/pods", scope: "pods:write", create: true, secrets: secrets,
-		body: createBody{Name: s.Label, Image: s.Image, GPU: gpuConfig{gpuID, count}, Cloud: cloud, Disk: s.DiskGB,
+		body: createBody{Name: s.Label, Image: s.Image, GPU: gpuConfig{gpuID, count, provision.LaunchCUDAMin(ctx)}, Cloud: cloud, Disk: s.DiskGB,
 			Ports: []string{httpPort()}, Env: s.Env}})
 	if err != nil {
 		return provision.Ref{}, err
