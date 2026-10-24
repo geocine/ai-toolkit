@@ -42,8 +42,9 @@ cut off or unsure; aitk.datasets.fixCaptions(name, { ops, trigger, apply }) fixe
 Run bundles move a whole run (dataset + checkpoints + optimizer state) between servers: aitk.bundles.download(jobId) gives a
 signed URL, aitk.bundles.import({ url | remote+key | upload_id, start: true }) continues it here, aitk.bundles.push / list
 manage a remote's library. To hand a person a file, sign it: aitk.files.link({ root, path }) or aitk.links.create.
-GPU servers: providers.offers -> tell the user the price and ask -> machines.launch (max_price_per_hour, request_id)
--> machines.wait -> machines.link gives the new server's URL and token. machines.terminate when done.
+GPU servers: providers.recommend (or hosts.recommend across providers) -> show the value and speed picks with their
+reason and price, and ask -> machines.launch (max_price_per_hour, request_id) -> machines.wait -> machines.link gives
+the new server's URL and token. machines.terminate when done.
 Training runs for a long time: start it, return, and check back with later runs instead of waiting in one.`
 
 const apiNotes = `// Usage: every method returns a Promise; await it. Methods with path params take them positionally,
