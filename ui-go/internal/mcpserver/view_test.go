@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -15,6 +16,8 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/geocine/aitoolkit/internal/imgmeta"
 )
 
 func TestView(t *testing.T) {
@@ -75,5 +78,57 @@ func TestView(t *testing.T) {
 		"paths": []string{"a", "b", "c", "d", "e", "f", "g", "h", "i"}}})
 	if !res.IsError {
 		t.Fatal("9 paths accepted")
+	}
+}
+
+// A phone photo stored landscape with EXIF orientation 6 is previewed upright
+// (portrait), with its upright size in the note.
+func TestViewOrientation(t *testing.T) {
+	stored := image.NewRGBA(image.Rect(0, 0, 400, 300))
+	for y := 0; y < 300; y++ {
+		for x := 0; x < 400; x++ {
+			c := color.RGBA{255, 255, 255, 255}
+			if x < 100 && y < 100 {
+				c = color.RGBA{255, 0, 0, 255} // stored top-left: upright top-right
+			}
+			stored.Set(x, y, c)
+		}
+	}
+	var b bytes.Buffer
+	if err := jpeg.Encode(&b, stored, &jpeg.Options{Quality: 95}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := imgmeta.InjectJPEG(b.Bytes(), imgmeta.APP1(imgmeta.EncodeTIFF(imgmeta.Exif{Orientation: 6}, binary.BigEndian)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(t.TempDir(), "IMG_0042.jpg")
+	if err := os.WriteFile(p, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, note, err := preview(p, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if note != "300x400, shown at 150x200" {
+		t.Fatalf("note %q", note)
+	}
+	img, err := jpeg.Decode(bytes.NewReader(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := img.Bounds(); got.Dx() != 150 || got.Dy() != 200 {
+		t.Fatalf("preview is %dx%d, want 150x200", got.Dx(), got.Dy())
+	}
+	red := func(x, y int) bool {
+		r, g, _, _ := img.At(x, y).RGBA()
+		return r > 0xc000 && g < 0x4000
+	}
+	if !red(130, 20) || red(20, 20) {
+		t.Fatal("preview is not turned upright")
+	}
+	// at full size the note has no "shown at"
+	if _, note, _ := preview(p, 1024); note != "300x400" {
+		t.Fatalf("full-size note %q", note)
 	}
 }

@@ -93,26 +93,35 @@ func preview(full string, maxPx int) ([]byte, string, error) {
 	} else if st.Size() > viewMaxSource {
 		return nil, "", fmt.Errorf("image is larger than %d MiB", viewMaxSource>>20)
 	}
-	f, err := os.Open(src)
+	data, err := os.ReadFile(src) // a source image is capped at viewMaxSource above
 	if err != nil {
 		return nil, "", err
 	}
-	defer f.Close()
-	img, err := thumbs.Decode(f)
+	img, err := thumbs.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, "", err
+	}
+	// Show a phone photo upright, as the studio grid and photos/check do. A
+	// generated thumb is upright already and carries no EXIF.
+	o := 1
+	if src == full {
+		o = thumbs.Orientation(data)
 	}
 	b := img.Bounds()
-	fit := thumbs.Fit(img, maxPx)
+	w, h := b.Dx(), b.Dy()
+	if o >= 5 && o <= 8 {
+		w, h = h, w
+	}
+	fit := thumbs.Orient(thumbs.Fit(img, maxPx), o)
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, fit, &jpeg.Options{Quality: viewJPEGQuality}); err != nil {
 		return nil, "", err
 	}
-	note := fmt.Sprintf("%dx%d", b.Dx(), b.Dy())
+	note := fmt.Sprintf("%dx%d", w, h)
 	if src != full {
 		note = "thumbnail " + note
 	}
-	if fb := fit.Bounds(); fb.Dx() != b.Dx() || fb.Dy() != b.Dy() {
+	if fb := fit.Bounds(); fb.Dx() != w || fb.Dy() != h {
 		note += fmt.Sprintf(", shown at %dx%d", fb.Dx(), fb.Dy())
 	}
 	return buf.Bytes(), note, nil
