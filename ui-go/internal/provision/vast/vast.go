@@ -31,6 +31,11 @@ var (
 	// Pace spaces calls per endpoint (limiter.go). Tests swap it for one on a
 	// fake clock.
 	Pace = NewLimiter(nil)
+	// searchMaxWait is the longest an offer search queues for a search slot
+	// before it answers rate_limited with the wait: below the recommender's
+	// per-provider budget (gpupick.PerProviderTimeout, 20 s), so a full
+	// window reads "busy, try again in N s" instead of a timeout.
+	searchMaxWait = 15 * time.Second
 )
 
 func init() { provision.Register(adapter{}) }
@@ -98,7 +103,16 @@ type envelope struct {
 // call paces, sends and checks one Vast request, decoding a 2xx body into
 // out. Every 2xx is checked for success:false.
 func call(ctx context.Context, ep Endpoint, op, key, method, path string, query url.Values, body, out any) error {
-	if err := Pace.Wait(ctx, ep); err != nil {
+	if ep == EpSearch {
+		busy, err := Pace.WaitAtMost(ctx, ep, searchMaxWait)
+		if err != nil {
+			return &provision.Error{Provider: provision.Vast, Class: provision.ClassUnavailable, Message: err.Error()}
+		}
+		if busy > 0 {
+			return &provision.Error{Provider: provision.Vast, Class: provision.ClassRateLimited, RetryAfter: busy.Round(time.Second) + time.Second,
+				Message: "Vast allows 10 offer searches a minute and this server has used them", SearchOnly: true}
+		}
+	} else if err := Pace.Wait(ctx, ep); err != nil {
 		return &provision.Error{Provider: provision.Vast, Class: provision.ClassUnavailable, Message: err.Error()}
 	}
 	u := strings.TrimRight(API, "/") + path
@@ -149,6 +163,7 @@ func classify(op string, res provision.Response, key string) error {
 		e.Class = provision.ClassRateLimited
 		e.Message = "Vast's daily search quota is used up until UTC midnight"
 		e.RetryAfter = untilUTCMidnight(time.Now())
+		e.SearchOnly = true // the instance endpoints keep working: the watcher goes on
 	case res.Status == http.StatusTooManyRequests || code == "rate_limit_exceeded":
 		e.Class = provision.ClassRateLimited
 		e.RetryAfter = provision.RetryAfter(res.Header, time.Now())

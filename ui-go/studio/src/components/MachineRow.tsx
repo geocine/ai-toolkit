@@ -84,12 +84,13 @@ export function MachineRow({
   }, [copied]);
 
   const can = (a: Machine['actions'][number]) => m.actions.includes(a);
-  // the server's forget rule: refused unless ended, or failed before anything was rented
-  const live = !m.ended_at && !(m.provider_id === '' && m.status === 'failed');
+  // the server's forget rule: refused unless ended, or refused before anything was rented
+  // (a never_listed create may have been made, so it needs force)
+  const live = !m.ended_at && !(m.provider_id === '' && m.status === 'failed' && m.problem !== 'never_listed');
   const plainHttp = !m.simulated && !!m.base_url && m.base_url.startsWith('http:');
   const terminateBtn = can('terminate') && (
     <button className="btn btn-sm btn-danger" onClick={() => setAsk('terminate')} disabled={busy}>
-      Terminate
+      {m.status === 'terminating' ? 'Terminate again' : 'Terminate'}
     </button>
   );
   const consoleBtn = consoleUrl && (
@@ -271,7 +272,12 @@ export function MachineRow({
             }
           }}
         >
-          {live ? (
+          {live && m.problem === 'never_listed' ? (
+            <p>
+              <strong>{m.name}</strong> is removed from this list. If {label} made it after all, it keeps running and billing there and this server stops
+              watching for it. Check the provider console first.
+            </p>
+          ) : live ? (
             <p>
               <strong>{m.name}</strong> is removed from this list, but it keeps running and billing at {label}. Terminate it first unless you will manage it in
               the provider console.

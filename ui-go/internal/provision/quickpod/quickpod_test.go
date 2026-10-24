@@ -180,6 +180,41 @@ func TestFastUnreported(t *testing.T) {
 	}
 }
 
+// A machine with less free space than max_disk_size can be rented with
+// only what is free (hostfit.FromQuickPod reads it the same way).
+func TestOffersMaxDiskIsFreeSpace(t *testing.T) {
+	row := map[string]any{"id": 7, "gpu_type": "NVIDIA GeForce RTX 3090", "num_gpus": 1, "gpu_vram": 24576,
+		"hourly_cost": 0.18, "max_disk_size": 444, "_machines": map[string]any{"online": true, "avail_disk_space": 200.6}}
+	stub(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/update/offer_is_busy" {
+			_, _ = w.Write([]byte("false"))
+			return
+		}
+		json.NewEncoder(w).Encode([]map[string]any{row})
+	})
+	ctx := context.Background()
+	got, err := a.Offers(ctx, key, provision.OfferQuery{DiskGB: 100})
+	if err != nil || len(got) != 1 || got[0].MaxDiskGB == nil || *got[0].MaxDiskGB != 200 {
+		t.Fatalf("offers %+v %v", got, err)
+	}
+	if h := got[0].Host; h == nil || int(h.DiskGB) != 200 {
+		t.Fatalf("host disk %+v", got[0].Host)
+	}
+	if got, err := a.Offers(ctx, key, provision.OfferQuery{DiskGB: 300}); err != nil || len(got) != 0 {
+		t.Fatalf("300 GB on a 200 GB-free machine kept: %+v %v", got, err)
+	}
+	_, err = a.Quote(ctx, key, "7", provision.OfferQuery{DiskGB: 300})
+	class(t, err, provision.ClassInvalid)
+	if err == nil || !strings.Contains(err.Error(), "this offer's 200 GB") {
+		t.Fatalf("quote: %v", err)
+	}
+	// no free space reported: max_disk_size stands
+	delete(row["_machines"].(map[string]any), "avail_disk_space")
+	if got, err := a.Offers(ctx, key, provision.OfferQuery{DiskGB: 300}); err != nil || len(got) != 1 || *got[0].MaxDiskGB != 444 {
+		t.Fatalf("without avail_disk_space: %+v %v", got, err)
+	}
+}
+
 func TestOffersLimitCap(t *testing.T) {
 	rows := make([]map[string]any, 250)
 	for i := range rows {

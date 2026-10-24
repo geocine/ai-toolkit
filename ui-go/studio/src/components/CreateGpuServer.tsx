@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, get, type Items, type Remote, type Server, type Settings } from '../lib/api';
 import type { NotifyConfig } from '../lib/lifecycle';
 import { perHour, providerNames } from '../lib/machines';
+import { priceCap } from '../lib/priceCap';
 import { launch, offers as listOffers, providers, recommend, recommendAll, removeKey, setKey, templates as listTemplates, testKey } from '../lib/provision';
 import type { GpuRecommendation, Machine, Offer, OfferQuery, Provider, ProviderKind, ProviderTemplate, RecommendQuery, WhenDone } from '../lib/provisionTypes';
 import { archName, checkImage, DEFAULT_IMAGE, gb, imageTag, minutes, modelArchs, recommendImage, type ImageCheckRequest, type ImageRecommendRequest } from '../lib/serverImage';
@@ -16,8 +17,6 @@ import { Callout, Empty, ErrorNote, useLoad } from './ui';
 
 const vramSteps = [0, 16, 24, 48, 80];
 const countSteps = [1, 2, 4, 8];
-
-const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /** "RTX 30-series or newer" from the image's SASS targets (sm_75 is hidden from offers by default). */
 function gpuFloor(sm: number[]): string {
@@ -609,7 +608,7 @@ function CreateForm({
       const m = await launch(s, {
         provider: p.kind,
         offer_id: offer.id,
-        max_price_per_hour: round2(offerPrice * 1.02),
+        max_price_per_hour: priceCap(offerPrice),
         request_id: rid.current,
         name: name.trim() || undefined,
         image: image.trim(),
@@ -1091,7 +1090,21 @@ function KeyStep({
         </Callout>
       )}
       <div className="key-row">
-        <input id="provider-key" type="password" autoComplete="new-password" value={keyText} onChange={e => setKeyText(e.target.value)} placeholder={`Paste your ${p.label} key`} />
+        {/* a masked text field, not a password one: the browser must not offer to save the key */}
+        <input
+          id="provider-key"
+          className="secret-input"
+          type="text"
+          autoComplete="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          data-1p-ignore=""
+          data-lpignore="true"
+          data-form-type="other"
+          value={keyText}
+          onChange={e => setKeyText(e.target.value)}
+          placeholder={`Paste your ${p.label} key`}
+        />
         <button className="btn btn-primary" type="submit" disabled={busy || !keyText.trim()}>
           {busy ? 'Checking…' : 'Save key'}
         </button>

@@ -30,27 +30,28 @@ import (
 // stubCloud is an in-memory provider: Launch creates an instance the test
 // then moves through its states with set.
 type stubCloud struct {
-	mu        sync.Mutex
-	kind      Kind
-	caps      Caps
-	verifyErr error
-	offers    []Offer
-	offersErr error
-	quote     Offer
-	quoteErr  error
-	templates []Template
-	launchErr error
-	listErr   error
-	getErr    error
-	actErr    error
-	logs      string
-	noID      bool // QuickPod: create returns no id; the pod is found by label
-	insts     map[string]*Instance
-	launched  []LaunchSpec
-	queries   []OfferQuery // what Offers and Quote received, in order
-	keys      []string
-	calls     map[string]int
-	next      int
+	mu            sync.Mutex
+	kind          Kind
+	caps          Caps
+	verifyErr     error
+	offers        []Offer
+	offersErr     error
+	quote         Offer
+	quoteErr      error
+	templates     []Template
+	launchErr     error
+	launchLostErr error // the create is made, then this error comes back (a timeout, a 5xx)
+	listErr       error
+	getErr        error
+	actErr        error
+	logs          string
+	noID          bool // QuickPod: create returns no id; the pod is found by label
+	insts         map[string]*Instance
+	launched      []LaunchSpec
+	queries       []OfferQuery // what Offers and Quote received, in order
+	keys          []string
+	calls         map[string]int
+	next          int
 }
 
 func newStub(k Kind) *stubCloud {
@@ -122,6 +123,9 @@ func (c *stubCloud) Launch(_ context.Context, key string, s LaunchSpec) (Ref, er
 	c.next++
 	id := fmt.Sprintf("pod%d", c.next)
 	c.insts[id] = &Instance{ProviderID: id, Label: s.Label, Status: StatusCreating, ProviderStatus: "CREATED"}
+	if c.launchLostErr != nil {
+		return Ref{}, c.launchLostErr
+	}
 	if c.noID {
 		return Ref{OfferID: s.OfferID, Label: s.Label}, nil
 	}
@@ -531,7 +535,8 @@ func TestKeyRedaction(t *testing.T) {
 		t.Fatalf("Launch quote: %v", err)
 	}
 	c.quoteErr = nil
-	c.launchErr = leak
+	// a refused create (an unclear one is kept as creating: TestLaunchUnclearAnswerIsWatched)
+	c.launchErr = Errorf(RunPod, ClassInvalid, 400, "upstream said: key "+key+" failed")
 	if _, _, err := e.s.Launch(e.ctx, e.req(RunPod), ""); err == nil || strings.Contains(err.Error(), key) {
 		t.Fatalf("Launch: %v", err)
 	}
@@ -773,6 +778,120 @@ func TestLaunchFailureRecorded(t *testing.T) {
 	e.clouds[Vast].launchErr = nil
 	if m := e.launch(Vast, nil); m.Name != "RTX 4090 on Vast.ai" {
 		t.Fatalf("the failed row kept its name: %q", m.Name)
+	}
+}
+
+// A create that may have been made (a timeout, a 5xx, an unreadable 2xx) is
+// not ended: it stays creating, counts toward max_running, needs force to
+// forget, and is adopted by label when it shows up.
+func TestLaunchUnclearAnswerIsWatched(t *testing.T) {
+	e := newEnv(t)
+	const key = "rpa_unclear_SECRET_5678"
+	e.setKey(RunPod, key)
+	one := 1
+	if _, err := e.s.SetKey(e.ctx, RunPod, ProviderUpdate{MaxRunning: &one}); err != nil {
+		t.Fatal(err)
+	}
+	c := e.clouds[RunPod]
+	c.launchLostErr = Errorf(RunPod, ClassUnavailable, 502, "bad gateway for key "+key)
+	m, created, err := e.s.Launch(e.ctx, e.req(RunPod), "")
+	if err != nil || !created {
+		t.Fatalf("unclear create: created %v, %v", created, err)
+	}
+	if m.Status != StatusCreating || m.ProviderID != "" || m.EndedAt != nil || !strings.Contains(m.Detail, "may have been made") ||
+		strings.Contains(m.Detail, key) || slices.Contains(m.Actions, "forget") {
+		t.Fatalf("machine %+v", m)
+	}
+	if n, _ := liveCount(e.ctx, RunPod, false); n != 1 {
+		t.Fatalf("liveCount %d, want 1", n)
+	}
+	c.launchLostErr = nil
+	if _, _, err := e.s.Launch(e.ctx, e.req(RunPod), ""); codeOf(err) != v1api.CodeConflict {
+		t.Fatalf("a second create past max_running: %v", err)
+	}
+	if err := e.s.Forget(e.ctx, m.ID, false); codeOf(err) != v1api.CodeConflict {
+		t.Fatalf("forget without force: %v", err)
+	}
+	if got := e.refresh(m.ID); got.ProviderID != "pod1" || got.Status != StatusCreating || got.Detail != "" {
+		t.Fatalf("adopted by label: %+v", got)
+	}
+	if c.n("Launch") != 1 {
+		t.Fatalf("launches %d", c.n("Launch"))
+	}
+
+	// a refusal still ends the row
+	c.launchErr = Errorf(RunPod, ClassCapacity, 409, "taken")
+	two := 2
+	if _, err := e.s.SetKey(e.ctx, RunPod, ProviderUpdate{MaxRunning: &two}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.s.Launch(e.ctx, e.req(RunPod), ""); codeOf(err) != v1api.CodeNoCapacity {
+		t.Fatalf("refused create: %v", err)
+	}
+	ms, _ := e.s.List(e.ctx, false)
+	if len(ms) != 2 || ms[0].Status != StatusFailed || ms[0].EndedAt == nil {
+		t.Fatalf("machines %+v", ms)
+	}
+}
+
+// A terminate the provider accepted but did not carry out can be sent again.
+func TestServiceTerminateAgain(t *testing.T) {
+	e := newEnv(t)
+	c := e.clouds[Vast]
+	m := e.launch(Vast, nil)
+	c.running("pod1")
+	e.refresh(m.ID)
+	if got, err := e.s.Terminate(e.ctx, m.ID, false); err != nil || got.Status != StatusTerminating {
+		t.Fatalf("terminate: %+v %v", got, err)
+	}
+	// the provider still lists it running
+	got := e.refresh(m.ID)
+	if got.Status != StatusTerminating || !slices.Contains(got.Actions, "terminate") {
+		t.Fatalf("still listed: %+v", got)
+	}
+	if got, err := e.s.Terminate(e.ctx, m.ID, false); err != nil || got.Status != StatusTerminating {
+		t.Fatalf("terminate again: %+v %v", got, err)
+	}
+	if n := c.n("Terminate"); n != 2 {
+		t.Fatalf("Terminate calls %d, want 2", n)
+	}
+	c.remove("pod1")
+	if got := e.refresh(m.ID); got.Status != StatusTerminated || slices.Contains(got.Actions, "terminate") {
+		t.Fatalf("gone: %+v", got)
+	}
+	if _, err := e.s.Terminate(e.ctx, m.ID, false); err != nil || c.n("Terminate") != 2 {
+		t.Fatalf("terminate an ended one: %v, calls %d", err, c.n("Terminate"))
+	}
+}
+
+// Vast's daily search quota (or its search window) limits offer search
+// only: the watcher keeps reading the instances.
+func TestSearchOnlyLimitKeepsWatcher(t *testing.T) {
+	e := newEnv(t)
+	c := e.clouds[Vast]
+	m := e.launch(Vast, nil)
+	c.running("pod1")
+	e.refresh(m.ID)
+	c.offersErr = &Error{Provider: Vast, Class: ClassRateLimited, Status: 429, Message: "quota", RetryAfter: 20 * time.Hour, SearchOnly: true}
+	if _, err := e.s.Offers(e.ctx, Vast, OfferQuery{DiskGB: 100}); codeOf(err) != v1api.CodeRateLimited {
+		t.Fatalf("offers: %v", err)
+	}
+	lists := c.n("List")
+	e.clock.Advance(61 * time.Second) // a ready machine is due every minute
+	e.s.Tick(e.ctx)
+	if c.n("List") != lists+1 {
+		t.Fatalf("the watcher paused on a search-only limit (List %d -> %d)", lists, c.n("List"))
+	}
+	// any other rate limit pauses it
+	c.offersErr = &Error{Provider: Vast, Class: ClassRateLimited, Status: 429, Message: "slow down", RetryAfter: time.Hour}
+	if _, err := e.s.Offers(e.ctx, Vast, OfferQuery{DiskGB: 200}); codeOf(err) != v1api.CodeRateLimited {
+		t.Fatalf("offers: %v", err)
+	}
+	lists = c.n("List")
+	e.clock.Advance(61 * time.Second)
+	e.s.Tick(e.ctx)
+	if c.n("List") != lists {
+		t.Fatal("the watcher ran through a provider-wide rate limit")
 	}
 }
 
@@ -1322,6 +1441,13 @@ func TestServiceNeverListed(t *testing.T) {
 		!slices.Equal(m.Actions, []string{"forget"}) {
 		t.Fatalf("after 5 min: %+v", m)
 	}
+	// it may be billing: forget needs force and it still counts toward max_running
+	if err := e.s.Forget(e.ctx, m.ID, false); codeOf(err) != v1api.CodeConflict {
+		t.Fatalf("forget never_listed without force: %v", err)
+	}
+	if n, _ := liveCount(e.ctx, QuickPod, false); n != 1 {
+		t.Fatalf("liveCount %d, want 1", n)
+	}
 	c.mu.Lock()
 	c.insts["pod1"].Label = label // it appears after all
 	c.mu.Unlock()
@@ -1343,6 +1469,18 @@ func TestServiceNeverListedNamesProvider(t *testing.T) {
 	m = e.refresh(m.ID)
 	if problemOf(m) != ProblemNeverListed || !strings.Contains(m.Detail, "RunPod") || strings.Contains(m.Detail, "QuickPod") {
 		t.Fatalf("never_listed on RunPod: %+v", m)
+	}
+	// it holds a max_running slot (default 2): one more launch, then the cap
+	c.noID = false
+	e.launch(RunPod, nil)
+	if _, _, err := e.s.Launch(e.ctx, e.req(RunPod), ""); codeOf(err) != v1api.CodeConflict {
+		t.Fatalf("never_listed did not count toward max_running: %v", err)
+	}
+	if err := e.s.Forget(e.ctx, m.ID, false); codeOf(err) != v1api.CodeConflict {
+		t.Fatalf("forget without force: %v", err)
+	}
+	if err := e.s.Forget(e.ctx, m.ID, true); err != nil {
+		t.Fatalf("forget with force: %v", err)
 	}
 }
 

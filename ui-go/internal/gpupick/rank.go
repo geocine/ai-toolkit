@@ -2,6 +2,7 @@ package gpupick
 
 import (
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 
@@ -115,6 +116,44 @@ func offerVRAM(o provision.Offer) float64 {
 	return float64(o.VRAMGB)
 }
 
+// tableGPU is the GPU table's row for an offer: the provider's raw GPU name
+// first, then the display name (SpeedOf's order).
+func tableGPU(o provision.Offer) (hostfit.GPU, bool) {
+	if o.Host != nil && o.Host.GPUName != "" {
+		if g, ok := hostfit.Lookup(o.Host.GPUName); ok {
+			return g, true
+		}
+	}
+	return hostfit.Lookup(o.GPU)
+}
+
+// legacySM reports a Volta or Turing GPU (sm_7x): never picked (D-8),
+// whatever the image declares. An image without SM or PTX facts adds no
+// arch code to the fit, so this reads the host's SM, else the table's.
+func legacySM(o provision.Offer) bool {
+	sm := 0
+	if o.Host != nil {
+		sm = o.Host.SM
+	}
+	if sm <= 0 {
+		if g, ok := tableGPU(o); ok {
+			sm = g.SM
+		}
+	}
+	return sm/10 == 7
+}
+
+// displayVRAM is the GB a pick's line shows: the GPU's nominal size when
+// the reported memory sits within the tier slack below it (an L4's 23034
+// MiB is a 24 GB card, as on RunPod), else the reported size.
+func displayVRAM(o provision.Offer) int {
+	raw := offerVRAM(o)
+	if g, ok := tableGPU(o); ok && g.VRAMGB > 0 && (raw <= 0 || (raw >= g.VRAMGB*TierSlack-eps && raw <= g.VRAMGB+0.5)) {
+		return int(math.Round(g.VRAMGB))
+	}
+	return int(math.Round(raw))
+}
+
 // SpeedOf is the offer's relative training speed (RTX 4090 = 1.00): the
 // provider's raw GPU name first (adapters rewrite display names), then the
 // display name. ok is false for a GPU the table does not know or does not
@@ -176,7 +215,7 @@ func Qualify(o provision.Offer, caps provision.Caps, need hostfit.Need, q Query,
 		return RejectCUDAUnknown
 	case has("runpod_no_cuda_capacity"):
 		return RejectCUDACapacity
-	case has(archCodes...):
+	case has(archCodes...) || legacySM(o):
 		return RejectGPUArch
 	case has("disk_image") || (o.MaxDiskGB != nil && *o.MaxDiskGB < diskAsk(need, q)):
 		return RejectDisk
@@ -333,7 +372,7 @@ func ReasonLine(p Pick, crossProvider bool, cudaMin string) string {
 	if crossProvider {
 		gpu += " on " + provision.Label(o.Provider)
 	}
-	parts := []string{gpu, fmt.Sprintf("%d GB", o.VRAMGB), fmt.Sprintf("$%.2f/h", o.PricePerHour)}
+	parts := []string{gpu, fmt.Sprintf("%d GB", displayVRAM(o)), fmt.Sprintf("$%.2f/h", o.PricePerHour)}
 	if h.InetDownMbps > 0 {
 		parts = append(parts, fmt.Sprintf("%.0f Mbps", h.InetDownMbps))
 		if h.DiskBWMBps <= 0 {

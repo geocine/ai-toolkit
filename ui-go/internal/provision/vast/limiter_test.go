@@ -286,3 +286,38 @@ func TestLimiterCancelledSleepHandsSlotBack(t *testing.T) {
 		t.Fatalf("slot not handed back: last %v, want %v", got, booked)
 	}
 }
+
+func TestLimiterWaitAtMost(t *testing.T) {
+	c := newSleepClock()
+	l := NewLimiter(c)
+	ctx := context.Background()
+	for i := range 10 {
+		c.advance(time.Second) // t+1 .. t+10
+		if busy, err := l.WaitAtMost(ctx, EpSearch, 15*time.Second); err != nil || busy != 0 {
+			t.Fatalf("search %d: busy %v, %v", i+1, busy, err)
+		}
+	}
+	// the next slot is 51 s away: refused at once, nothing booked
+	if busy, err := l.WaitAtMost(ctx, EpSearch, 15*time.Second); err != nil || busy != 51*time.Second || len(c.sleeps()) != 0 {
+		t.Fatalf("full window: busy %v, %v, sleeps %v", busy, err, c.sleeps())
+	}
+	// 40 s later it is 11 s away: waited for
+	c.advance(40 * time.Second)
+	if busy, err := l.WaitAtMost(ctx, EpSearch, 15*time.Second); err != nil || busy != 0 {
+		t.Fatalf("within the limit: busy %v, %v", busy, err)
+	}
+	if s := c.sleeps(); len(s) != 1 || s[0] != 11*time.Second {
+		t.Fatalf("slept %v, want [11s] (the refused call booked nothing)", s)
+	}
+	// a plain Wait still queues as long as it takes
+	if err := l.Wait(ctx, EpSearch); err != nil {
+		t.Fatal(err)
+	}
+	// other endpoints honour the limit too
+	if busy, _ := l.WaitAtMost(ctx, EpCreate, 0); busy != 0 {
+		t.Fatalf("first create: busy %v", busy)
+	}
+	if busy, _ := l.WaitAtMost(ctx, EpCreate, time.Second); busy != 4500*time.Millisecond {
+		t.Fatalf("second create: busy %v", busy)
+	}
+}
