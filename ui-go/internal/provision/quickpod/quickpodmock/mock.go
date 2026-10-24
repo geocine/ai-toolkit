@@ -547,10 +547,7 @@ func (m *Mock) template(uuid string) (Template, bool) {
 // creditFail answers insufficient_credit (values as strings: errors are flat
 // string maps, spec: quickpod.md §8 item 7).
 func (m *Mock) creditFail(w http.ResponseWriter, f mockkit.Faults, hourly float64, action string) bool {
-	cur := m.credit
-	if f.NoCredit {
-		cur = 0.42
-	}
+	cur := f.Balance(m.credit)
 	if !f.NoCredit && cur >= hourly*minRuntime {
 		return false
 	}
@@ -745,11 +742,12 @@ func (m *Mock) listPods(bearerOK bool) http.HandlerFunc {
 }
 
 func (m *Mock) me(w http.ResponseWriter, r *http.Request) {
-	if _, _, ok := m.authed(w, r, false); !ok {
+	_, f, ok := m.authed(w, r, false)
+	if !ok {
 		return
 	}
 	m.mu.Lock()
-	c := m.credit
+	c := f.Balance(m.credit)
 	m.mu.Unlock()
 	mockkit.WriteJSON(w, 200, map[string]any{
 		"id": 1234, "name": "Sim", "email": "sim@example.com", "user_type": "user", "role": "user",

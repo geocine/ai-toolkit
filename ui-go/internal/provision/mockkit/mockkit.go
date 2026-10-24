@@ -68,7 +68,7 @@ const (
 
 type Faults struct {
 	Unauthorized      bool       // every authenticated call -> provider 401
-	NoCredit          bool       // create/start -> provider credit error
+	NoCredit          bool       // create/start -> provider credit error; the balance reads 0
 	NoCapacity        bool       // create -> provider capacity error
 	RateLimitEvery    int        // every Nth authenticated call -> 429 (0 = off)
 	CrashAfterRunning bool       // provider error state after running
@@ -180,6 +180,15 @@ func (o Options) Authorize(key string) (Faults, bool) {
 		return f, false
 	}
 	return f, !f.Unauthorized
+}
+
+// Balance is the credit a mock reports to a caller with faults f: a sim_broke
+// key (NoCredit) reads as an empty account, as its creates and starts fail.
+func (f Faults) Balance(credit float64) float64 {
+	if f.NoCredit {
+		return 0
+	}
+	return credit
 }
 
 func (f Faults) Scale(d time.Duration) time.Duration {

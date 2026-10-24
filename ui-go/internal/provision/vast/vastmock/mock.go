@@ -266,7 +266,7 @@ func (m *Mock) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case path == "/api/v0/users/current" && r.Method == http.MethodGet:
-		m.user(w, r)
+		m.user(w, r, f)
 	case path == "/api/v0/bundles" && (r.Method == http.MethodPost || r.Method == http.MethodGet):
 		m.bundles(w, r, keyless)
 	case reAsk.MatchString(path) && r.Method == http.MethodPut:
@@ -344,9 +344,9 @@ func readJSON(r *http.Request, v any) error {
 
 // ---- account ----
 
-func (m *Mock) user(w http.ResponseWriter, r *http.Request) {
+func (m *Mock) user(w http.ResponseWriter, r *http.Request, f mockkit.Faults) {
 	m.mu.Lock()
-	credit := m.credit
+	credit := f.Balance(m.credit)
 	m.mu.Unlock()
 	// spec: vast.md §2. The raw answer carries api_key; the adapter must drop it.
 	mockkit.WriteJSON(w, http.StatusOK, map[string]any{

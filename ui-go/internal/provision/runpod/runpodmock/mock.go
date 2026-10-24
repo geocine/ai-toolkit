@@ -960,7 +960,7 @@ func (m *Mock) graphql(w http.ResponseWriter, r *http.Request) {
 			spend += p.price
 		}
 	}
-	credit := m.credit
+	credit := callerOf(r).faults.Balance(m.credit)
 	m.mu.Unlock()
 	mockkit.WriteJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"myself": map[string]any{
 		"id": "user_mock", "clientBalance": credit, "currentSpendPerHr": round4(spend), "spendLimit": 80}}}, "")

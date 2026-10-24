@@ -251,11 +251,35 @@ func TestSimKeyFaults(t *testing.T) {
 			if code(err) != v1api.CodeProviderAuth || v1api.StatusOf(code(err)) != 400 {
 				t.Fatalf("sim_bad: %v (code %q)", err, code(err))
 			}
+			// the studio shows this as is: the provider and the rejection, once
+			if _, msg, _, _ := provision.V1(err); !strings.HasPrefix(msg, provision.Label(k)+" rejected the API key") ||
+				strings.Count(msg, provision.Label(k)) != 1 || strings.Count(strings.ToLower(msg), "key") > 1 {
+				t.Fatalf("sim_bad message %q", msg)
+			}
 			if _, err := e.launch(k, "sim_full"); code(err) != v1api.CodeNoCapacity || v1api.StatusOf(code(err)) != 409 {
 				t.Fatalf("sim_full: %v (code %q)", err, code(err))
 			}
 			if _, err := e.launch(k, "sim_broke"); code(err) != v1api.CodeInsufficientCredit || v1api.StatusOf(code(err)) != 402 {
 				t.Fatalf("sim_broke: %v (code %q)", err, code(err))
+			}
+		})
+	}
+}
+
+// The key check reports the credit the launch then holds to: the plain key
+// has some, sim_broke none.
+func TestSimKeyCredit(t *testing.T) {
+	for _, k := range kinds {
+		t.Run(string(k), func(t *testing.T) {
+			e := newSim(t)
+			for key, want := range map[string]float64{"": 25, "sim_broke": 0} {
+				if err := e.setKey(k, key); err != nil {
+					t.Fatalf("SetKey(%q): %v", key, err)
+				}
+				r, err := e.svc.Test(e.ctx, k)
+				if err != nil || !r.OK || r.Credit == nil || *r.Credit != want {
+					t.Fatalf("key %q: %+v %v, want credit %v", key, r, err, want)
+				}
 			}
 		})
 	}
