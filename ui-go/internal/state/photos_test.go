@@ -405,3 +405,60 @@ func TestPhotoFileSHA256(t *testing.T) {
 		t.Fatal("missing file hashed")
 	}
 }
+
+// A sha that a photo in another folder still has keeps its rows when one
+// dataset forgets its analysis; a sha only the forgotten folder has, or one
+// whose other copy is gone from disk, does not.
+func TestPhotoCacheForgetKeepsShared(t *testing.T) {
+	ctx := openPhotoDB(t)
+	root := testutil.TempDir(t)
+	dir, other := filepath.Join(root, "ana"), filepath.Join(root, "ana_v2")
+	write := func(p, body string) string {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		sum, err := FileSHA256(ctx, p, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sum
+	}
+	shared := write(filepath.Join(dir, "a.jpg"), "same bytes")
+	if got := write(filepath.Join(other, "copy.jpg"), "same bytes"); got != shared {
+		t.Fatal("copies hash differently")
+	}
+	own := write(filepath.Join(dir, ".set_aside", "b.jpg"), "only here")
+	gone := write(filepath.Join(dir, "c.jpg"), "copy deleted")
+	write(filepath.Join(other, "gone.jpg"), "copy deleted")
+	if err := os.Remove(filepath.Join(other, "gone.jpg")); err != nil {
+		t.Fatal(err)
+	}
+	all := []string{shared, own, gone}
+	for _, s := range all {
+		if err := PutPhotoMetrics(ctx, s, 1, []byte(`{}`)); err != nil {
+			t.Fatal(err)
+		}
+		if err := PutPhotoFaces(ctx, map[string][]byte{s: []byte(`{}`)}, 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := PutPhotoSet(ctx, &PhotoSet{Dir: dir, Kind: "person"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ForgetPhotos(ctx, dir, all); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := GetPhotoMetrics(ctx, all, 1); len(got) != 1 || got[shared] == nil {
+		t.Fatalf("metrics after forget = %q, want only the shared photo's", got)
+	}
+	if got, _ := GetPhotoFaces(ctx, all, 1); len(got) != 1 || got[shared] == nil {
+		t.Fatalf("faces after forget = %q, want only the shared photo's", got)
+	}
+	if s, err := GetPhotoSet(ctx, dir); err != nil || s != nil {
+		t.Fatalf("forgotten set = %+v, %v", s, err)
+	}
+}

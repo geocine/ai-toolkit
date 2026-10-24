@@ -107,7 +107,9 @@ type asideOrigin struct {
 
 // readAsideFrom maps the set-aside photos to the dataset paths recorded
 // for them. A record for a photo that is gone, or whose content changed,
-// is dropped.
+// is dropped, and so is one whose path is not a clean photo path inside
+// the dataset (restore moves the photo there; the file may have been
+// written by hand).
 func readAsideFrom(dir string, aside []*entry) map[string]string {
 	out := map[string]string{}
 	data, err := os.ReadFile(filepath.Join(dir, SetAsideDir, asideFromFile))
@@ -121,6 +123,10 @@ func readAsideFrom(dir string, aside []*entry) map[string]string {
 	for _, e := range aside {
 		r, ok := recs[e.rel]
 		if !ok || r.From == "" || r.From == e.rel || (r.SHA256 != "" && e.sha != "" && r.SHA256 != e.sha) {
+			continue
+		}
+		if _, rel, ok := photoPath(dir, r.From); !ok || rel != r.From || strings.HasPrefix(rel, SetAsideDir+"/") ||
+			!filepath.IsLocal(filepath.FromSlash(rel)) {
 			continue
 		}
 		out[e.rel] = r.From

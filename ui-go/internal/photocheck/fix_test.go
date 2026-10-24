@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"image"
+	"image/color"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/geocine/aitoolkit/internal/imgmeta"
 	"github.com/geocine/aitoolkit/internal/state"
@@ -157,6 +160,10 @@ func TestFix(t *testing.T) {
 	if !s.exists(".set_aside/t.png") || s.exists("t.png") || string(s.read(t, "t.txt")) != "transparent" {
 		t.Error("t.png: the original goes aside, the caption stays with t.jpg")
 	}
+	// the same format keeps its name, and the original still goes aside
+	if !s.exists(".set_aside/g16.png") || !bytes.Equal(s.read(t, ".set_aside/g16.png"), files["g16.png"]) {
+		t.Error("g16.png: the 16-bit original should be in .set_aside/")
+	}
 	for _, f := range []string{"g16.png", "t.jpg"} {
 		if it := itemByFile(fx.Review, f); it == nil || slices.Contains(it.Flags, FlagGray16) || slices.Contains(it.Flags, FlagTransparent) {
 			t.Errorf("%s after convert: %+v", f, it)
@@ -241,6 +248,43 @@ func TestFixBake(t *testing.T) {
 	}
 	if it := itemByFile(fx.Review, "r.jpg"); slices.Contains(it.Flags, FlagRotated) || it.Width != 600 {
 		t.Fatalf("after: %+v", it)
+	}
+	// the original is kept in .set_aside/, the caption stays with the new file
+	if !bytes.Equal(s.read(t, ".set_aside/r.jpg"), rot) || string(s.read(t, "r.txt")) != "cap" {
+		t.Fatal("bake: the original should be in .set_aside/ and the caption in place")
+	}
+	if len(fx.Review.SetAside) != 1 || fx.Review.SetAside[0].File != ".set_aside/r.jpg" {
+		t.Fatalf("set_aside after bake %+v", fx.Review.SetAside)
+	}
+	entries, _ := os.ReadDir(s.dir)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".r.jpg") {
+			t.Errorf("left a temp file %s", e.Name())
+		}
+	}
+	// restore brings it back next to the baked one
+	fx = s.fix(t, true, FixOp{Op: "restore", All: true})
+	if got := changesOf(fx); got != "restore .set_aside/r.jpg>r_2.jpg" || !bytes.Equal(s.read(t, "r_2.jpg"), rot) {
+		t.Fatalf("restore: %s", got)
+	}
+}
+
+// A preview of a same-format bake writes nothing and shows the original
+// set aside.
+func TestFixBakePreview(t *testing.T) {
+	s := setupService(t)
+	rot := testutil.WithExif(testutil.JPEG(testutil.Scene(92, 800, 600), 92), 6, "", "", "")
+	s.write(t, map[string][]byte{"r.jpg": rot})
+	s.settled(t, Options{})
+	fx := s.fix(t, false, FixOp{Op: "bake_orientation"})
+	if got := changesOf(fx); got != "bake_orientation r.jpg>" {
+		t.Fatalf("preview: %s", got)
+	}
+	if s.exists(".set_aside") || !bytes.Equal(s.read(t, "r.jpg"), rot) {
+		t.Fatal("the preview wrote")
+	}
+	if len(fx.Review.SetAside) != 1 || itemByFile(fx.Review, "r.jpg") == nil {
+		t.Fatalf("preview review: set aside %+v", fx.Review.SetAside)
 	}
 }
 
@@ -421,5 +465,77 @@ func TestCropRect(t *testing.T) {
 	r, ok := cropRect([4]float64{0.9, 0.9, 0.1, 0.1}, 2000, 2000)
 	if !ok || r != image.Rect(1480, 1480, 2000, 2000) {
 		t.Fatalf("corner crop %v %v", r, ok)
+	}
+}
+
+// A .set_aside/.from.json written by hand cannot send a restore outside
+// the dataset; a clean in-dataset origin is still followed.
+func TestFixRestoreIgnoresOutsideOrigin(t *testing.T) {
+	s := setupService(t)
+	s.write(t, map[string][]byte{
+		".set_aside/x.jpg": scene(61),
+		".set_aside/w.jpg": scene(62),
+		".set_aside/y.jpg": scene(63),
+		".set_aside/" + asideFromFile: []byte(`{
+			"x.jpg": {"from": "../../evil/x.jpg"},
+			"w.jpg": {"from": "C:/evil/w.jpg"},
+			"y.jpg": {"from": "sub/y.jpg"}
+		}`),
+	})
+	s.settled(t, Options{})
+	fx := s.fix(t, true, FixOp{Op: "restore", All: true})
+	if got := changesOf(fx); got != "restore .set_aside/w.jpg>w.jpg, restore .set_aside/x.jpg>x.jpg, restore .set_aside/y.jpg>sub/y.jpg" {
+		t.Fatalf("restore: %s", got)
+	}
+	if !s.exists("x.jpg") || !s.exists("w.jpg") || !s.exists("sub/y.jpg") {
+		t.Fatal("restored photos missing")
+	}
+	root := filepath.Dir(filepath.Dir(s.dir))
+	if _, err := os.Stat(filepath.Join(root, "evil")); err == nil {
+		t.Fatal("restore wrote outside the dataset")
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(s.dir), "evil")); err == nil {
+		t.Fatal("restore wrote outside the dataset")
+	}
+}
+
+// panicMagic starts a test-only image format whose decoder panics, as a
+// decoder bug on a hostile file would.
+const panicMagic = "AITKPANIC"
+
+func init() {
+	image.RegisterFormat("aitkpanic", panicMagic,
+		func(io.Reader) (image.Image, error) { panic("decoder bug") },
+		func(io.Reader) (image.Config, error) {
+			return image.Config{ColorModel: color.RGBAModel, Width: 640, Height: 480}, nil
+		})
+}
+
+// A decoder that panics during an applied convert fails the request; the
+// original stays where it was and the dataset is not left locked.
+func TestFixConvertDecoderPanic(t *testing.T) {
+	s := setupService(t)
+	bad := append([]byte(panicMagic), make([]byte, 64)...)
+	s.write(t, map[string][]byte{"x.bmp": bad, "a.jpg": scene(64)})
+	s.settled(t, Options{})
+	if _, err := ApplyFix(s.ctx, s.dir, FixRequest{Ops: []FixOp{{Op: "convert", Files: []string{"x.bmp"}}}, Apply: true}); err == nil ||
+		!strings.Contains(err.Error(), "cannot decode x.bmp") {
+		t.Fatalf("convert: %v, want a decode error", err)
+	}
+	if !bytes.Equal(s.read(t, "x.bmp"), bad) || s.exists(".set_aside/x.bmp") {
+		t.Fatal("the original should stay in place")
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := ApplyFix(s.ctx, s.dir, FixRequest{Ops: []FixOp{{Op: "set_aside", Files: []string{"a.jpg"}}}, Apply: true})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("the dataset stayed locked")
 	}
 }

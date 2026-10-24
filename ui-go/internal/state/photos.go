@@ -275,8 +275,15 @@ func DeletePhotoSet(ctx context.Context, dir string) error {
 
 // ForgetPhotos removes a dataset's analysis: the metrics and face rows of
 // shas (every version and algo; pass the set-aside photos' too) and the
-// folder's photo_sets row, in one transaction.
+// folder's photo_sets row, in one transaction. A sha that a photo outside
+// dir still has (by file_hashes, and the file is still there) keeps its
+// rows: they are keyed by content, so another dataset holding the same
+// bytes is using them.
 func ForgetPhotos(ctx context.Context, dir string, shas []string) error {
+	shas, err := ownedOnly(ctx, dir, shas)
+	if err != nil {
+		return err
+	}
 	tx, err := DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -297,6 +304,61 @@ func ForgetPhotos(ctx context.Context, dir string, shas []string) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// ownedOnly drops from shas those a file outside dir still has. A stale
+// file_hashes row for a file that is gone does not count.
+func ownedOnly(ctx context.Context, dir string, shas []string) ([]string, error) {
+	prefix := hashKeyPath(filepath.Clean(dir)) + string(filepath.Separator)
+	inside := func(p string) bool {
+		if filepath.Separator == '\\' {
+			return len(p) >= len(prefix) && strings.EqualFold(p[:len(prefix)], prefix)
+		}
+		return strings.HasPrefix(p, prefix)
+	}
+	shared := map[string]bool{}
+	err := inChunks(shas, func(marks string, args []any) error {
+		rows, err := DB.QueryContext(ctx, `SELECT path, sha256 FROM file_hashes WHERE sha256 IN (`+marks+`)`, args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		var others [][2]string
+		for rows.Next() {
+			var p, sha string
+			if err := rows.Scan(&p, &sha); err != nil {
+				return err
+			}
+			if !inside(p) {
+				others = append(others, [2]string{p, sha})
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows.Close()
+		for _, o := range others {
+			if !shared[o[1]] && exists(o[0]) {
+				shared[o[1]] = true
+			}
+		}
+		return nil
+	})
+	if err != nil || len(shared) == 0 {
+		return shas, err
+	}
+	out := make([]string, 0, len(shas))
+	for _, s := range shas {
+		if !shared[s] {
+			out = append(out, s)
+		}
+	}
+	return out, nil
+}
+
+func exists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }
 
 // GCPhotos deletes metrics and face rows last seen before olderThan and

@@ -75,6 +75,13 @@ func Measure(path, rel string) (m Metrics, err error) {
 	sn = imgmeta.SniffHead(head)
 	size = int64(n) + rest
 	sha = hex.EncodeToString(sum.Sum(nil))
+	if sn.Format == "webp" && size > int64(n) {
+		// A WebP keeps its EXIF (and XMP, C2PA) after the image data, so
+		// a big one's metadata is past the head.
+		if meta, err := webpMeta(f, size); err == nil {
+			sn = imgmeta.SniffHead(meta)
+		}
+	}
 
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return failed("cannot read this file")
@@ -113,6 +120,55 @@ func Measure(path, rel string) (m Metrics, err error) {
 		m.Width, m.Height = h.Width, h.Height
 	}
 	return m, nil
+}
+
+// webpMetaMax caps a metadata chunk webpMeta reads whole.
+const webpMetaMax = 16 << 20
+
+// webpMeta rebuilds a WebP's RIFF chunks without the image data, for
+// imgmeta.SniffHead: the image chunks (VP8, VP8L, ALPH, ANMF) keep only
+// their first bytes, which hold the size; the others are read whole.
+func webpMeta(f *os.File, size int64) ([]byte, error) {
+	var hdr [12]byte
+	if _, err := f.ReadAt(hdr[:], 0); err != nil {
+		return nil, err
+	}
+	if string(hdr[:4]) != "RIFF" || string(hdr[8:12]) != "WEBP" {
+		return nil, errWebPFrame
+	}
+	var out bytes.Buffer
+	out.Write(hdr[:])
+	for pos := int64(12); pos+8 <= size; {
+		var ch [8]byte
+		if _, err := f.ReadAt(ch[:], pos); err != nil {
+			return nil, err
+		}
+		n := int64(binary.LittleEndian.Uint32(ch[4:]))
+		if n > size-pos-8 {
+			n = size - pos - 8 // cut off: what is there
+		}
+		keep := n
+		switch string(ch[:4]) {
+		case "VP8 ", "VP8L", "ALPH", "ANMF":
+			keep = min(n, 32)
+		default:
+			if n > webpMetaMax {
+				keep = 0
+			}
+		}
+		body := make([]byte, keep)
+		if _, err := f.ReadAt(body, pos+8); err != nil {
+			return nil, err
+		}
+		binary.LittleEndian.PutUint32(ch[4:], uint32(keep))
+		out.Write(ch[:])
+		out.Write(body)
+		if keep&1 == 1 {
+			out.WriteByte(0)
+		}
+		pos += 8 + n + n&1
+	}
+	return out.Bytes(), nil
 }
 
 // firstWebPFrame decodes the first frame of an animated WebP: its ANMF
