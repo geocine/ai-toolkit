@@ -1,4 +1,4 @@
-import { Ellipsis, ExternalLink, KeyRound, Play, ScrollText, Square, Trash2 } from 'lucide-react';
+import { Ellipsis, ExternalLink, KeyRound, Link2, Play, ScrollText, Square, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Server } from '../lib/api';
 import { copyText, perHour, pillState, providerNames, stateLabel, type Tracked } from '../lib/machines';
@@ -29,6 +29,7 @@ export function MachineRow({
   onChanged,
   onTerminated,
   onForgotten,
+  onLink,
 }: {
   t: Tracked;
   linked: Server | null;
@@ -37,6 +38,8 @@ export function MachineRow({
   onChanged: (m: Machine) => void;
   onTerminated: (m: Machine) => void;
   onForgotten: () => void;
+  /** Adds this ready machine to the saved servers again, after its server was removed by hand. */
+  onLink: () => void;
 }) {
   const m = t.machine;
   const s = t.owner;
@@ -207,6 +210,12 @@ export function MachineRow({
         )}
         {m.problem !== 'open_server' && !['no_port', 'not_ready_timeout', 'never_listed'].includes(m.problem ?? '') && terminateBtn}
         <Menu label={`More for ${m.name}`}>
+          {!linked && m.status === 'ready' && m.problem !== 'open_server' && (
+            <button role="menuitem" onClick={onLink}>
+              <Link2 />
+              Add to your servers
+            </button>
+          )}
           {m.status === 'ready' && m.problem !== 'open_server' && (
             <button role="menuitem" onClick={copyToken}>
               <KeyRound />
