@@ -3,7 +3,7 @@
 // judge them (docs/headless.md, PHOTO-PLAN section 11). The browser only
 // measures; every rule and threshold lives in the server's judge.
 
-import { call, del, get, post, type Job, type Server } from './api';
+import { ApiError, call, del, get, post, type Job, type Server } from './api';
 import type { PhotoAssess, PhotoFix, PhotoFixOp, PhotoKind, PhotoReview, PhotoSettingsPatch } from './photoTypes';
 import { measure, type WorkIn, type WorkOut } from './photos.worker';
 
@@ -113,6 +113,14 @@ const photosPath = (dataset: string, rest: string) => `/v1/datasets/${encodeURIC
 /** Judges metrics measured here (or anywhere) with the server's rules; items: [] returns the formats it converts. */
 export function assess(server: Server, body: PhotoAssess): Promise<PhotoReview> {
   return post<PhotoReview>(server, '/v1/photos/assess', body);
+}
+
+/**
+ * What a failed live check (assess) shows: nothing on a 404, which is an older
+ * server with no photo checks (uploading still works there), else the error.
+ */
+export function assessFailure(e: unknown): unknown {
+  return e instanceof ApiError && e.status === 404 ? null : e;
 }
 
 /** The stored photos' review. pending > 0 means analysis is still running: call again. */

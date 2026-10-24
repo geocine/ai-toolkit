@@ -48,7 +48,7 @@ import { go } from '../lib/route';
 import { save, useStored } from '../lib/store';
 import { bytes } from '../lib/format';
 import { batches, prepareImages, trainable, type PrepNote } from '../lib/images';
-import { assess, checkPhotos, fixPhotos, photoSettings } from '../lib/photos';
+import { assess, assessFailure, checkPhotos, fixPhotos, photoSettings } from '../lib/photos';
 import type {
   PhotoAssess,
   PhotoDecision,
@@ -372,7 +372,10 @@ function StepImages({ k, dataset, onDone, back }: { k: Knobs; dataset: string; o
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [uploaded, setUploaded] = useState(false);
-  const [error, setError] = useState<unknown>(null);
+  const [error, setError] = useState<unknown>(null); // a drop or an upload that failed
+  // the live check's own failure: a later check that works clears it, and a
+  // drop's error is left alone
+  const [assessError, setAssessError] = useState<unknown>(null);
   // one drop is measured, or one upload runs, at a time: a drop meanwhile is
   // turned away (it would race the names, and the end of an upload clears
   // the grid). The lock opens only once the render with the new photos is
@@ -413,13 +416,18 @@ function StepImages({ k, dataset, onDone, back }: { k: Knobs; dataset: string; o
     if (measuring) return;
     if (!kept.length) {
       setReview(null);
+      setAssessError(null);
       return;
     }
     let live = true;
     const t = setTimeout(() => {
       assess(server, assessBody()).then(
-        r => live && take(r),
-        e => live && setError(e),
+        r => {
+          if (!live) return;
+          setAssessError(null);
+          take(r);
+        },
+        e => live && setAssessError(assessFailure(e)),
       );
     }, 250);
     return () => {
@@ -802,6 +810,7 @@ function StepImages({ k, dataset, onDone, back }: { k: Knobs; dataset: string; o
         </div>
       )}
       <ErrorNote error={error} />
+      <ErrorNote error={assessError} />
       <div className="wizard-nav">
         <button className="btn btn-ghost" onClick={back}>
           <ArrowLeft />
