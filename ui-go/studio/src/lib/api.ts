@@ -244,7 +244,7 @@ export interface Job {
 }
 export interface Dataset { name: string; path: string; images: number; captions: number; size: number; modified: string }
 export interface DatasetItem { file: string; caption: string | null; size: number; width?: number; height?: number }
-export interface DatasetDetail extends Dataset { items: DatasetItem[]; next_cursor: string | null; caption_job: Job | null }
+export interface DatasetDetail extends Dataset { items: DatasetItem[]; next_cursor: string | null; caption_job: Job | null; photo_job?: Job | null }
 export interface CaptionOption { value: unknown; label: string }
 export type CaptionFlag = 'missing' | 'no_trigger' | 'trigger_case' | 'truncated' | 'hedging' | 'preamble' | 'duplicate';
 export interface CaptionCheck { items: { file: string; caption: string | null; flags: CaptionFlag[] }[]; total: number; flagged: number; counts: Partial<Record<CaptionFlag, number>>; trigger: string }
