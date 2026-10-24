@@ -348,6 +348,19 @@ var Ops = []Op{
 		Params: []Param{opt("sink", "string", "body", "one sink id (default all)"), opt("message", "string", "body", "")}},
 }
 
+// Feature files (ops_<feature>.go) append to Ops and register their TS types
+// and JS helpers from init(), so features never edit this file.
+var (
+	extraTypes []string                // TS blocks written after typesTS, in registration order
+	helpers    = map[string][]string{} // group -> TS member lines written inside that group's block
+)
+
+// RegisterTypes adds a TypeScript block (type aliases / interfaces, no `export`) to the declaration.
+func RegisterTypes(ts string) { extraTypes = append(extraTypes, ts) }
+
+// RegisterHelper adds TS member lines (e.g. a wait() helper) to a group's block.
+func RegisterHelper(group, ts string) { helpers[group] = append(helpers[group], ts) }
+
 // pathParams returns the op's path params in order.
 func (o Op) pathParams() []Param {
 	var out []Param
@@ -420,6 +433,10 @@ func Declaration(search string) string {
 	}
 	var b strings.Builder
 	b.WriteString(typesTS)
+	for _, t := range extraTypes {
+		b.WriteString("\n")
+		b.WriteString(t)
+	}
 	b.WriteString("\ndeclare const aitk: {\n")
 	for _, g := range order {
 		fmt.Fprintf(&b, "  %s: {\n", g)
@@ -428,6 +445,12 @@ func Declaration(search string) string {
 		}
 		if g == "jobs" {
 			b.WriteString(waitTS)
+		}
+		if g == "bundles" {
+			b.WriteString(bundleWaitTS)
+		}
+		for _, h := range helpers[g] {
+			b.WriteString(h)
 		}
 		b.WriteString("  };\n")
 	}
