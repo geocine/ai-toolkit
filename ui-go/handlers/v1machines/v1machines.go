@@ -23,6 +23,7 @@ import (
 	"github.com/geocine/aitoolkit/internal/provision/guide"
 	"github.com/geocine/aitoolkit/internal/provision/relay"
 	"github.com/geocine/aitoolkit/internal/state"
+	"github.com/geocine/aitoolkit/internal/studioapi"
 	"github.com/geocine/aitoolkit/internal/v1api"
 )
 
@@ -115,10 +116,19 @@ func loopbackPeer(r *http.Request) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// localCaller is a loopback peer that also named this machine as its Host
+// (localhost, a loopback IP, AITK_PUBLIC_URL's host or AITK_ALLOWED_HOSTS).
+// A DNS-rebound page reaches the server from 127.0.0.1 too, but its Host is
+// still the attacker's name, so it is not a local caller. This holds in
+// either mode; studio API mode's Gate checks the same Host on every route.
+func localCaller(r *http.Request) bool {
+	return loopbackPeer(r) && studioapi.HostAllowed(r.Host)
+}
+
 // guard is the open-server guard: a server without AI_TOOLKIT_AUTH or API
-// keys rents GPUs only for requests from this machine.
+// keys rents GPUs only for requests from this machine (localCaller).
 func guard(w http.ResponseWriter, r *http.Request) bool {
-	if !httpx.IsOpen() || loopbackPeer(r) {
+	if !httpx.IsOpen() || localCaller(r) {
 		return true
 	}
 	v1api.Fail(w, v1api.CodeForbidden, "Set AI_TOOLKIT_AUTH on this server before it can rent GPUs for you.")
@@ -132,7 +142,7 @@ func guard(w http.ResponseWriter, r *http.Request) bool {
 // forwarded with no credentials and the machine decides.
 func authenticated(r *http.Request) bool {
 	if httpx.IsOpen() {
-		return loopbackPeer(r)
+		return localCaller(r)
 	}
 	scheme, token, ok := strings.Cut(r.Header.Get("Authorization"), " ")
 	if !ok || !strings.EqualFold(scheme, "Bearer") || token == "" {
