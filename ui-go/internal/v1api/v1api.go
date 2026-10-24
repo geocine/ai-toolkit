@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -25,6 +26,12 @@ const (
 	CodeImageBlocked   = "image_blocked"   // 422: the image cannot run on the chosen host; details carry the checks
 	CodeInternal       = "internal"        // 500
 	CodeRemoteFailed   = "remote_failed"   // 502
+
+	// GPU servers (internal/provision).
+	CodeProviderAuth       = "provider_auth"       // 400: the provider rejected the key (never 401: that means our token)
+	CodeInsufficientCredit = "insufficient_credit" // 402
+	CodeNoCapacity         = "no_capacity"         // 409
+	CodeRateLimited        = "rate_limited"        // 429
 )
 
 var statusOf = map[string]int{
@@ -39,6 +46,11 @@ var statusOf = map[string]int{
 	CodeImageBlocked:   http.StatusUnprocessableEntity,
 	CodeInternal:       http.StatusInternalServerError,
 	CodeRemoteFailed:   http.StatusBadGateway,
+
+	CodeProviderAuth:       http.StatusBadRequest,
+	CodeInsufficientCredit: http.StatusPaymentRequired,
+	CodeNoCapacity:         http.StatusConflict,
+	CodeRateLimited:        http.StatusTooManyRequests,
 }
 
 // JSON writes v with status.
@@ -90,6 +102,14 @@ func Fail(w http.ResponseWriter, code, message string) {
 // status, for errors a client acts on (a blocked launch carries its checks).
 func FailDetails(w http.ResponseWriter, code, message string, details any) {
 	JSON(w, StatusOf(code), map[string]any{"error": map[string]any{"code": code, "message": message, "details": details}})
+}
+
+// FailAfter is Fail plus Retry-After (whole seconds, min 1) when after > 0.
+func FailAfter(w http.ResponseWriter, code, message string, after time.Duration) {
+	if after > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(max(1, int(after.Round(time.Second)/time.Second))))
+	}
+	Fail(w, code, message)
 }
 
 // StatusOf is the HTTP status of a code; unknown codes are 500.

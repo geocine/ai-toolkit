@@ -48,6 +48,9 @@ func CORS(next http.Handler) http.Handler {
 // open: no token configured and no API key, so requests need no credentials.
 func open() bool { return os.Getenv("AI_TOOLKIT_AUTH") == "" && !state.HasKeys() }
 
+// IsOpen: no AI_TOOLKIT_AUTH and no API key.
+func IsOpen() bool { return open() }
+
 func unsafeMethod(m string) bool {
 	return m != http.MethodGet && m != http.MethodHead && m != http.MethodOptions
 }
