@@ -4,6 +4,7 @@
 // controller once and never kept in the browser.
 import { call, del, get, post, type Items, type Server } from './api';
 import type {
+  GpuRecommendation,
   LaunchRequest,
   Machine,
   MachineLink,
@@ -16,6 +17,7 @@ import type {
   ProviderTemplate,
   ProviderTest,
   ProviderUpdate,
+  RecommendQuery,
   SetupGuide,
 } from './provisionTypes';
 
@@ -47,6 +49,17 @@ export const testKey = (s: Server, kind: ProviderKind) => post<ProviderTest>(s, 
 /** Cheapest first. */
 export const offers = async (s: Server, kind: ProviderKind, q: OfferQuery = {}) =>
   (await get<Items<Offer>>(s, `/v1/providers/${k(kind)}/offers${query(q)}`)).items;
+/**
+ * The default GPU pick on one provider: best value and best speed in the
+ * smallest VRAM tier the model fits (internal/gpupick). It only suggests;
+ * picks are null when nothing qualifies, and message then says why.
+ */
+export const recommend = (s: Server, kind: ProviderKind, q: RecommendQuery = {}) => get<GpuRecommendation>(s, `/v1/providers/${k(kind)}/recommend${query(q)}`);
+/** recommend across every provider with a key, or the ones listed; notes say which could not be searched. */
+export const recommendAll = (s: Server, q: RecommendQuery & { providers?: ProviderKind[] } = {}) => {
+  const { providers: only, ...rest } = q;
+  return get<GpuRecommendation>(s, `/v1/hosts/recommend${query({ providers: only?.join(','), ...rest })}`);
+};
 export const templates = async (s: Server, kind: ProviderKind) => (await get<Items<ProviderTemplate>>(s, `/v1/providers/${k(kind)}/templates`)).items;
 /** The manual template guide. It never takes a token; the studio fills it in. */
 export const setup = (s: Server, kind: ProviderKind, o: { image?: string; disk_gb?: number; cors_origin?: string; generate_token?: boolean } = {}) =>
