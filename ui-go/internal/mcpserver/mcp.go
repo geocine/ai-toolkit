@@ -42,6 +42,8 @@ cut off or unsure; aitk.datasets.fixCaptions(name, { ops, trigger, apply }) fixe
 Run bundles move a whole run (dataset + checkpoints + optimizer state) between servers: aitk.bundles.download(jobId) gives a
 signed URL, aitk.bundles.import({ url | remote+key | upload_id, start: true }) continues it here, aitk.bundles.push / list
 manage a remote's library. To hand a person a file, sign it: aitk.files.link({ root, path }) or aitk.links.create.
+GPU servers: providers.offers -> tell the user the price and ask -> machines.launch (max_price_per_hour, request_id)
+-> machines.wait -> machines.link gives the new server's URL and token. machines.terminate when done.
 Training runs for a long time: start it, return, and check back with later runs instead of waiting in one.`
 
 const apiNotes = `// Usage: every method returns a Promise; await it. Methods with path params take them positionally,
@@ -82,12 +84,14 @@ func newServer() *mcp.Server {
 			return nil, RunOutput{}, fmt.Errorf("server API not configured")
 		}
 		auth, origin := "", ""
+		target := api
 		if req.Extra != nil && req.Extra.Header != nil {
 			auth, origin = req.Extra.Header.Get("Authorization"), req.Extra.Header.Get(originHeader)
+			target = asPeer(api, req.Extra.Header)
 		}
 		res := codemode.Run(ctx, in.Code, codemode.Options{
 			Timeout: time.Duration(in.TimeoutMs) * time.Millisecond,
-			Call:    codemode.HandlerCaller(api, auth, origin),
+			Call:    codemode.HandlerCaller(target, auth, origin),
 		})
 		out := RunOutput{Logs: res.Logs, Error: res.Error, Calls: res.Calls, DurationMs: res.DurationMs}
 		json.Unmarshal(res.Result, &out.Result)
@@ -123,11 +127,41 @@ func Handler() http.Handler {
 // signed from code mode are absolute URLs the agent can hand out.
 const originHeader = "X-Aitk-Origin"
 
+// peerHeader carries the MCP client's RemoteAddr into the tool handlers (set
+// here, never trusted from the client), so the in-process /v1 calls of code
+// mode come from the same peer as the /mcp request: an agent on this machine
+// passes the open-server guard like the studio does, a remote one does not.
+const peerHeader = "X-Aitk-Peer"
+
+// proxyHeaders say a request came through a proxy; they are copied onto
+// code mode's calls so the guard sees them too.
+var proxyHeaders = []string{"X-Forwarded-For", "X-Real-Ip", "Forwarded"}
+
+// asPeer serves h as the /mcp request's peer: its RemoteAddr and any proxy
+// headers it carried. Without a stamped peer the calls keep httptest's
+// non-loopback address.
+func asPeer(h http.Handler, from http.Header) http.Handler {
+	peer := from.Get(peerHeader)
+	if peer == "" {
+		return h
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.RemoteAddr = peer
+		for _, k := range proxyHeaders {
+			if v := from.Values(k); len(v) > 0 {
+				r.Header[k] = append([]string(nil), v...)
+			}
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
 // Register serves /mcp. The auth middleware in front of the mux guards it.
 func Register(mux *http.ServeMux) {
 	h := Handler()
 	httpx.Handle(mux, "/mcp", func(w http.ResponseWriter, r *http.Request) {
 		r.Header.Set(originHeader, links.Origin(r, os.Getenv("AITK_PUBLIC_URL")))
+		r.Header.Set(peerHeader, r.RemoteAddr)
 		h.ServeHTTP(w, r)
 	})
 }

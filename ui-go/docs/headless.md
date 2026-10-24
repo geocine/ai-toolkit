@@ -29,6 +29,8 @@ never extended. Tables (owned by `internal/state`, embedded migrations):
 | `remotes` | upload targets (S3/R2 or Hugging Face); secrets write-only |
 | `uploads` | upload jobs and their progress |
 | `file_hashes` | sha256 cache keyed by path + size + mtime |
+| `settings` | fork settings; GPU providers keep `provision.key.<kind>` (the provider API key, write-only) and `provision.max_running.<kind>` |
+| `machines` | GPU servers rented through `/v1/machines`: provider, ids, status, problem, token, spec (never env values), image digest and launch ref |
 
 ## Conventions (`/v1`)
 
@@ -37,7 +39,9 @@ never extended. Tables (owned by `internal/state`, embedded migrations):
   an HTTP status that matches (400 `invalid_request`, 401 `unauthorized`, 403
   `forbidden`, 404 `not_found`, 409 `conflict` (409 `dataset_exists` when a
   dataset of that name holds other files), 413 `too_large`, 422
-  `invalid_config`, 500 `internal`, 502 `remote_failed`).
+  `invalid_config`, 500 `internal`, 502 `remote_failed`; GPU providers add
+  400 `provider_auth`, 402 `insufficient_credit`, 409 `no_capacity`, 422
+  `image_blocked` and 429 `rate_limited`, see GPU providers and machines).
 - Lists return `{"items": [...]}` (plus `next_cursor` when paged).
 - `POST` creating a resource answers 201 with the resource; actions answer 200
   with the resource after the action (never the stale row upstream returns).
@@ -245,6 +249,8 @@ increasing `id`. Clients keep the last id they saw and resume from it.
 | `job.sync` | `{remote, action, step, files, error}` (portable sync; `action: lease_lost` when another node took the job) |
 | `lifecycle.state` | Lifecycle (see Unattended runs) |
 | `bundle.import`, `bundle.push` | BundleTask (see Run bundles; progress at most ~1/s) |
+| `machine.state` | Machine (see GPU providers and machines; on a change of status, problem, base URL, price or name; never the token) |
+| `machine.deleted` | `{id}` (a machine forgotten with `DELETE /v1/machines/{id}`) |
 
 - `GET /v1/events?after=&job_id=&types=a,b&limit=&wait_ms=` → `{items: [Event], next_cursor}` (polling;
   `after=now` starts from the current end, skipping history; `wait_ms` up to
@@ -516,6 +522,208 @@ job_name, results: [{job_id, job_name, safe, via, detail}], updated_at}`;
 
 Every change is a `lifecycle.state` event carrying Lifecycle.
 
+## GPU providers and machines
+
+This server can rent GPU servers ("machines") that run this image on RunPod,
+Vast.ai and QuickPod (beta), watch them until they answer, and hand out
+their URL and token so the studio or an agent can use them
+(`internal/provision`, one adapter per provider written from its published
+API). Usually a laptop or a small always-on server is the controller and the
+machines do the training. Provider calls never happen on a read of
+`/v1/providers`; offers and quotes are cached for 30 s.
+
+- **Keys.** One key per provider, stored with `PUT /v1/providers/{kind}`
+  after the provider accepts it (fork setting `provision.key.<kind>`,
+  write-only: responses show `key_hint`, the last 4 characters). Without a
+  stored key `AITK_PROVISION_<KIND>_KEY` applies (`AITK_PROVISION_RUNPOD_KEY`,
+  `..._VAST_KEY`, `..._QUICKPOD_KEY`), never the `AITK_<KIND>_API_KEY` a pod
+  uses to end itself.
+- **Kill switch.** `AITK_PROVISION_PROVIDERS=runpod,vast` enables only those;
+  any other `{kind}` answers 404 `not_found` "unknown provider".
+- **Simulate.** `AITK_PROVISION_SIMULATE=1` runs the three provider mocks in
+  this process and refuses the real provider hosts: machines come up as
+  loopback copies of this server, `simulated: true`, and cost nothing
+  (`AITK_PROVISION_SIMULATE_DELAY`, default `15s`; see docs/providers.md for
+  the `sim_*` fault keys). For local testing only.
+
+Shapes (`studio/src/lib/provisionTypes.ts` is the exact contract):
+
+- `Provider = {kind: runpod|vast|quickpod, label, stage: stable|beta,
+  capabilities, unconfirmed: [sentence], console_url, keys_url, key_scopes,
+  configured, key_source: api|env|sim|"", key_hint, max_running, running,
+  simulated}`. `capabilities` says what the provider can do:
+  `template_required` (QuickPod), `cloud_choice` and `count_choice` (RunPod),
+  `stop_start`, `stop_keeps_disk` (false on RunPod: a stop wipes the
+  container disk), `https` (`yes` RunPod, `no` Vast, `unconfirmed`
+  QuickPod), `self_destroy` (`builtin` Vast, `key` the others), `credit`,
+  the env limits, `image_digest_ref`, `reports_inet`, `reports_disk_bw`.
+- `Offer = {id, provider, gpu, gpu_count, vram_gb, price_per_hour,
+  stopped_price_per_hour, location, reliability, availability, max_disk_gb,
+  cloud?, https, host, fit}`. `price_per_hour` is the whole machine while it
+  runs, with the disk asked for; `host` (driver, CUDA, bandwidth, disk) and
+  `fit` (does the image run there) are null until the image check fills them.
+- `Machine = {id, name, label, provider, provider_id, status, problem,
+  detail, provider_status, gpu, gpu_count, vram_gb, location, image,
+  image_digest, image_launch_ref, image_warnings, disk_gb, base_url, secure,
+  relay_path, price_per_hour, stopped_price_per_hour, when_done,
+  self_destroy_key, copied_remote, actions, self, simulated, warnings,
+  created_at, updated_at, ready_at, ended_at}`. `actions` is what works now
+  (`stop`, `start`, `terminate`, `forget`); `self` marks the machine this
+  server runs on. It never holds the token.
+- `MachineLink = {name, base_url, token, secure, relay_path}`;
+  `MachineLogs = {text, source, truncated}`; `ProviderTemplate = {id, name,
+  image, ours, publishes_port, has_token}`; `SetupGuide = {kind, image, port,
+  disk_gb, env: [{name, value, secret, note}], env_block, docker_options,
+  fields: [{label, value, note}], steps, url_pattern, console_url, keys_url,
+  key_scopes, token?}`.
+
+Providers:
+- `GET /v1/providers` → `{items: [Provider]}` (no provider call)
+- `PUT /v1/providers/{kind} {api_key?, max_running?}` → Provider (the key is checked with the provider first: 400 `provider_auth` and nothing stored when it is rejected; `max_running` 1-20, default `AITK_PROVISION_MAX_RUNNING` or 2). Guarded.
+- `DELETE /v1/providers/{kind}` → 204 (the stored key; an env key still applies)
+- `POST /v1/providers/{kind}/test` → `{ok, detail, credit}` (200 even when not ok)
+- `GET /v1/providers/{kind}/offers?gpu=&min_vram_gb=&max_vram_gb=&max_price=&gpu_count=&cloud=&disk_gb=&limit=&image=&model=&show_all=&fast=` → `{items: [Offer]}`, cheapest first.
+  `gpu` is a substring of the GPU name; `max_vram_gb` is exclusive (offers
+  below it); `max_price` is $/h for the whole machine; `cloud` is RunPod's
+  `secure` (default) or `community`; `disk_gb` (20-2000, default 100) prices
+  the disk; `limit` 1-200 (default 50); `image` is the image the hosts must
+  run (default `ghcr.io/geocine/aitoolkit-go:latest`); `model` is a model
+  arch (`flux`, `qwen_image`, ...) for VRAM badges and the disk need;
+  `show_all=1` keeps offers the image cannot run, marked in `fit`; `fast=1`
+  keeps hosts with at least 500 Mbps download and 300 MB/s disk, where the
+  provider reports them (an offer that reports neither passes).
+- `GET /v1/providers/{kind}/templates` → `{items: [ProviderTemplate]}` (QuickPod launches need one with `ours` and `publishes_port`)
+- `GET /v1/providers/{kind}/setup?image=&disk_gb=&cors_origin=&generate_token=1` → SetupGuide: the manual instructions for the provider's console (docs/providers.md). It needs no key and never accepts a token; `generate_token=1` fills in a fresh one (returned in `token`), otherwise a placeholder stays.
+
+Machines (`{id}` is a machine id or the name of a live machine):
+- `GET /v1/machines?active=1` → `{items: [Machine]}` newest first (`active`: not ended)
+- `POST /v1/machines` LaunchRequest → **201** Machine (`creating`); **200** with the same Machine for a repeated `request_id`. Guarded.
+- `GET /v1/machines/{id}?refresh=1` → Machine (`refresh` re-reads it from the provider, at most every 5 s across callers)
+- `PATCH /v1/machines/{id} {name?, token?}` → Machine (`token` is the AI_TOOLKIT_AUTH a template set; it clears `token_mismatch` and re-probes now)
+- `POST /v1/machines/{id}/stop` → Machine (409 unless `stop` is in `actions`)
+- `POST /v1/machines/{id}/start` → Machine (409 unless `start` is in `actions`). Guarded.
+- `POST /v1/machines/{id}/terminate {confirm_self?}` → Machine (`terminating`). Deletes the machine and its disk at the provider; irreversible. On the machine this server runs on (`self`) it needs `confirm_self: true` (else 400).
+- `DELETE /v1/machines/{id}?force=1` → 204: forgets an ended machine (or a failed one that never got a provider id; else 409, because it may still bill). `force=1` forgets it here only: it keeps running and billing at the provider.
+- `POST /v1/machines/{id}/link` → MachineLink: the only response with the machine's token; 409 unless the machine is `ready` and enforces its token. Guarded.
+- `GET /v1/machines/{id}/logs?tail=200` → MachineLogs (tail up to 2000 lines, text clipped to its last 256 KiB)
+
+`LaunchRequest = {provider, offer_id, max_price_per_hour, request_id?, name?,
+image?, disk_gb?, gpu_count?, cloud?, template_id?, cors_origins?,
+studio_url?, copy_remote?, copy_hf_token?, copy_notify?, when_done?,
+self_destroy_key?, env?, skip_image_check?}`:
+- `provider`, `offer_id` (from offers) and `max_price_per_hour` are required;
+  `request_id` is 8-64 of `[A-Za-z0-9_-]`;
+- `name` defaults to `<gpu> on <provider>` (1-64 characters, unique among
+  live machines); `image` defaults to `ghcr.io/geocine/aitoolkit-go:latest`;
+  `disk_gb` is 20-2000 and at most the offer's `max_disk_gb`;
+- `gpu_count` and `cloud` are RunPod only; QuickPod needs `template_id` from
+  its templates;
+- `cors_origins` (each `scheme://host[:port]`) default to the request's
+  `Origin`; `studio_url` becomes `AITK_STUDIO_URL` on the machine;
+- `copy_remote` names an S3 or Hugging Face remote whose settings and keys go
+  into the machine's env (`AITK_S3_*` / `AITK_HF_*`, plus `AITK_SYNC_REMOTE`
+  and `AITK_AUTO_RESUME=1`); a shared-folder remote gives 400.
+  `copy_hf_token` and `copy_notify` copy this server's Hugging Face token and
+  notification sinks;
+- `when_done` (`keep`, `stop`, `destroy`) defaults to `destroy` when
+  `copy_remote` is set and destroy is possible (on QuickPod only with
+  `self_destroy_key`), else `keep` (with a warning when a remote is set on
+  QuickPod without the key). `stop` or `destroy` without `copy_remote` is 422
+  `invalid_config`, because results must be kept somewhere;
+- `self_destroy_key` puts the account key into the machine's env so it can
+  delete itself (RunPod, QuickPod; Vast has its own per-instance key);
+- `env` adds `AITK_*`, `HF_*`, `HUGGING_FACE_HUB_TOKEN` or `TZ` variables;
+  reserved names (`AI_TOOLKIT_AUTH`, `AITK_CORS_ORIGINS`, `AITK_WHEN_DONE*`,
+  `AITK_PROVISION_*`, `AITK_*_API_KEY`, provider prefixes, ...) and values
+  over a provider's limits are 422 naming the variable, never echoing it;
+- `skip_image_check` is honoured only for custom images or registries that
+  cannot be read, never to skip a host-side block.
+
+Every machine gets its own random `AI_TOOLKIT_AUTH`. Env values are never
+stored or returned; the machine row keeps only their names.
+
+Money rules:
+- A launch rents a GPU and costs money from the moment it returns. Show the
+  offer's `price_per_hour` and get the user's OK first.
+- The offer is quoted again just before the launch; a price above
+  `max_price_per_hour` is 409 `conflict` ("The price is now $0.52/h, above
+  your limit of $0.47/h ...").
+- `request_id` makes a retry return the same machine instead of renting twice.
+- `max_running` per provider (default 2) caps live machines: 409 `conflict`
+  at the cap.
+- This server never terminates a machine on its own: a machine that is not
+  ready in 20 minutes (`AITK_PROVISION_READY_TIMEOUT`) is `failed` with
+  `not_ready_timeout` and is still billed until it is terminated.
+- A stopped machine may still bill for its disk (`stopped_price_per_hour`).
+
+Statuses (`status`); the watcher refreshes transitional ones every 10 s,
+ready ones every minute and stopped ones every 5 min:
+
+| status | meaning |
+|---|---|
+| `creating` | accepted; the provider is allocating (QuickPod: until the pod is listed) |
+| `starting` | host assigned; the image is pulling or the container starting |
+| `running` | the provider says running; the server does not answer with its token yet |
+| `ready` | `GET /v1/system` on the machine answered 200 with its token |
+| `stopping`, `stopped` | compute released; the disk may still bill |
+| `terminating`, `terminated` | terminate sent / gone at the provider |
+| `failed` | the launch was refused, the provider reported an error, or it was not ready in time |
+| `unknown` | a provider state this server cannot map (raw value in `provider_status`) |
+
+Problems (`problem`, with the human text in `detail`):
+
+| problem | meaning |
+|---|---|
+| `token_mismatch` | the server answers but refuses our token (the template set its own AI_TOOLKIT_AUTH): `PATCH` it in |
+| `open_server` | the server answers without any token; it is ready but cannot be linked |
+| `no_port` | running over 3 min without a public port for 8675 |
+| `not_ready_timeout` | not ready in time; still billed |
+| `unreachable` | was ready, failing probes for over 5 min |
+| `never_listed` | QuickPod accepted the pod but it never appeared in 5 min |
+| `provider_error` | the provider reports an error state |
+| `not_refreshed` | a real machine while simulate is on (or the reverse); actions on it are 409 |
+| `cuda_failed`, `pull_slow`, `image_pull_failed` | the image could not run its CUDA check, is pulling far slower than the host predicts, or could not be pulled |
+
+Errors from providers: 400 `provider_auth` (the provider rejected the key;
+never 401, which means this server's own token), 402 `insufficient_credit`,
+409 `no_capacity` (the offer was taken: pick another), 409 `conflict`
+(action not valid now, price rose, cap reached), 422 `invalid_config` (when
+done or env rules), 422 `image_blocked` (the image cannot run on that host;
+the checks are in `error.details`), 429 `rate_limited` with `Retry-After`
+(the watcher pauses that provider too), 502 `remote_failed` (the provider did
+not answer). Provider messages are passed through with any key redacted.
+
+**Open-server guard.** On a server without `AI_TOOLKIT_AUTH` and without API
+keys, `PUT /v1/providers/{kind}`, `POST /v1/machines`, `.../start`,
+`.../link` and the relay answer 403 `forbidden` ("Set AI_TOOLKIT_AUTH on this
+server before it can rent GPUs for you.") unless the request comes straight
+from this machine (a loopback peer and no `X-Forwarded-For`, `X-Real-IP` or
+`Forwarded` header). Code mode over `/mcp` counts as the MCP client's own
+connection: an agent on this machine needs no token, one connecting from
+elsewhere or through a proxy is refused.
+
+**Relay** (for plain-http hosts, Vast and QuickPod, that a studio served over
+https cannot call):
+- `GET /v1/machines/{id}/relay/{path...}`
+- `POST /v1/machines/{id}/relay/{path...}`
+- `PUT /v1/machines/{id}/relay/{path...}`
+- `PATCH /v1/machines/{id}/relay/{path...}`
+- `DELETE /v1/machines/{id}/relay/{path...}`
+
+each forward the request to `<base_url>/<path>` with its query and body
+(streamed, SSE flushed). `Origin`, `Cookie`, `X-Forwarded-*` and
+`Authorization` from the client are dropped and `Set-Cookie` from the
+machine; `X-Forwarded-Prefix: /v1/machines/<id>/relay` lets the machine build
+links that point back through the relay. A request that passed this server's
+auth gets `Authorization: Bearer <machine token>`; the public media GETs and
+signed links that reach the relay without a token are forwarded with no
+credentials, so the machine decides. 409 `conflict` unless the machine is
+ready with a `base_url`; 502 `remote_failed` when it cannot be reached; a
+private address is refused unless the machine is simulated. Each request
+costs two hops, and this server's `AITK_CORS_ORIGINS` applies. The relay has
+no `aitk` op: agents use `machines.link` and talk to the machine (or its
+`/mcp`) directly.
+
 ## MCP (code mode)
 
 `/mcp` speaks MCP over Streamable HTTP (same bearer auth). Instead of one tool
@@ -537,9 +745,10 @@ per endpoint it exposes three:
   max 1024; videos show their thumbnail) with a caption line, 8 MiB per call.
 
 Everything a UI can do has an `aitk` op (a test walks the registered `/v1`
-routes; only `GET /v1/events/stream` and `/v1/openapi.json` are left out:
-`events.list({ after, wait_ms })` long-polls instead, `aitk_api` replaces the
-OpenAPI document). Bodies that are not JSON:
+routes; only `GET /v1/events/stream`, `/v1/openapi.json` and the machine
+relay are left out: `events.list({ after, wait_ms })` long-polls instead,
+`aitk_api` replaces the OpenAPI document, and an agent reaches a machine
+through `machines.link`). Bodies that are not JSON:
 - binary in: base64 params, 16 MiB per call (`datasets.putFile`,
   `datasets.uploadFiles`, `datasets.uploadArchive`, `bundles.uploadChunk`),
   or let the server fetch a URL (`datasets.importUrl`, `bundles.import({ url })`);
@@ -547,6 +756,23 @@ OpenAPI document). Bodies that are not JSON:
   `links.create`) sign the download instead of fetching it, so the agent
   gets a URL it can hand to a person or to another server;
 - `bundles.wait(id)` polls an import or push until it settles, like `jobs.wait`.
+
+GPU servers are the `providers` group (`list`, `setKey`, `removeKey`, `test`,
+`offers`, `templates`, `setup`) and the `machines` group (`list`, `launch`,
+`get`, `update`, `stop`, `start`, `terminate`, `forget`, `link`, `logs`, and
+`wait(id, {until?, timeout_ms?, poll_ms?})`, which re-reads the machine until
+its status is in `until`, default `ready`, `failed`, `stopped`, `terminated`,
+or 100 s pass, and returns the last Machine). The agent asks before it
+spends money:
+```ts
+const offer = (await aitk.providers.offers("runpod", { min_vram_gb: 24, limit: 5 })).items[0];
+// tell the user offer.gpu and offer.price_per_hour, and launch only after they agree
+const m = await aitk.machines.launch({ provider: "runpod", offer_id: offer.id,
+  max_price_per_hour: offer.price_per_hour, request_id: "lora_run_0001", copy_remote: "r2" });
+const ready = await aitk.machines.wait(m.id); // up to 100 s; call it again in a later run while it is still starting
+if (ready.status !== "ready" || ready.problem) return ready;
+return await aitk.machines.link(m.id); // { base_url, token }: connect to that server's /mcp
+```
 
 Example the agent might send to `aitk_run`:
 ```ts

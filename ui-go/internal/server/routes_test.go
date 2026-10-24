@@ -13,7 +13,15 @@ import (
 var notOps = map[string]string{
 	"GET /v1/events/stream": "an SSE stream never ends inside one sandboxed call; events.list with wait_ms long-polls the same events",
 	"GET /v1/openapi.json":  "describes the HTTP API; agents read the client's declaration from aitk_api instead",
+
+	"GET /v1/machines/{id}/relay/{path...}":    relayWhy,
+	"POST /v1/machines/{id}/relay/{path...}":   relayWhy,
+	"PUT /v1/machines/{id}/relay/{path...}":    relayWhy,
+	"PATCH /v1/machines/{id}/relay/{path...}":  relayWhy,
+	"DELETE /v1/machines/{id}/relay/{path...}": relayWhy,
 }
+
+const relayWhy = "raw HTTP relay to a launched machine; agents use machines.link and talk to the machine (or connect MCP to it)"
 
 var param = regexp.MustCompile(`\{[^}]*\}`)
 
