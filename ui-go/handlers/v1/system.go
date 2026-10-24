@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/geocine/aitoolkit/internal/apicache"
+	"github.com/geocine/aitoolkit/internal/controller"
 	"github.com/geocine/aitoolkit/internal/paths"
 	"github.com/geocine/aitoolkit/internal/sysstats"
 	"github.com/geocine/aitoolkit/internal/v1api"
@@ -64,10 +65,18 @@ func upstreamVersion() *string {
 	return nil
 }
 
+// mode is "controller" on a no-GPU controller (internal/controller), else "server".
+func mode() string {
+	if controller.Enabled() {
+		return "controller"
+	}
+	return "server"
+}
+
 func health(w http.ResponseWriter, r *http.Request) {
 	v1api.OK(w, map[string]any{
 		"ok": true, "version": version(), "upstream_version": upstreamVersion(),
-		"started_at": v1api.Time(startedAt),
+		"started_at": v1api.Time(startedAt), "mode": mode(),
 	})
 }
 

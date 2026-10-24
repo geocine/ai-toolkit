@@ -3,6 +3,7 @@ package httpx
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -47,6 +48,38 @@ func TestCORS(t *testing.T) {
 	t.Setenv("AITK_CORS_ORIGINS", "*")
 	if rec := do("OPTIONS", "/mcp", "https://anything.example", true); rec.Code != http.StatusNoContent {
 		t.Fatalf("wildcard preflight %d", rec.Code)
+	}
+}
+
+// An https studio calling a controller on http://127.0.0.1 gets Chrome's
+// private-network preflight answered; other preflights do not carry it.
+func TestCORSPrivateNetwork(t *testing.T) {
+	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusTeapot) })
+	h := CORS(ok)
+	preflight := func(origin string, private bool) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("OPTIONS", "/v1/providers", nil)
+		req.Header.Set("Origin", origin)
+		req.Header.Set("Access-Control-Request-Method", "GET")
+		if private {
+			req.Header.Set("Access-Control-Request-Private-Network", "true")
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	t.Setenv("AITK_CORS_ORIGINS", "https://studio.example")
+	rec := preflight("https://studio.example", true)
+	if rec.Code != http.StatusNoContent || rec.Header().Get("Access-Control-Allow-Private-Network") != "true" {
+		t.Fatalf("private-network preflight: %d %v", rec.Code, rec.Header())
+	}
+	if !strings.Contains(rec.Header().Get("Access-Control-Expose-Headers"), "Retry-After") {
+		t.Fatalf("Retry-After not exposed: %v", rec.Header())
+	}
+	if rec := preflight("https://studio.example", false); rec.Header().Get("Access-Control-Allow-Private-Network") != "" {
+		t.Fatal("a plain preflight must not allow private network access")
+	}
+	if rec := preflight("https://evil.example", true); rec.Header().Get("Access-Control-Allow-Private-Network") != "" {
+		t.Fatal("an unlisted origin must not get private network access")
 	}
 }
 
