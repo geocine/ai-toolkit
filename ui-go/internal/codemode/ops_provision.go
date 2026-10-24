@@ -45,7 +45,7 @@ var provisionOps = []Op{
 	{Group: "machines", Name: "list", Method: "GET", Path: "/v1/machines", Result: "Items<Machine>", Doc: "GPU servers this server rented, newest first.",
 		Params: []Param{opt("active", "boolean", "query", "only the ones not ended")}},
 	{Group: "machines", Name: "launch", Method: "POST", Path: "/v1/machines", Result: "Machine",
-		Doc: "Rents a GPU and costs money from the moment it returns. First show the user the offer's price_per_hour and get their OK; max_price_per_hour is required and enforced (409 if the price rose). Use a request_id so a retry never rents twice. copy_remote puts that remote's keys into the machine's env, visible in the provider console. Then machines.wait and machines.link.",
+		Doc: "Rents a GPU and costs money from the moment it returns. First show the user the offer's price_per_hour and get their OK; max_price_per_hour is required and enforced (409 if the price rose). Use a request_id so a retry never rents twice. copy_remote puts that remote's keys into the machine's env, visible in the provider console. The server re-checks the image and refuses with image_blocked (the checks are in error.details); run images.check or images.recommend first. Then machines.wait and machines.link.",
 		Params: []Param{p("provider", "ProviderKind", "body", ""), p("offer_id", "string", "body", "an offer id from providers.offers"),
 			p("max_price_per_hour", "number", "body", "the price the user agreed to; refused when the offer now costs more"),
 			opt("request_id", "string", "body", "8-64 of [A-Za-z0-9_-]; repeating it returns the same machine"),

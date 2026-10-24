@@ -13,6 +13,7 @@ import (
 	"github.com/geocine/aitoolkit/handlers/settings"
 	"github.com/geocine/aitoolkit/handlers/system"
 	"github.com/geocine/aitoolkit/handlers/v1"
+	"github.com/geocine/aitoolkit/handlers/v1images"
 	"github.com/geocine/aitoolkit/handlers/v1machines"
 	"github.com/geocine/aitoolkit/handlers/v1portable"
 	"github.com/geocine/aitoolkit/handlers/v1remotes"
@@ -41,6 +42,7 @@ func NewMux() *http.ServeMux {
 	v1templates.Register(mux)
 	v1unattended.Register(mux)
 	v1machines.Register(mux)
+	v1images.Register(mux)
 	events.Register(mux)
 	mcpserver.Register(mux)
 	return mux

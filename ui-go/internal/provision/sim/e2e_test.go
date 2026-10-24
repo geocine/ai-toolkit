@@ -2,8 +2,10 @@ package sim
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -11,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/geocine/aitoolkit/handlers/v1images"
 	"github.com/geocine/aitoolkit/internal/hostfit"
 	"github.com/geocine/aitoolkit/internal/imagecheck"
 	"github.com/geocine/aitoolkit/internal/imagecheck/registrymock"
@@ -559,5 +562,31 @@ func TestSimImageUnpublished(t *testing.T) {
 	}
 	if n := len(active.vm.Instances()); n != 0 {
 		t.Fatalf("%d instances created", n)
+	}
+}
+
+// The image check route reads the default image from the in-process
+// registry under simulate, with nothing leaving the machine (§3.10.2).
+func TestSimImageCheckRoute(t *testing.T) {
+	useTripwire(t)
+	newSim(t)
+	mux := http.NewServeMux()
+	v1images.Register(mux)
+	req := httptest.NewRequest("POST", "/v1/images/check",
+		strings.NewReader(`{"image":"ghcr.io/geocine/aitoolkit-go:latest"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	var body struct {
+		OK    bool `json:"ok"`
+		Image *struct {
+			Revision string `json:"revision"`
+		} `json:"image"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); rec.Code != http.StatusOK || err != nil || !body.OK {
+		t.Fatalf("status %d err %v body %s", rec.Code, err, rec.Body)
+	}
+	if body.Image == nil || body.Image.Revision != registrymock.Revision {
+		t.Fatalf("image %s", rec.Body)
 	}
 }
