@@ -26,6 +26,7 @@ import (
 	"github.com/geocine/aitoolkit/internal/provision/vast"
 	"github.com/geocine/aitoolkit/internal/provision/vast/vastmock"
 	"github.com/geocine/aitoolkit/internal/state"
+	"github.com/geocine/aitoolkit/internal/studioapi"
 	"github.com/geocine/aitoolkit/internal/testutil"
 	"github.com/geocine/aitoolkit/internal/v1api"
 )
@@ -171,11 +172,13 @@ func newEnv(t *testing.T) (*fakeManager, http.Handler) {
 	return f, mux
 }
 
-// call serves one request from a loopback peer unless an option changes it.
+// call serves one request from a loopback peer, addressed to 127.0.0.1,
+// unless an option changes it.
 func call(t *testing.T, h http.Handler, method, path, body string, opts ...func(*http.Request)) *httptest.ResponseRecorder {
 	t.Helper()
 	r := httptest.NewRequest(method, path, strings.NewReader(body))
 	r.RemoteAddr = "127.0.0.1:40000"
+	r.Host = "127.0.0.1:8675"
 	for _, o := range opts {
 		o(r)
 	}
@@ -442,11 +445,58 @@ func TestOpenServerGuard(t *testing.T) {
 	}
 }
 
+// DNS rebinding: a hostile page whose name now resolves to 127.0.0.1 reaches
+// an open server from a loopback peer, but its Host is still its own name.
+// Outside studio API mode too, it must not rent GPUs, take a machine's token
+// or drive the relay; the operator's declared names still get through.
+func TestOpenServerRefusesRebinding(t *testing.T) {
+	f, h := newEnv(t)
+	t.Cleanup(studioapi.SetForTest(false))
+	t.Setenv("AITK_PUBLIC_URL", "")
+	t.Setenv("AITK_ALLOWED_HOSTS", "")
+	if !httpx.IsOpen() {
+		t.Fatal("the test server is not open")
+	}
+	guarded := []struct{ method, path, body string }{
+		{"PUT", "/v1/providers/runpod", `{"api_key":"abcdefgh"}`},
+		{"POST", "/v1/machines", `{"provider":"runpod","offer_id":"o1","max_price_per_hour":1}`},
+		{"POST", "/v1/machines/mch_1/link", ""},
+		{"GET", "/v1/machines/mch_1/relay/v1/system", ""},
+		{"POST", "/v1/machines/mch_1/relay/v1/jobs", "{}"},
+	}
+	rebound := func(r *http.Request) {
+		r.Host = "evil.com:8675"
+		r.Header.Set("Origin", "http://evil.com:8675")
+	}
+	for _, c := range guarded {
+		f.calls = nil
+		w := call(t, h, c.method, c.path, c.body, rebound)
+		if w.Code != 403 || errCode(t, w) != v1api.CodeForbidden || len(f.calls) != 0 {
+			t.Errorf("rebound %s %s: %d %s (calls %v)", c.method, c.path, w.Code, w.Body, f.calls)
+		}
+		for _, host := range []string{"127.0.0.1:8675", "localhost:8675", "[::1]:8675"} {
+			if w := call(t, h, c.method, c.path, c.body, func(r *http.Request) { r.Host = host }); w.Code == 403 {
+				t.Errorf("loopback %s %s with Host %s refused: %s", c.method, c.path, host, w.Body)
+			}
+		}
+	}
+	// a name the operator declared is trusted, as in studio API mode
+	t.Setenv("AITK_ALLOWED_HOSTS", "gpu-box.lan")
+	if w := call(t, h, "POST", "/v1/machines/mch_1/link", "", func(r *http.Request) { r.Host = "gpu-box.lan:8675" }); w.Code != 200 {
+		t.Errorf("allowed host refused: %d %s", w.Code, w.Body)
+	}
+	t.Setenv("AITK_PUBLIC_URL", "https://studio.example.net")
+	if w := call(t, h, "POST", "/v1/machines/mch_1/link", "", func(r *http.Request) { r.Host = "studio.example.net" }); w.Code != 200 {
+		t.Errorf("public URL host refused: %d %s", w.Code, w.Body)
+	}
+}
+
 func TestAuthenticated(t *testing.T) {
 	openState(t)
 	req := func(opts ...func(*http.Request)) *http.Request {
 		r := httptest.NewRequest("GET", "/v1/machines/m/relay/api/img/a.png", nil)
 		r.RemoteAddr = "127.0.0.1:1"
+		r.Host = "localhost:8675"
 		for _, o := range opts {
 			o(r)
 		}
@@ -457,6 +507,9 @@ func TestAuthenticated(t *testing.T) {
 	}
 	if !authenticated(req()) || authenticated(req(fromRemote)) {
 		t.Error("open server: only loopback is authenticated")
+	}
+	if authenticated(req(func(r *http.Request) { r.Host = "evil.com:8675" })) {
+		t.Error("open server: a loopback peer with a foreign Host (DNS rebinding) is not authenticated")
 	}
 	t.Setenv("AI_TOOLKIT_AUTH", "admin-token-123")
 	if !authenticated(req(bearer("admin-token-123"), fromRemote)) {
