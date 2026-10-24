@@ -52,6 +52,7 @@ const verb = (m: LifeMode) => (m === 'destroy' ? 'Destroying' : m === 'stop' ? '
 const how: Record<Lifecycle['provider'], string> = {
   runpod: 'through RunPod',
   vast: 'through Vast.ai',
+  quickpod: 'through the QuickPod API',
   command: 'by running AITK_WHEN_DONE_CMD',
   exit: 'by ending the server process',
 };
@@ -525,7 +526,7 @@ export function NotificationsSection() {
               <input type="text" value={links.studio} onChange={e => setLinks({ ...links, studio: e.target.value })} placeholder="https://…/studio/" />
             </Field>
             <Field label="Public URL" hint="This server, as seen from outside">
-              <input type="text" value={links.pub} onChange={e => setLinks({ ...links, pub: e.target.value })} placeholder="Detected on RunPod / Vast.ai" />
+              <input type="text" value={links.pub} onChange={e => setLinks({ ...links, pub: e.target.value })} placeholder="Detected on RunPod / Vast.ai / QuickPod" />
             </Field>
             <Field label="Samples every (min)">
               <input type="number" min={1} value={links.every} onChange={e => setLinks({ ...links, every: e.target.value })} />

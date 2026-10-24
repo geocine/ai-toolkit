@@ -540,7 +540,7 @@ type LifecycleMode = "keep" | "stop" | "destroy";
 type Lifecycle = {
   mode: LifecycleMode; on: "completed" | "any"; delay_s: number; dry_run: boolean;
   state: "off" | "waiting" | "countdown" | "verifying" | "acting" | "held" | "cancelled" | "done" | "failed";
-  deadline: string | null; reason: string; provider: "runpod" | "vast" | "command" | "exit";
+  deadline: string | null; reason: string; provider: "runpod" | "vast" | "quickpod" | "command" | "exit";
   job_id: string | null; job_name: string | null;
   results: { job_id: string; job_name: string; safe: boolean; via: string; detail: string }[]; updated_at: string;
 };

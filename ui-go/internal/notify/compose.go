@@ -34,7 +34,7 @@ import (
 
 // PublicURL is the server's public base URL: AITK_PUBLIC_URL (or the
 // configured public_url), else derived from the provider (RunPod's HTTP
-// proxy, Vast.ai's mapped port), else "".
+// proxy, Vast.ai's mapped port, QuickPod's mapped port), else "".
 func PublicURL(c Config) string {
 	if c.PublicURL != "" {
 		return strings.TrimRight(c.PublicURL, "/")
@@ -47,6 +47,9 @@ func PublicURL(c Config) string {
 		return "https://" + id + "-" + port + ".proxy.runpod.net"
 	}
 	if ip, p := env("PUBLIC_IPADDR"), env("VAST_TCP_PORT_"+port); ip != "" && p != "" {
+		return "http://" + ip + ":" + p
+	}
+	if ip, p := env("PUBLIC_IPADDR"), env("QUICKPOD_PORT_"+port); ip != "" && p != "" {
 		return "http://" + ip + ":" + p
 	}
 	return ""

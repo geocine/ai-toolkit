@@ -14,7 +14,7 @@ export interface Lifecycle {
   state: LifeState;
   deadline: string | null;
   reason: string;
-  provider: 'runpod' | 'vast' | 'command' | 'exit';
+  provider: 'runpod' | 'vast' | 'quickpod' | 'command' | 'exit';
   job_id: string | null;
   job_name: string | null;
   results: JobResult[] | null;
@@ -25,6 +25,7 @@ export interface Lifecycle {
 export const providerHow: Record<Lifecycle['provider'], string> = {
   runpod: 'through RunPod',
   vast: 'through Vast.ai',
+  quickpod: 'through the QuickPod API',
   command: 'by running AITK_WHEN_DONE_CMD',
   exit: 'by ending the server process',
 };

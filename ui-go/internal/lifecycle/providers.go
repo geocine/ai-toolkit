@@ -27,27 +27,41 @@ type Provider interface {
 
 // API bases (tests point them at httptest servers).
 var (
-	runpodAPI = "https://rest.runpod.io/v1"
-	vastAPI   = "https://console.vast.ai/api/v0"
+	runpodAPI   = "https://api.runpod.io"
+	runpodV1API = "https://rest.runpod.io/v1"
+	vastAPI     = "https://console.vast.ai/api/v0"
+	quickpodAPI = "https://api.quickpod.org"
 )
+
+// v1Retire is the day RunPod retires REST v1. Until then a pod key that v2
+// refuses is retried on v1.
+var v1Retire = time.Date(2026, 11, 15, 0, 0, 0, 0, time.UTC)
+
+// now is the clock the v1 cutoff reads (tests move it).
+var now = time.Now
 
 var httpClient = &http.Client{Timeout: 60 * time.Second}
 
 func env(key string) string { return strings.TrimSpace(os.Getenv(key)) }
 
 // detectProvider picks the provider from the environment:
-// AITK_WHEN_DONE_PROVIDER (runpod | vast | command | exit) when set, else
-// AITK_WHEN_DONE_CMD, else RunPod (RUNPOD_POD_ID), else Vast.ai
-// (CONTAINER_ID with CONTAINER_API_KEY), else a plain process exit.
+// AITK_WHEN_DONE_PROVIDER (runpod | vast | quickpod | command | exit) when
+// set, else AITK_WHEN_DONE_CMD, else RunPod (RUNPOD_POD_ID), else Vast.ai
+// (CONTAINER_ID with CONTAINER_API_KEY), else QuickPod (CONTAINER_LABEL,
+// QUICKPOD_PORT_8675 and AITK_QUICKPOD_API_KEY), else a plain process exit.
 func detectProvider() Provider {
-	runpod := &runPod{id: env("RUNPOD_POD_ID"), key: firstNonEmpty(env("AITK_RUNPOD_API_KEY"), env("RUNPOD_API_KEY"))}
+	runpod := &runPod{id: env("RUNPOD_POD_ID"), key: firstNonEmpty(env("AITK_RUNPOD_API_KEY"), env("RUNPOD_API_KEY")),
+		podKey: env("AITK_RUNPOD_API_KEY") == ""}
 	vast := &vastAI{id: env("CONTAINER_ID"), key: firstNonEmpty(env("AITK_VAST_API_KEY"), env("CONTAINER_API_KEY"))}
+	quickpod := &quickPod{id: env("CONTAINER_LABEL"), key: env("AITK_QUICKPOD_API_KEY")}
 	cmd := &command{cmd: env("AITK_WHEN_DONE_CMD")}
 	switch strings.ToLower(env("AITK_WHEN_DONE_PROVIDER")) {
 	case "runpod":
 		return runpod
 	case "vast", "vastai", "vast.ai":
 		return vast
+	case "quickpod":
+		return quickpod
 	case "command", "cmd":
 		return cmd
 	case "exit":
@@ -60,6 +74,8 @@ func detectProvider() Provider {
 		return runpod
 	case vast.id != "" && vast.key != "":
 		return vast
+	case quickpod.id != "" && env("QUICKPOD_PORT_8675") != "" && quickpod.key != "":
+		return quickpod
 	}
 	return &exitProvider{}
 }
@@ -86,7 +102,14 @@ func denied(err error) bool {
 	return errors.As(err, &ae) && (ae.status == http.StatusUnauthorized || ae.status == http.StatusForbidden)
 }
 
+// call sends a Bearer-authenticated JSON request.
 func call(ctx context.Context, method, u, key string, body any) ([]byte, error) {
+	return callWith(ctx, method, u, http.Header{"Authorization": {"Bearer " + key}}, body)
+}
+
+// callWith sends a JSON request with the given auth headers and returns the
+// body of a 2xx answer, or an *apiError.
+func callWith(ctx context.Context, method, u string, auth http.Header, body any) ([]byte, error) {
 	var rd io.Reader
 	if body != nil {
 		b, _ := json.Marshal(body)
@@ -96,7 +119,11 @@ func call(ctx context.Context, method, u, key string, body any) ([]byte, error) 
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+key)
+	for k, vs := range auth {
+		for _, v := range vs {
+			req.Header.Add(k, v)
+		}
+	}
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -120,12 +147,17 @@ func clip(b []byte, n int) []byte {
 	return b
 }
 
-// runPod uses RunPod's REST API (https://docs.runpod.io/api-reference):
-// DELETE /v1/pods/{podId} terminates (204), POST /v1/pods/{podId}/stop stops
-// (200). The RUNPOD_API_KEY RunPod injects into a pod is pod-scoped and may
-// not be allowed to terminate; a 401/403 there falls back to stop.
+// runPod uses RunPod's REST API v2 (https://docs.runpod.io/api-reference-v2):
+// DELETE /v2/pods/{id} terminates (204), POST /v2/pods/{id}/action
+// {"action":"stop"} stops (200). The RUNPOD_API_KEY RunPod injects into a pod
+// is pod-scoped: when v2 refuses it (401/403) before v1 retires (v1Retire),
+// the same call is retried on v1 (POST /v1/pods/{id}/stop, DELETE
+// /v1/pods/{id}). A terminate the key may not do falls back to stop.
 // AITK_RUNPOD_API_KEY supplies a full key instead.
-type runPod struct{ id, key string }
+type runPod struct {
+	id, key string
+	podKey  bool // key is the pod-scoped RUNPOD_API_KEY
+}
 
 func (p *runPod) Name() string { return "runpod" }
 
@@ -139,27 +171,41 @@ func (p *runPod) ready() error {
 	return nil
 }
 
-func (p *runPod) podURL(suffix string) string {
-	return strings.TrimRight(runpodAPI, "/") + "/pods/" + url.PathEscape(p.id) + suffix
+func (p *runPod) podURL(base, suffix string) string {
+	return strings.TrimRight(base, "/") + "/pods/" + url.PathEscape(p.id) + suffix
+}
+
+// do sends the v2 call and, for a pod key v2 refuses before v1 retires, the
+// same call on v1. via names the API when v1 answered ("" for v2).
+func (p *runPod) do(ctx context.Context, method, v2suffix string, body any, v1suffix string) (via string, err error) {
+	_, err = call(ctx, method, p.podURL(strings.TrimRight(runpodAPI, "/")+"/v2", v2suffix), p.key, body)
+	if err == nil || !denied(err) || !p.podKey || !now().Before(v1Retire) {
+		return "", err
+	}
+	if _, v1err := call(ctx, method, p.podURL(runpodV1API, v1suffix), p.key, nil); v1err != nil {
+		return "", fmt.Errorf("%v; API v1: %w", err, v1err)
+	}
+	return " through API v1 (RunPod retires it on " + v1Retire.Format("2006-01-02") + ")", nil
 }
 
 func (p *runPod) Stop(ctx context.Context) (string, error) {
 	if err := p.ready(); err != nil {
 		return "", err
 	}
-	if _, err := call(ctx, http.MethodPost, p.podURL("/stop"), p.key, nil); err != nil {
+	via, err := p.do(ctx, http.MethodPost, "/action", map[string]string{"action": "stop"}, "/stop")
+	if err != nil {
 		return "", fmt.Errorf("runpod stop pod %s: %w", p.id, err)
 	}
-	return "RunPod pod " + p.id + " stopped (its disk is kept and still billed)", nil
+	return "RunPod pod " + p.id + " stopped" + via + " (its disk is kept and still billed)", nil
 }
 
 func (p *runPod) Destroy(ctx context.Context) (string, error) {
 	if err := p.ready(); err != nil {
 		return "", err
 	}
-	_, err := call(ctx, http.MethodDelete, p.podURL(""), p.key, nil)
+	via, err := p.do(ctx, http.MethodDelete, "", nil, "")
 	if err == nil {
-		return "RunPod pod " + p.id + " terminated", nil
+		return "RunPod pod " + p.id + " terminated" + via, nil
 	}
 	if !denied(err) {
 		return "", fmt.Errorf("runpod terminate pod %s: %w", p.id, err)
@@ -234,6 +280,71 @@ func (p *vastAI) Destroy(ctx context.Context) (string, error) {
 	detail, serr := p.Stop(ctx)
 	if serr != nil {
 		return "", fmt.Errorf("vast destroy instance %s: %v; stop: %w", p.id, err, serr)
+	}
+	return detail + "; the API key may not destroy", nil
+}
+
+// quickPod uses QuickPod's secure-key API (https://api.quickpod.org):
+// GET /update/api/stoppod?pod_uuid= stops (compute billing stops, storage is
+// kept) and GET /update/api/destroypod?pod_uuid= removes the pod and its
+// disk. The pod UUID is CONTAINER_LABEL. QuickPod injects no API key, so
+// AITK_QUICKPOD_API_KEY (a qpk_ key that may write pods) is passed in; it
+// goes in both X-API-Key and Authorization: ApiKey, as QuickPod's CLI sends
+// it. Any 2xx is success, and the answer's message (or result) is shown.
+type quickPod struct{ id, key string }
+
+func (p *quickPod) Name() string { return "quickpod" }
+
+func (p *quickPod) ready() error {
+	if p.id == "" || p.key == "" {
+		return errors.New("CONTAINER_LABEL and AITK_QUICKPOD_API_KEY are required")
+	}
+	return nil
+}
+
+// act calls one pod action and returns ": <message>" from the answer, or "".
+func (p *quickPod) act(ctx context.Context, action string) (string, error) {
+	u := strings.TrimRight(quickpodAPI, "/") + "/update/api/" + action + "?pod_uuid=" + url.QueryEscape(p.id)
+	body, err := callWith(ctx, http.MethodGet, u, http.Header{"X-API-Key": {p.key}, "Authorization": {"ApiKey " + p.key}}, nil)
+	if err != nil {
+		return "", err
+	}
+	var r struct {
+		Message string `json:"message"`
+		Result  string `json:"result"`
+	}
+	json.Unmarshal(body, &r)
+	if msg := strings.TrimSpace(firstNonEmpty(r.Message, r.Result)); msg != "" {
+		return ": " + string(clip([]byte(msg), 300)), nil
+	}
+	return "", nil
+}
+
+func (p *quickPod) Stop(ctx context.Context) (string, error) {
+	if err := p.ready(); err != nil {
+		return "", err
+	}
+	msg, err := p.act(ctx, "stoppod")
+	if err != nil {
+		return "", fmt.Errorf("quickpod stop pod %s: %w", p.id, err)
+	}
+	return "QuickPod pod " + p.id + " stopped (storage is kept and still billed)" + msg, nil
+}
+
+func (p *quickPod) Destroy(ctx context.Context) (string, error) {
+	if err := p.ready(); err != nil {
+		return "", err
+	}
+	msg, err := p.act(ctx, "destroypod")
+	if err == nil {
+		return "QuickPod pod " + p.id + " destroyed" + msg, nil
+	}
+	if !denied(err) {
+		return "", fmt.Errorf("quickpod destroy pod %s: %w", p.id, err)
+	}
+	detail, serr := p.Stop(ctx)
+	if serr != nil {
+		return "", fmt.Errorf("quickpod destroy pod %s: %v; stop: %w", p.id, err, serr)
 	}
 	return detail + "; the API key may not destroy", nil
 }
