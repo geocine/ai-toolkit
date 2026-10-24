@@ -23,6 +23,7 @@ import (
 	"github.com/geocine/aitoolkit/internal/events"
 	"github.com/geocine/aitoolkit/internal/jobstate"
 	"github.com/geocine/aitoolkit/internal/lifecycle"
+	"github.com/geocine/aitoolkit/internal/photocheck"
 	"github.com/geocine/aitoolkit/internal/portable"
 	"github.com/geocine/aitoolkit/internal/remote"
 	"github.com/geocine/aitoolkit/internal/settings"
@@ -155,6 +156,11 @@ func (c *composer) handle(ctx context.Context, e events.Event) {
 	}
 	j, err := store.GetJob(ctx, *e.JobID)
 	if err != nil || j == nil {
+		return
+	}
+	// A face check is a CPU helper job, not training: its log names photos
+	// and it has no GPU, so it sends nothing (PHO §10.3).
+	if j.JobType == photocheck.FaceJobType {
 		return
 	}
 	cfg := Current()
