@@ -739,6 +739,125 @@ costs two hops, and this server's `AITK_CORS_ORIGINS` applies. The relay has
 no `aitk` op: agents use `machines.link` and talk to the machine (or its
 `/mcp`) directly.
 
+### GPU recommendation
+
+The recommender (`internal/gpupick`) suggests the default offer: **best
+value** (most training speed per $/h) and **best speed** (fastest), from
+the smallest VRAM tier the model fits, among offers that can run the image
+fast. It only reads offers and never rents anything: the studio preselects
+the value pick, and an agent shows both picks and asks before
+`machines.launch`. Every tier query goes through the 30 s offers cache, so a
+recommendation right after an offers request of the same shape costs no
+provider call. Results are not cached themselves.
+
+- `GET /v1/providers/{kind}/recommend?model=&image=&disk_gb=&cloud=&max_price=` → GpuRecommendation for one provider. 404 for an unknown or disabled `{kind}`, 400 `invalid_request` when the provider has no key ("Add a RunPod API key first"); a provider error ends the run with that error (429 `rate_limited` with `Retry-After`, 402, 400 `provider_auth`, 502).
+- `GET /v1/hosts/recommend?providers=runpod,vast&model=&image=&disk_gb=&cloud=&max_price=` → GpuRecommendation across every enabled provider with a key, or the comma list in `providers`. A provider that fails is a note, not the status: the others still give picks. 400 when no listed provider has a key ("Add an API key for RunPod, Vast.ai or QuickPod first"), for a name that is not a provider, or when every listed provider is turned off by `AITK_PROVISION_PROVIDERS` (`providers: "quickpod" isn't enabled on this server`); a turned-off provider listed beside others is a `not_configured` note.
+
+`model` is a model arch (`flux`, `qwen_image`, `wan22_14b`, ...); an arch
+the VRAM table does not know is accepted, starts at 24 GB and adds the note
+`model_unknown`. `image` is the image the picks are judged against (default
+`ghcr.io/geocine/aitoolkit-go:latest`; the studio sends its Image row, or on
+QuickPod the template's image). `disk_gb` is 20-2000 (default: what the
+image and model need) and `max_price` is above 0. The code-mode ops are
+`providers.recommend(kind, q)` and `hosts.recommend(q)`.
+
+The rules:
+
+1. **Disk.** The disk asked for is the larger of `disk_gb` and what the
+   image and model need (`need.disk_gb`, at least 100 GB without a known
+   model). When the image cannot be read, the default image's built-in
+   requirements stand in and a note with the image check code
+   (`image_denied`, `image_not_found`, `image_unreachable`) says so; a
+   missing or private image also puts its sentence first in `message`.
+2. **Ladder.** VRAM tiers 24, 32, 48, 80, 96, 141 and 180 GB. The walk
+   starts at the smallest tier where the model fits or is tight (rounded up
+   to the ladder, never below 24; 80 when it fits nowhere up to 80; 24 with
+   no model). An offer's tier is the largest `L` with `vram ≥ L × 0.9`
+   (host VRAM in GiB when known), so 22.49 GiB L4 and A10 cards are 24 GB
+   cards, and 20 GB cards are below the ladder and ignored. There is one
+   offers query per tier and provider (`gpu_count=1`, `fast=1`, `limit=200`,
+   the tier's VRAM band), and the walk stops at the first tier with a pick:
+   a higher tier is searched only when the lower one has nothing.
+3. **Qualify.** An offer is left out for the first rule it fails, in this
+   order:
+
+   | code | left out when |
+   |---|---|
+   | `gpu_count` | it has more than one GPU (each job uses one) |
+   | `price` | `max_price` is set and the offer costs more |
+   | `cuda` | the driver is below the image's CUDA (`host_cuda`) |
+   | `cuda_unknown` | the driver is unknown (`host_cuda_unknown`) |
+   | `cuda_capacity` | RunPod has no free host with the CUDA it needs (`runpod_no_cuda_capacity`) |
+   | `gpu_arch` | the image has no kernels for the GPU (`gpu_sm`), the GPU is sm_75 (`gpu_sm_flash_attn`, hidden by default), not NVIDIA (`gpu_vendor`) or unknown (`gpu_unknown`), or the host CPU is not amd64 (`host_arch`) |
+   | `disk` | the host cannot hold the image (`disk_image`), or its `max_disk_gb` is below the disk asked for |
+   | `inet` | it **reports** a download speed below 500 Mbps |
+   | `disk_bw` | it **reports** a disk speed below 300 MB/s |
+   | `reliability` | it reports a reliability below 0.95 |
+   | `fit_block` | anything else blocks, or the offer was not checked against the image (note `not_decorated`) |
+   | `speed_unknown` | the GPU has no speed rating |
+
+   RunPod passes the CUDA rule through `host_cuda_placement`: RunPod itself
+   places the pod on a host with the image's CUDA. A download or disk speed
+   that is 0 or missing means "not reported" and passes (RunPod never
+   reports them, and some QuickPod rows have none); only a reported value
+   below the threshold leaves an offer out.
+4. **Thresholds** (`thresholds` in the answer). 500 Mbps pulls the 6.54 GB
+   image in about 3.5 min, where the 73 Mbps hosts seen on Vast and
+   QuickPod take about 25 min; at 300 MB/s the disk stops being the
+   bottleneck of the unpack. Their units are UNCONFIRMED: Vast's
+   `inet_down` is read as Mbps and `disk_bw` as MB/s, and QuickPod's units
+   are unknown. The 0.95 reliability floor is ours, not a provider's
+   (UNCONFIRMED tuning; Vast reports 0-1, QuickPod 0-100, normalised to
+   0-1).
+5. **Rank** within the tier. Value is the highest `per_dollar = speed /
+   price_per_hour`; when two offers are within 2 % of each other, one that
+   reports both its download and disk speed ranks first. Speed is the
+   highest `speed` (RTX 4090 = 1.00, as in `hosts.gpus`). Equal scores
+   break by lower price, then higher reliability (none lowest), then
+   provider order (RunPod, Vast.ai, QuickPod), then offer id. `default` is
+   `value` when there is a pick; when one offer is both, `value` and
+   `speed` hold the same offer.
+6. **Reason** (`reason`, the one line to show with the pick):
+   `{gpu} · {vram} GB · ${price}/h · {net} · {cuda}`. `net` is the reported
+   download speed (`912 Mbps`, followed by `disk speed not reported` when
+   only the disk speed is missing) or `net not reported`; `cuda` is `CUDA
+   13.2 OK` for a host that reports its CUDA, or `CUDA 13.0+ by RunPod`. In
+   a cross-provider answer ` on {provider}` follows the GPU: `RTX 4090 on
+   Vast.ai · 24 GB · $0.34/h · 912 Mbps · CUDA 13.2 OK`.
+7. **Nothing qualifies.** `value` and `speed` are null, `default` is `""`
+   and `message` says why, from the run: "No offer from 24 to 180 GB has
+   fast internet, enough disk (100 GB) and a driver for CUDA 13.0 right
+   now. Most were left out for slow internet (12). Pick one yourself from
+   the list.", or, when no offer came back at all, "No offers match these
+   filters (disk 2000 GB). Change the filters or pick a provider with more
+   stock." The offer list stays the way to pick by hand.
+
+`GpuRecommendation = {providers, model, start_tier_gb, tier_gb, default:
+value|"", value, speed, need, tiers, notes, thresholds, message}`
+(`studio/src/lib/provisionTypes.ts` is the exact contract):
+- `value` and `speed` are `GpuPick = {kind: value|speed, offer, tier_gb,
+  speed, speed_source, per_dollar, reason}` or null. `offer` is the whole
+  Offer as `providers.offers` returns it, so a client can show and launch
+  it even when its own list does not hold it;
+- `providers` is what was searched; `tier_gb` is the tier the picks come
+  from (0 for none); `need` is the DiskNeed;
+- `tiers: [{tier_gb, offers, qualified, rejected: {code: count}}]` is each
+  tier walked, in order;
+- `notes: [{provider, code, message, offers}]`: `not_configured` (no key,
+  or not enabled), a `/v1` error code for a provider that failed
+  (`rate_limited`, `provider_auth`, `remote_failed`, ...), `not_decorated`,
+  and, with `provider: ""`, the image and `model_unknown` notes;
+- `thresholds = {min_inet_down_mbps, min_disk_bw_mbps, min_reliability,
+  ladder}`.
+
+Arrays and records are never null. An agent picks, then asks:
+```ts
+const rec = await aitk.providers.recommend("vast", { model: "flux" });
+if (!rec.value) return rec.message; // nothing qualifies: say so, and let the user pick from providers.offers
+return { value: rec.value.reason, speed: rec.speed.reason, price: rec.value.offer.price_per_hour };
+// after the user's OK: machines.launch({ provider: "vast", offer_id: rec.value.offer.id, max_price_per_hour, request_id })
+```
+
 ## Images and hosts
 
 Before a GPU server is rented this server reads what its image needs from
@@ -827,7 +946,7 @@ host-side codes and a one-line summary ("Driver too old (CUDA 12.8)",
 `images.check` shows it once.
 
 The code-mode groups are `images` (`check`, `tags`, `recommend`), `hosts`
-(`gpus`, `fit`) and `system.cuda`. An agent checks before it rents:
+(`gpus`, `fit`, and `recommend` from GPU recommendation) and `system.cuda`. An agent checks before it rents:
 ```ts
 const offers = (await aitk.providers.offers("vast", { model: "flux", limit: 5 })).items;
 const offer = offers.find((o) => o.fit?.level !== "block");
@@ -872,14 +991,16 @@ through `machines.link`). Bodies that are not JSON:
 - `bundles.wait(id)` polls an import or push until it settles, like `jobs.wait`.
 
 GPU servers are the `providers` group (`list`, `setKey`, `removeKey`, `test`,
-`offers`, `templates`, `setup`) and the `machines` group (`list`, `launch`,
+`offers`, `recommend`, `templates`, `setup`; `hosts.recommend` searches every
+provider) and the `machines` group (`list`, `launch`,
 `get`, `update`, `stop`, `start`, `terminate`, `forget`, `link`, `logs`, and
 `wait(id, {until?, timeout_ms?, poll_ms?})`, which re-reads the machine until
 its status is in `until`, default `ready`, `failed`, `stopped`, `terminated`,
 or 100 s pass, and returns the last Machine). The agent asks before it
 spends money:
 ```ts
-const offer = (await aitk.providers.offers("runpod", { min_vram_gb: 24, limit: 5 })).items[0];
+const offer = (await aitk.providers.recommend("runpod", { model: "flux" })).value?.offer;
+if (!offer) return "nothing qualifies: pick one with providers.offers";
 // tell the user offer.gpu and offer.price_per_hour, and launch only after they agree
 const m = await aitk.machines.launch({ provider: "runpod", offer_id: offer.id,
   max_price_per_hour: offer.price_per_hour, request_id: "lora_run_0001", copy_remote: "r2" });
