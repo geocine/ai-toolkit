@@ -22,6 +22,7 @@ const (
 	CodeDatasetExists  = "dataset_exists"  // 409: a dataset of that name holds other files
 	CodeTooLarge       = "too_large"       // 413
 	CodeInvalidConfig  = "invalid_config"  // 422
+	CodeImageBlocked   = "image_blocked"   // 422: the image cannot run on the chosen host; details carry the checks
 	CodeInternal       = "internal"        // 500
 	CodeRemoteFailed   = "remote_failed"   // 502
 )
@@ -35,6 +36,7 @@ var statusOf = map[string]int{
 	CodeDatasetExists:  http.StatusConflict,
 	CodeTooLarge:       http.StatusRequestEntityTooLarge,
 	CodeInvalidConfig:  http.StatusUnprocessableEntity,
+	CodeImageBlocked:   http.StatusUnprocessableEntity,
 	CodeInternal:       http.StatusInternalServerError,
 	CodeRemoteFailed:   http.StatusBadGateway,
 }
@@ -81,11 +83,21 @@ func ItemsPage[T any](w http.ResponseWriter, items []T, cursor string) {
 
 // Fail writes {"error": {"code", "message"}} with the code's status.
 func Fail(w http.ResponseWriter, code, message string) {
-	status, ok := statusOf[code]
-	if !ok {
-		status = http.StatusInternalServerError
+	JSON(w, StatusOf(code), map[string]any{"error": map[string]string{"code": code, "message": message}})
+}
+
+// FailDetails writes {"error": {"code", "message", "details"}} with the code's
+// status, for errors a client acts on (a blocked launch carries its checks).
+func FailDetails(w http.ResponseWriter, code, message string, details any) {
+	JSON(w, StatusOf(code), map[string]any{"error": map[string]any{"code": code, "message": message, "details": details}})
+}
+
+// StatusOf is the HTTP status of a code; unknown codes are 500.
+func StatusOf(code string) int {
+	if status, ok := statusOf[code]; ok {
+		return status
 	}
-	JSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": message}})
+	return http.StatusInternalServerError
 }
 
 // Internal logs err and answers 500 internal.
