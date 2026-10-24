@@ -8,6 +8,7 @@ import { get, type Health, type Server, type SystemInfo } from '../lib/api';
 import { useStudio } from '../lib/context';
 import { autoLink, canAutoLink, providerNames, useMachines } from '../lib/machines';
 import type { ProviderKind } from '../lib/provisionTypes';
+import { href } from '../lib/route';
 import { uid } from '../lib/store';
 
 type Check = { ok: true; health: Health; system: SystemInfo } | { ok: false; error: unknown };
@@ -28,7 +29,11 @@ const blank = (token = ''): Server => ({ id: uid(), name: '', base: sameOrigin()
 
 const scrollTo = (id: string) => setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
 
-export function Servers() {
+/**
+ * create comes from #/servers?create=1 (ControllerNote); activeMode is what the
+ * active server's health said it is, for servers this page has not tested yet.
+ */
+export function Servers({ create, activeMode }: { create?: boolean; activeMode: Health['mode'] | null }) {
   const { servers, setServers, active, setActiveId } = useStudio();
   const [draft, setDraft] = useState<Server | null>(servers.length ? null : blank());
   const [checks, setChecks] = useState<Record<string, Check | 'pending'>>({});
@@ -36,6 +41,20 @@ export function Servers() {
   const [guide, setGuide] = useState<{ kind?: ProviderKind } | null>(null);
   const [toast, setToast] = useState<Server | null>(null);
   const tracked = useMachines(servers);
+
+  // open the dialog once, then drop ?create=1 so a reload does not reopen it
+  useEffect(() => {
+    if (!create) return;
+    setCreating(true);
+    window.location.replace(href({ page: 'servers' }));
+  }, [create]);
+
+  const modeOf = (s: Server): Health['mode'] | null => {
+    const c = checks[s.id];
+    if (c && c !== 'pending' && c.ok) return c.health.mode ?? 'server';
+    return s.id === active?.id ? activeMode : null;
+  };
+  const onlyController = servers.length === 1 && modeOf(servers[0]) === 'controller';
 
   const test = async (s: Server) => {
     setChecks(c => ({ ...c, [s.id]: 'pending' }));
@@ -80,7 +99,10 @@ export function Servers() {
     <>
       <PageHeader
         title="Servers"
-        description="Each server is the ai-toolkit Go image running somewhere. Add one you already run, or create a GPU server on RunPod, Vast.ai or QuickPod."
+        description={
+          'Each server is the ai-toolkit Go image running somewhere. Add one you already run, or create a GPU server on RunPod, Vast.ai or QuickPod.' +
+          (onlyController ? ' Create your first GPU server through it.' : '')
+        }
         actions={
           <>
             <button className="btn btn-ghost" onClick={() => setGuide({})}>
@@ -112,6 +134,7 @@ export function Servers() {
                   <p className="server-name">
                     {s.name}
                     {inUse && <span className="badge tone-accent">In use</span>}
+                    {modeOf(s) === 'controller' && <span className="badge tone-quiet">Controller</span>}
                     {s.machine && <span className="badge tone-quiet">{providerNames[s.machine.provider] ?? s.machine.provider}</span>}
                   </p>
                   <p className="mono server-base">{s.base}</p>
