@@ -95,22 +95,22 @@ type LaunchProblem = { text: string; link?: string; checks?: ImageCheckItem[] };
  * an offer and the settings, then rent it at a capped price.
  */
 export function CreateGpuServer({
-  controller,
+  owner,
   model,
   onClose,
   onCreated,
   onGuide,
   onAddServer,
 }: {
-  controller: Server | null;
+  owner: Server | null;
   /** The model arch of the run the user came from, for "What will you train?". */
   model?: string;
   onClose: () => void;
-  onCreated: (m: Machine, controller: Server) => void;
+  onCreated: (m: Machine, owner: Server) => void;
   onGuide: (kind?: ProviderKind) => void;
   onAddServer: () => void;
 }) {
-  if (!controller)
+  if (!owner)
     return (
       <Dialog wide title="Create a GPU server" onClose={onClose}>
         <Empty
@@ -130,20 +130,20 @@ export function CreateGpuServer({
         </Empty>
       </Dialog>
     );
-  return <CreateForm controller={controller} model={model} onClose={onClose} onCreated={onCreated} onGuide={onGuide} />;
+  return <CreateForm owner={owner} model={model} onClose={onClose} onCreated={onCreated} onGuide={onGuide} />;
 }
 
 function CreateForm({
-  controller: s,
+  owner: s,
   model,
   onClose,
   onCreated,
   onGuide,
 }: {
-  controller: Server;
+  owner: Server;
   model?: string;
   onClose: () => void;
-  onCreated: (m: Machine, controller: Server) => void;
+  onCreated: (m: Machine, owner: Server) => void;
   onGuide: (kind?: ProviderKind) => void;
 }) {
   const provs = useLoad(s, providers, []);

@@ -1,7 +1,7 @@
 // Manual template guides, bundled so they work with no server at all.
 // guides.json is generated from internal/provision/guide
 // (go test ./internal/provision/guide -update); GET /v1/providers/{kind}/setup
-// serves the same text from a controller.
+// serves the same text from any server.
 import bundled from './guides.json';
 import type { ProviderKind, SetupGuide } from './provisionTypes';
 
@@ -54,7 +54,7 @@ export function validateGuideOptions(o: GuideOptions): Partial<Record<keyof Guid
  * refuse are left out: a bad token or image keeps the placeholder or default,
  * each origin is trimmed and the invalid ones dropped, and a disk outside
  * 20-2000 GB keeps the guide's. Works on the bundled guides and on the ones a
- * controller serves.
+ * server serves.
  */
 export function fillGuide(g: SetupGuide, o: GuideOptions = {}): SetupGuide {
   const token = o.token?.trim() ?? '';

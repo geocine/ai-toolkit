@@ -13,7 +13,7 @@ func init() { addRoutes(registerPhotos) }
 
 func registerPhotos(mux *http.ServeMux) {
 	// the daily photo-cache GC registers with the routes, so it starts with
-	// the other loops (bg.Start); controller mode skips it
+	// the other loops (bg.Start); the studio API skips it
 	photocheck.StartGC()
 
 	httpx.Handle(mux, "POST /v1/photos/assess", assessPhotos)

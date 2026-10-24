@@ -20,7 +20,7 @@ function meta(t: Tracked): string {
   return gpu.join(' · ');
 }
 
-/** One GPU server tracked by a controller: state, problems and actions (PLAN §11). */
+/** One GPU server tracked by the server that holds its provider key: state, problems and actions (PLAN §11). */
 export function MachineRow({
   t,
   linked,
@@ -39,7 +39,7 @@ export function MachineRow({
   onForgotten: () => void;
 }) {
   const m = t.machine;
-  const s = t.controller;
+  const s = t.owner;
   const label = t.provider?.label ?? providerNames[m.provider];
   const consoleUrl = t.provider?.console_url ?? '';
   const [busy, setBusy] = useState(false);

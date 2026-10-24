@@ -33,16 +33,16 @@ export function CopyButton({ text, label = 'Copy' }: { text: string; label?: str
 
 /**
  * "Set up a template yourself": the manual steps per provider. It works with
- * no server at all (studio/src/lib/guides.json); with a controller the same
+ * no server at all (studio/src/lib/guides.json); with a server the same
  * guide comes from providers.setup, the source MCP agents read.
  */
 export function ProviderGuide({
-  controller,
+  owner,
   initial = 'runpod',
   onClose,
   onAddServer,
 }: {
-  controller: Server | null;
+  owner: Server | null;
   initial?: ProviderKind;
   onClose: () => void;
   onAddServer: (token: string) => void;
@@ -53,16 +53,16 @@ export function ProviderGuide({
   const [served, setServed] = useState<Partial<Record<ProviderKind, SetupGuide | 'none'>>>({});
 
   useEffect(() => {
-    if (!controller || served[kind]) return;
+    if (!owner || served[kind]) return;
     let cancelled = false;
-    setup(controller, kind).then(
+    setup(owner, kind).then(
       g => !cancelled && setServed(v => ({ ...v, [kind]: g })),
       () => !cancelled && setServed(v => ({ ...v, [kind]: 'none' })), // older server: the bundled copy
     );
     return () => {
       cancelled = true;
     };
-  }, [controller?.id, kind]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [owner?.id, kind]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fromServer = served[kind];
   // fillGuide checks the token and origin the same way the server does, so a

@@ -114,8 +114,8 @@ func nodeHandler(n mockkit.NodeSpec, inner http.Handler, clock mockkit.Clock) ht
 		}
 		r = r.Clone(r.Context())
 		r.Header.Del("Authorization")
-		if ctl := os.Getenv("AI_TOOLKIT_AUTH"); ctl != "" && strings.HasPrefix(r.URL.Path, "/mcp") {
-			r.Header.Set("Authorization", "Bearer "+ctl)
+		if own := os.Getenv("AI_TOOLKIT_AUTH"); own != "" && strings.HasPrefix(r.URL.Path, "/mcp") {
+			r.Header.Set("Authorization", "Bearer "+own)
 		}
 		if r.Method == http.MethodGet && r.URL.Path == "/v1/health" && (n.Image != "" || n.StaleImage) {
 			serveHealth(w, r, inner, nodeVersion(n))

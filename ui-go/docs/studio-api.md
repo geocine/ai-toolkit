@@ -1,10 +1,12 @@
-# Controller on a laptop
+# Studio API
 
-A controller is the Go server without the trainer: it holds your provider
-keys and creates, watches, stops and terminates GPU servers. It does not
-train. Keep it running while servers it launched exist; they keep billing if
-it is gone. Every machine it creates is labelled `aitk-…` at the provider, so
-you can always find and terminate it in the provider console.
+The studio API is the Go server without the trainer: it holds your provider
+keys, lists and recommends GPU offers, and creates, watches, stops, relays
+and terminates GPU servers. It does not train; training runs on the GPU
+servers it creates. Run it anywhere: your laptop, a VPS or Docker. Keep it
+running while servers it launched exist; they keep billing if it is gone.
+Every machine it creates is labelled `aitk-…` at the provider, so you can
+always find and terminate it in the provider console.
 
 It needs no GPU, no Python and no upstream checkout. It creates its own
 databases, serves the studio at `/studio/`, and answers the provider,
@@ -19,20 +21,20 @@ You need Go 1.26 and Node 22.
 ```bash
 cd ui-go/studio && npm ci && npm run build
 cd .. && go build -o aitk-server .        # Windows: go build -o aitk-server.exe .
-./aitk-server --controller               # then open http://127.0.0.1:8675/studio/
+./aitk-server --studio-api               # then open http://127.0.0.1:8675/studio/
 ```
 
 The binary serves the studio build in `studio/dist` next to it. `go run .
---controller` from `ui-go/` works too.
+--studio-api` from `ui-go/` works too.
 
 | Flag or env | Meaning |
 |---|---|
-| `--controller`, `AITK_CONTROLLER=1` | Controller mode (`1`, `true` or `yes`). |
-| `--data-dir`, `AITK_CONTROLLER_DIR` | Where the databases live. Default: `%AppData%\aitk-controller` on Windows, `~/Library/Application Support/aitk-controller` on macOS, `~/.config/aitk-controller` on Linux. The folder is made private to you (0700) and the database files 0600; Windows keeps its own permissions. |
+| `--studio-api`, `AITK_STUDIO_API=1` | Studio API mode (`1`, `true` or `yes`). |
+| `--data-dir`, `AITK_STUDIO_API_DIR` | Where the databases live. Default: `%AppData%\aitk-studio-api` on Windows, `~/Library/Application Support/aitk-studio-api` on macOS, `~/.config/aitk-studio-api` on Linux. The folder is made private to you (0700) and the database files 0600; Windows keeps its own permissions. |
 | `--port`, `PORT` | Port, default 8675. |
-| `--host` | Address to listen on. Default `127.0.0.1` in controller mode (the plain server listens on `0.0.0.0`). |
-| `AI_TOOLKIT_AUTH` | Bearer token. Required when `--host` is not loopback: the controller refuses to start on a reachable address without it, because it holds your provider keys. |
-| `AITK_ALLOWED_HOSTS` | Extra `Host` names an open controller (no token, no API key) answers, as a comma list of `host` or `host:port`. See [Host names](#host-names). |
+| `--host` | Address to listen on. Default `127.0.0.1` in studio API mode (the plain server listens on `0.0.0.0`). |
+| `AI_TOOLKIT_AUTH` | Bearer token. Required when `--host` is not loopback: the studio API refuses to start on a reachable address without it, because it holds your provider keys. |
+| `AITK_ALLOWED_HOSTS` | Extra `Host` names an open studio API (no token, no API key) answers, as a comma list of `host` or `host:port`. See [Host names](#host-names). |
 | `AITK_CORS_ORIGINS` | Origins of a studio hosted elsewhere (see below). |
 | `AITK_PROVISION_RUNPOD_KEY`, `AITK_PROVISION_VAST_KEY`, `AITK_PROVISION_QUICKPOD_KEY` | Provider keys used when none was saved in the studio. |
 | `AITK_PROVISION_SIMULATE=1` | Try it with no credits: every provider answers from an in-process mock. The keys that fail on purpose are in [providers.md](providers.md#simulate). |
@@ -46,10 +48,10 @@ one. You never need `npx prisma db push` here.
 
 ### Host names
 
-An open controller (no `AI_TOOLKIT_AUTH` and no API key) answers only
+An open studio API (no `AI_TOOLKIT_AUTH` and no API key) answers only
 requests whose `Host` is `127.0.0.1`, `[::1]` or `localhost`, on any port.
 Anything else gets 403. That stops a web page whose name was re-pointed at
-127.0.0.1 (DNS rebinding) from driving your controller. It also answers on:
+127.0.0.1 (DNS rebinding) from driving your studio API. It also answers on:
 
 - the host of `AITK_PUBLIC_URL` (`host`, or `host:port` when the URL has a
   port), so MCP code mode keeps working when you set it;
@@ -68,27 +70,27 @@ header.
 - **Easiest.** Open `http://127.0.0.1:8675/studio/`. It is the same origin,
   so no CORS and no token are needed on loopback. Then **Servers → Add
   server** with base URL `http://127.0.0.1:8675`, plus the token if you set
-  one. The server shows a *Controller* badge, and **Create a GPU server**
+  one. The server shows a *Studio API* badge, and **Create a GPU server**
   rents your first GPU server through it.
 - **Studio dev server.** `cd ui-go/studio && npm run dev` (port 5174). The
   Vite proxy sends `/aitk` to `AITK_API` (default `http://127.0.0.1:8675`), so
   add a server with base URL `/aitk`. No CORS is needed.
 - **A studio hosted elsewhere** (for example `https://studio.example`). Start
-  the controller with `AITK_CORS_ORIGINS=https://studio.example` and add the
+  the studio API with `AITK_CORS_ORIGINS=https://studio.example` and add the
   server `http://127.0.0.1:8675`. Browsers treat an https page calling
   `http://127.0.0.1` differently: Chrome may ask for local network access, and
   Safari may block it as mixed content. This is not verified, so use the
-  controller's own `/studio/` when you can.
+  studio API's own `/studio/` when you can.
 
 ## Small image (optional)
 
-A controller image with the Go server and the studio only: no CUDA and no
+A studio API image with the Go server and the studio only: no CUDA and no
 Python, so it is far smaller than the GPU image and needs no GPU.
 
 ```bash
-docker build -f ui-go/docker/controller.Dockerfile -t aitk-controller .        # from the repo root
-docker run -d --name aitk-controller -p 127.0.0.1:8675:8675 \
-  -e AI_TOOLKIT_AUTH=<a long random token> -v aitk-controller:/data aitk-controller
+docker build -f ui-go/docker/studio-api.Dockerfile -t aitk-studio-api .        # from the repo root
+docker run -d --name aitk-studio-api -p 127.0.0.1:8675:8675 \
+  -e AI_TOOLKIT_AUTH=<a long random token> -v aitk-studio-api:/data aitk-studio-api
 ```
 
 Then open `http://127.0.0.1:8675/studio/` and add the server with that token.
@@ -104,27 +106,27 @@ Point an MCP client at `http://127.0.0.1:8675/mcp` (streamable HTTP), with
 `Authorization: Bearer <token>` when `AI_TOOLKIT_AUTH` or an API key is set.
 Code mode then has `aitk.providers.*`, `aitk.hosts.recommend`,
 `aitk.images.*` and `aitk.machines.*`. Trainer ops answer with the
-controller's 409 sentence. On an open controller an agent on this machine
+studio API's 409 sentence. On an open studio API an agent on this machine
 needs no token; one that connects under a name other than localhost needs
 that name in `AITK_ALLOWED_HOSTS`.
 
 With `AITK_PROVISION_SIMULATE=1`, every simulated GPU server is this same
-controller under another address. Code mode through such a machine's `/mcp`
-works when the controller has no credentials at all, or when
+studio API under another address. Code mode through such a machine's `/mcp`
+works when the studio API has no credentials at all, or when
 `AI_TOOLKIT_AUTH` is set. With API keys only (no `AI_TOOLKIT_AUTH`) it answers
 401, so set `AI_TOOLKIT_AUTH` for that test. Its `/v1/health` also reports
-`mode: controller` and its studio pages show the controller note: that is the
+`mode: studio-api` and its studio pages show the studio API note: that is the
 honest result, and a simulated click-through ends at *Ready and linked*.
 
 ## Limits
 
 - No runs, captions, dataset uploads or face checks: those routes answer 409
-  with "This server is a controller (no GPU, no trainer): it creates and
+  with "This server is the studio API (no GPU, no trainer): it creates and
   tracks GPU servers. Do this on a GPU server: …". Reads such as
-  `GET /v1/jobs` and `GET /v1/datasets` answer from the controller's own empty
+  `GET /v1/jobs` and `GET /v1/datasets` answer from the studio API's own empty
   folders.
 - `/v1/system/cuda` is refused (it runs Python). `GET /v1/system` still
   answers, but nothing here uses the GPUs it lists.
 - The console is not served: `/` redirects to `/studio/`.
 - The bundle, portable, lifecycle and upload loops do not run, so *When done*
-  is for the GPU servers it launches, not for the controller.
+  is for the GPU servers it launches, not for the studio API.

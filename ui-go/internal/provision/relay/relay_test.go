@@ -23,8 +23,8 @@ import (
 )
 
 const (
-	controllerToken = "ctl-token-123"
-	machineToken    = "aitk_machine_token"
+	relayToken   = "relay-token-123"
+	machineToken = "aitk_machine_token"
 )
 
 // seenReq is what the stub machine received.
@@ -94,10 +94,10 @@ func (m *stubMachine) count() int {
 	return len(m.seen)
 }
 
-// newController serves the relay route behind httpx.Auth, the way the
-// controller does, with AI_TOOLKIT_AUTH set and target as every machine.
-func newController(t *testing.T, target provision.RelayTarget) *httptest.Server {
-	t.Setenv("AI_TOOLKIT_AUTH", controllerToken)
+// newRelayServer serves the relay route behind httpx.Auth, the way the
+// relaying server does, with AI_TOOLKIT_AUTH set and target as every machine.
+func newRelayServer(t *testing.T, target provision.RelayTarget) *httptest.Server {
+	t.Setenv("AI_TOOLKIT_AUTH", relayToken)
 	t.Setenv("AITK_PUBLIC_URL", "")
 	mux := http.NewServeMux()
 	for _, m := range []string{"GET", "POST", "PUT", "PATCH", "DELETE"} {
@@ -143,11 +143,11 @@ func errCode(t *testing.T, res *http.Response) string {
 
 func TestRelayPassesThrough(t *testing.T) {
 	m := newMachine(t)
-	c := newController(t, provision.RelayTarget{BaseURL: m.URL, Token: machineToken, Simulated: true})
+	c := newRelayServer(t, provision.RelayTarget{BaseURL: m.URL, Token: machineToken, Simulated: true})
 	res := send(t, "POST", c.URL+"/v1/machines/mch_1/relay/v1/datasets/a%2Fb/files?x=1&y=two", "payload", map[string]string{
-		"Authorization":      "Bearer " + controllerToken,
+		"Authorization":      "Bearer " + relayToken,
 		"Origin":             "https://studio.example",
-		"Cookie":             "controller=secret",
+		"Cookie":             "session=secret",
 		"X-Forwarded-Prefix": "/evil",
 		"Forwarded":          "for=1.2.3.4",
 	})
@@ -175,17 +175,17 @@ func TestRelayPassesThrough(t *testing.T) {
 		t.Errorf("forwarding headers: %v", h)
 	}
 
-	// behind its own https proxy the controller passes on the origin its
+	// behind its own https proxy the relaying server passes on the origin its
 	// clients use (links.Origin), so the machine's absolute links work
 	send(t, "GET", c.URL+"/v1/machines/mch_1/relay/v1/system", "", map[string]string{
-		"Authorization": "Bearer " + controllerToken, "X-Forwarded-Proto": "https", "X-Forwarded-Host": "ctl.example",
+		"Authorization": "Bearer " + relayToken, "X-Forwarded-Proto": "https", "X-Forwarded-Host": "relay.example",
 	})
-	if h := m.last(t).Header; h.Get("X-Forwarded-Host") != "ctl.example" || h.Get("X-Forwarded-Proto") != "https" {
-		t.Errorf("proxied controller: %v", h)
+	if h := m.last(t).Header; h.Get("X-Forwarded-Host") != "relay.example" || h.Get("X-Forwarded-Proto") != "https" {
+		t.Errorf("proxied relay server: %v", h)
 	}
 	t.Setenv("AITK_PUBLIC_URL", "https://public.example/")
 	send(t, "GET", c.URL+"/v1/machines/mch_1/relay/v1/system", "", map[string]string{
-		"Authorization": "Bearer " + controllerToken, "X-Forwarded-Host": "ctl.example",
+		"Authorization": "Bearer " + relayToken, "X-Forwarded-Host": "relay.example",
 	})
 	if h := m.last(t).Header; h.Get("X-Forwarded-Host") != "public.example" || h.Get("X-Forwarded-Proto") != "https" {
 		t.Errorf("AITK_PUBLIC_URL: %v", h)
@@ -194,11 +194,11 @@ func TestRelayPassesThrough(t *testing.T) {
 
 func TestRelayStreamsEvents(t *testing.T) {
 	m := newMachine(t)
-	c := newController(t, provision.RelayTarget{BaseURL: m.URL, Token: machineToken, Simulated: true})
+	c := newRelayServer(t, provision.RelayTarget{BaseURL: m.URL, Token: machineToken, Simulated: true})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, "GET", c.URL+"/v1/machines/mch_1/relay/v1/events/stream", nil)
-	req.Header.Set("Authorization", "Bearer "+controllerToken)
+	req.Header.Set("Authorization", "Bearer "+relayToken)
 	start := time.Now()
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -216,8 +216,8 @@ func TestRelayStreamsEvents(t *testing.T) {
 
 func TestRelayRedirectsStayInside(t *testing.T) {
 	m := newMachine(t)
-	c := newController(t, provision.RelayTarget{BaseURL: m.URL, Token: machineToken, Simulated: true})
-	auth := map[string]string{"Authorization": "Bearer " + controllerToken}
+	c := newRelayServer(t, provision.RelayTarget{BaseURL: m.URL, Token: machineToken, Simulated: true})
+	auth := map[string]string{"Authorization": "Bearer " + relayToken}
 	for path, want := range map[string]string{
 		"go-home": "/v1/machines/mch_1/relay/studio/",
 		"go-base": "/v1/machines/mch_1/relay/v1/health?x=1",
@@ -329,11 +329,11 @@ func TestRelayDialBlocked(t *testing.T) {
 	}
 }
 
-// Without the controller's token only the machine's public reads and signed
+// Without the relaying server's token only the machine's public reads and signed
 // links get through, and they carry no credentials.
 func TestRelayPublicPassthrough(t *testing.T) {
 	m := newMachine(t)
-	c := newController(t, provision.RelayTarget{BaseURL: m.URL, Token: machineToken, Simulated: true})
+	c := newRelayServer(t, provision.RelayTarget{BaseURL: m.URL, Token: machineToken, Simulated: true})
 	relay := c.URL + "/v1/machines/x/relay"
 
 	res := send(t, "GET", relay+"/api/img/a/b.png", "", nil)
@@ -367,12 +367,12 @@ func TestRelayPublicPassthrough(t *testing.T) {
 		t.Errorf("signed link reached the machine as %+v", got)
 	}
 
-	// a wrong controller token is refused, never swapped for the machine's
+	// a wrong relay token is refused, never swapped for the machine's
 	if res := send(t, "GET", relay+"/v1/jobs", "", map[string]string{"Authorization": "Bearer nope"}); res.StatusCode != 401 {
 		t.Errorf("wrong token: %d", res.StatusCode)
 	}
 	// the right one gets the machine token on a private route
-	send(t, "GET", relay+"/v1/jobs", "", map[string]string{"Authorization": "Bearer " + controllerToken})
+	send(t, "GET", relay+"/v1/jobs", "", map[string]string{"Authorization": "Bearer " + relayToken})
 	if got := m.last(t); got.Path != "/v1/jobs" || got.Header.Get("Authorization") != "Bearer "+machineToken {
 		t.Errorf("authenticated relay reached the machine as %+v", got)
 	}

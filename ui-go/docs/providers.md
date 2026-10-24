@@ -7,9 +7,9 @@ hand, and what each provider does with your money and your data.
 ## Two ways to get a GPU server
 
 1. **Create it from the studio.** Servers → *Create a GPU server*. The server
-   the studio is connected to (the *controller*) rents the GPU with your
-   provider API key, waits until the aitk server on it answers, and adds it to
-   your servers. It also stops and terminates it for you.
+   the studio is connected to (usually the [studio API](studio-api.md)) rents
+   the GPU with your provider API key, waits until the aitk server on it
+   answers, and adds it to your servers. It also stops and terminates it for you.
 2. **Set up a template yourself.** Servers → *Set up a template yourself*
    shows the steps below with your token filled in. Start the image at the
    provider by hand, then add its URL and token under Servers → *Add server*.
@@ -17,7 +17,8 @@ hand, and what each provider does with your money and your data.
 
 ## Where calls run and why
 
-The studio never calls a provider. Every provider call runs on the controller:
+The studio never calls a provider. Every provider call runs on the server that
+holds your provider keys:
 
 | Provider | From a browser | Server URL |
 |---|---|---|
@@ -26,21 +27,22 @@ The studio never calls a provider. Every provider call runs on the controller:
 | QuickPod | Echoes the origin, but templates can only be made with a console login. | `https://<pod id>-8675.proxy.quickpod.io/` (not verified), or `http://<ip>:<port>` |
 
 One code path for all three also keeps provider keys out of the browser: a key
-is sent once to the controller, stored there and never returned (only its
+is sent once to that server, stored there and never returned (only its
 last four characters, `key_hint`).
 
 **Mixed content.** A studio served over https cannot call an `http://` server.
 When the server's URL is https, or the studio page itself is http, the studio
 talks to the server directly. Otherwise (Vast.ai, QuickPod without the proxy)
-it goes through the controller's relay, `/v1/machines/{id}/relay/...`:
+it goes through that server's relay, `/v1/machines/{id}/relay/...`:
 
-- every request makes two hops, browser → controller → server;
-- the controller's `AITK_CORS_ORIGINS` applies, and the server needs none;
+- every request makes two hops, browser → that server → GPU server;
+- the relaying server's `AITK_CORS_ORIGINS` applies, and the GPU server
+  needs none;
 - uploads stream, events stream, and image thumbnails and signed download
   links pass through without a token (the server checks them itself);
-- the controller → server leg is still plain http.
+- the relay → GPU server leg is still plain http.
 
-## The controller
+## The server that holds your keys
 
 The server you use creates and tracks the GPU servers. It keeps the provider
 keys, the list of machines and their tokens in its database, and polls the
@@ -48,13 +50,13 @@ providers while anything runs. Keep it long-lived: if it is lost, its
 machines **keep billing**. Every machine is labelled `aitk-…` at the provider,
 so you can find and terminate it in the provider console.
 
-Any aitk server can be the controller. To run one on your laptop, with no
-GPU, Python or upstream checkout, start the Go server in controller mode
-([docs/controller.md](controller.md) has the build steps, the flags and a
-small image):
+Any aitk server can hold the keys. The usual one is the studio API: the Go
+server with no GPU, Python or upstream checkout, run on your laptop, a VPS or
+in Docker ([docs/studio-api.md](studio-api.md) has the build steps, the flags
+and a small image):
 
 ```bash
-./aitk-server --controller     # then open http://127.0.0.1:8675/studio/
+./aitk-server --studio-api     # then open http://127.0.0.1:8675/studio/
 ```
 
 It listens on `127.0.0.1` and keeps its databases in your user config
@@ -63,7 +65,7 @@ folder.
 Or, with Docker and no build (a large CUDA image; no GPU needed):
 
 ```bash
-docker run -d --name aitk-controller -p 127.0.0.1:8675:8675 \
+docker run -d --name aitk-server -p 127.0.0.1:8675:8675 \
   -e AI_TOOLKIT_AUTH=<token> -e AITK_CORS_ORIGINS=<studio origin> \
   -e AI_TOOLKIT_GO_DB=/app/ai-toolkit/data/aitk_go.db \
   -v aitk-control:/app/ai-toolkit/data \
@@ -77,7 +79,8 @@ machine list across restarts. `-p 127.0.0.1:…` publishes it on loopback only.
 
 - **Key.** Create one at <https://console.runpod.io/user/settings> with
   `pods:read`, `pods:write`, `catalog:read` and `templates:read`. Paste it
-  in the studio, or set `AITK_PROVISION_RUNPOD_KEY` on the controller.
+  in the studio, or set `AITK_PROVISION_RUNPOD_KEY` on the server that
+  holds your keys.
 - **Price.** The GPU price on the chosen cloud (Secure or Community) × GPU
   count, plus the container disk at $0.10 per GB per month (÷ 730 hours).
   RunPod picks the data center.
@@ -131,7 +134,7 @@ URL: `https://<pod id>-8675.proxy.runpod.net`
 - **URL.** `http://<ip>:<port>`, from the instance's mapped port. The port
   changes when the instance starts again.
 - **Limits.** Plain http only: the token crosses the internet unencrypted.
-  Vast also limits how often its API can be called, so the controller spaces
+  Vast also limits how often its API can be called, so the server spaces
   its calls, and offer searches have a daily quota.
 - **Account env.** Vast puts Account → Environment Variables into every
   instance, including the ones the studio creates with their own
@@ -222,10 +225,10 @@ URL: `https://<pod id>-8675.proxy.quickpod.io/`
 *Create a GPU server* lists only hosts that can run the image you launch:
 an NVIDIA amd64 GPU from the RTX 30-series and A100 on, a driver for CUDA
 13.0 or newer, and enough disk (docs/deploy.md, "The image"). Each provider
-filters as far as its API allows, and the controller does the rest, so every
+filters as far as its API allows, and the aitk server does the rest, so every
 offer carries the same `fit` whichever provider it comes from:
 
-| Provider | The provider filters | The controller filters |
+| Provider | The provider filters | The aitk server filters |
 |---|---|---|
 | RunPod | The pod is created with `gpu.minCudaVersion` `13.0`, so RunPod places it only on a host whose driver runs the image. | GPU types the image cannot run are left out of the catalog. A GPU with no free CUDA 13.0 host right now is a warning. RunPod reports no download or disk speed. |
 | Vast.ai | The search sends `gpu_arch`, `cpu_arch`, `cuda_max_good >= 13.0`, `compute_cap` (the GPU architectures the image runs), `disk_space` (the disk need), plus `gpu_ram` when a model is chosen and `inet_down` and `disk_bw` for fast hosts. Never `driver_vers`: it is empty or stale on many hosts. | The GPU name, and the same checks again on each row. |
@@ -244,8 +247,8 @@ The filters above the list:
 
 Each offer shows its fit as a dot and one line ("Driver too old (CUDA
 12.8)", "≈ 3 min to pull"), and the disk defaults to the disk need. The Image
-row under Configure says which build the server will run: the controller's
-own build when it is published, else the newest, pinned to its `:<sha>` tag.
+row under Configure says which build the server will run: the creating
+server's own build when it is published, else the newest, pinned to its `:<sha>` tag.
 On QuickPod it checks the template's image instead. A launch repeats every
 check and is refused (`image_blocked`) before any provider call when the
 host cannot run the image.
@@ -259,18 +262,18 @@ CUDA 13.0 driver, a supported GPU, enough disk, at least 500 Mbps and
 ## Money guards
 
 - Every launch names a ceiling, `max_price_per_hour` (the studio sends the
-  quoted price plus 2 %). The controller quotes the offer again and refuses
+  quoted price plus 2 %). The server quotes the offer again and refuses
   with 409 when the price is now above it.
 - A launch carries a `request_id`: sending it again returns the same machine
   instead of renting a second GPU.
 - `max_running` caps live machines per provider: 2 by default, 1 to 20, set
   per provider in the studio or with `AITK_PROVISION_MAX_RUNNING`.
-- A controller without `AI_TOOLKIT_AUTH` refuses to rent, start or link for
+- A server without `AI_TOOLKIT_AUTH` refuses to rent, start or link for
   anyone but a caller on the same machine.
 - The MCP launch op tells agents to quote the price and get your OK first.
-- The controller never terminates anything on its own. A machine that is not
-  ready after 20 minutes (`AITK_PROVISION_READY_TIMEOUT`) is marked failed and
-  is still billed until you terminate it.
+- The server that holds your keys never terminates anything on its own. A
+  machine that is not ready after 20 minutes (`AITK_PROVISION_READY_TIMEOUT`)
+  is marked failed and is still billed until you terminate it.
 
 ## When done
 
@@ -296,11 +299,11 @@ the container. It is never preselected.
 ## Security
 
 - Each machine gets a fresh token (`AI_TOOLKIT_AUTH`, `aitk_` plus 32 random
-  bytes). The controller keeps it and hands it to the studio only when the
-  machine is linked; events and logs never carry it. The controller checks
-  that the server refuses requests without it, and flags a machine that
+  bytes). That server keeps it and hands it to the studio only when the
+  machine is linked; events and logs never carry it. It checks
+  that the GPU server refuses requests without it, and flags a machine that
   answers without a token instead of adding it.
-- Provider keys are write-only on the controller.
+- Provider keys are write-only on the server that holds them.
 - *Keep results on* copies that remote's credentials into the machine's
   environment as plain values. Anyone with the provider key or console access
   can read them. It is never preselected.

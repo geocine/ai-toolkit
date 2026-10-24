@@ -1,5 +1,5 @@
 -- The tables `npx prisma db push` creates for schema.prisma (next to this
--- file, a copy of ui/prisma/schema.prisma). Controller mode creates its
+-- file, a copy of ui/prisma/schema.prisma). The studio API creates its
 -- database from this; parity/schema_embed_test.go checks it against the copy.
 CREATE TABLE "Settings" ("id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, "key" TEXT NOT NULL, "value" TEXT NOT NULL);
 CREATE UNIQUE INDEX "Settings_key_key" ON "Settings"("key");

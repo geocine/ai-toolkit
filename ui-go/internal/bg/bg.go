@@ -31,7 +31,7 @@ func Go(name string, fn func(context.Context)) {
 	}
 }
 
-// Skip marks loops that never start (controller mode). Call before Start.
+// Skip marks loops that never start (the studio API). Call before Start.
 func Skip(names ...string) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -40,7 +40,7 @@ func Skip(names ...string) {
 	}
 }
 
-// Names lists every registered loop name, skipped or not (for the controller
+// Names lists every registered loop name, skipped or not (for the studio API
 // allow-list test).
 func Names() []string {
 	mu.Lock()

@@ -157,13 +157,13 @@ func Valid(r *http.Request) bool {
 	return subtle.ConstantTimeCompare([]byte(sig), []byte(want)) == 1
 }
 
-// relayPrefix is the X-Forwarded-Prefix a controller's relay sets
+// relayPrefix is the X-Forwarded-Prefix the relay sets
 // (internal/provision/relay); no other prefix is honoured.
 var relayPrefix = regexp.MustCompile(`^/v1/machines/[A-Za-z0-9_]+/relay$`)
 
 // Origin is the base URL clients reach this server at: AITK_PUBLIC_URL when
 // set, else the scheme://host the request (or the proxy in front of it)
-// says. Reached through a controller's relay, it is the controller's
+// says. Reached through another server's relay, it is that server's
 // scheme://host plus the relay prefix, so absolute links point back through
 // the relay.
 func Origin(r *http.Request, publicURL string) string {

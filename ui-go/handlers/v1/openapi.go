@@ -172,7 +172,7 @@ func schemas() map[string]any {
 	return map[string]any{
 		"Error": obj(map[string]any{"error": obj(map[string]any{"code": str(), "message": str()}, "code", "message")}, "error"),
 		"Health": obj(map[string]any{"ok": boolean(), "version": str(), "upstream_version": strOrNull(), "started_at": dateTime(),
-			"mode": enum("server", "controller")}),
+			"mode": enum("server", "studio-api")}),
 		"System": obj(map[string]any{"gpus": arrayOf(anyObject()), "has_nvidia_smi": boolean(), "cpu": anyObject(),
 			"disks":        arrayOf(obj(map[string]any{"name": str(), "path": str(), "free": integer(), "total": integer()})),
 			"toolkit_root": str()}),

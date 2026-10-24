@@ -55,11 +55,11 @@ func IsOutOfDate(err error) bool {
 	return err != nil && strings.HasPrefix(err.Error(), "database schema is out of date")
 }
 
-// Recreate replaces the database at path, made by an older controller whose
+// Recreate replaces the database at path, made by an older studio API whose
 // embedded schema has since followed upstream: it keeps the Settings rows (the
-// only data a controller keeps there), renames the file to
+// only data the studio API keeps there), renames the file to
 // <path>.bak-<unix>, creates a fresh one from SchemaSQL and puts the rows
-// back. Controller mode only: a database next to a checkout belongs to
+// back. Studio API only: a database next to a checkout belongs to
 // prisma db push. It closes DB first (the file is renamed); call Open after.
 func Recreate(path string) (backup string, err error) {
 	if DB != nil {

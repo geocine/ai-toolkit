@@ -6,10 +6,10 @@ import { link, machines, providers } from './provision';
 import type { Machine, MachineLink, MachineStatus, Provider, ProviderKind } from './provisionTypes';
 import { load, save, uid } from './store';
 
-/** A machine and the saved server (its controller) that tracks it. */
+/** A machine and the saved server (its owner, which holds the provider key) that tracks it. */
 export interface Tracked {
   machine: Machine;
-  controller: Server;
+  owner: Server;
   provider: Provider | null;
 }
 
@@ -106,7 +106,7 @@ export function useMachines(servers: Server[]) {
       for (const machine of lists[s.id] ?? []) {
         if (seen.has(machine.id)) continue;
         seen.add(machine.id);
-        out.push({ machine, controller: s, provider: provs[s.id]?.find(p => p.kind === machine.provider) ?? null });
+        out.push({ machine, owner: s, provider: provs[s.id]?.find(p => p.kind === machine.provider) ?? null });
       }
     }
     return out.sort((a, b) => b.machine.created_at.localeCompare(a.machine.created_at));
@@ -144,11 +144,11 @@ export function useMachines(servers: Server[]) {
   }, [key, pollOnce, busy]);
 
   /** Puts a machine the page just changed in place, before the next poll. */
-  const put = useCallback((controllerId: string, m: Machine) => {
+  const put = useCallback((ownerId: string, m: Machine) => {
     setLists(v => {
-      const cur = v[controllerId] ?? [];
+      const cur = v[ownerId] ?? [];
       const next = cur.some(x => x.id === m.id) ? cur.map(x => (x.id === m.id ? m : x)) : [m, ...cur];
-      return { ...v, [controllerId]: next };
+      return { ...v, [ownerId]: next };
     });
   }, []);
   const drop = useCallback((id: string) => {
@@ -161,11 +161,11 @@ export function useMachines(servers: Server[]) {
 /**
  * How the studio reaches a linked machine. Direct when the machine is https or
  * this page is plain http (no mixed content); otherwise through the
- * controller's relay with the controller's token.
+ * owner's relay with the owner's token.
  */
-export function linkVia(controller: Server, l: MachineLink): { base: string; token: string; via: 'direct' | 'relay' } {
+export function linkVia(owner: Server, l: MachineLink): { base: string; token: string; via: 'direct' | 'relay' } {
   if (l.secure || window.location.protocol === 'http:') return { base: trimBase(l.base_url), token: l.token, via: 'direct' };
-  return { base: trimBase(controller.base) + l.relay_path, token: controller.token, via: 'relay' };
+  return { base: trimBase(owner.base) + l.relay_path, token: owner.token, via: 'relay' };
 }
 
 const LINKED = 'aitk.studio.linked';
@@ -181,14 +181,14 @@ export const canAutoLink = (m: Machine) => m.status === 'ready' && m.problem !==
  * Links a ready machine and returns the Server to save, or null when it is
  * not linkable (yet). The id is recorded in aitk.studio.linked.
  */
-export async function autoLink(controller: Server, m: Machine): Promise<Server | null> {
+export async function autoLink(owner: Server, m: Machine): Promise<Server | null> {
   if (!canAutoLink(m)) return null;
   linking.add(m.id);
   try {
-    const l = await link(controller, m.id);
-    const { base, token, via } = linkVia(controller, l);
+    const l = await link(owner, m.id);
+    const { base, token, via } = linkVia(owner, l);
     save(LINKED, [...load<string[]>(LINKED, []).filter(x => x !== m.id), m.id]);
-    return { id: uid(), name: l.name || m.name, base, token, machine: { id: m.id, control: controller.id, provider: m.provider, via } };
+    return { id: uid(), name: l.name || m.name, base, token, machine: { id: m.id, control: owner.id, provider: m.provider, via } };
   } catch {
     return null; // tried again at the next poll
   } finally {

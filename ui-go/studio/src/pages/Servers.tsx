@@ -32,7 +32,7 @@ const blank = (token = ''): Server => ({ id: uid(), name: '', base: sameOrigin()
 const scrollTo = (id: string) => setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
 
 /**
- * create comes from #/servers?create=1 (ControllerNote); activeMode is what the
+ * create comes from #/servers?create=1 (StudioApiNote); activeMode is what the
  * active server's health said it is, for servers this page has not tested yet.
  */
 export function Servers({ create, activeMode }: { create?: boolean; activeMode: Health['mode'] | null }) {
@@ -72,7 +72,7 @@ export function Servers({ create, activeMode }: { create?: boolean; activeMode: 
     if (c && c !== 'pending' && c.ok) return c.health.mode ?? 'server';
     return s.id === active?.id ? activeMode : null;
   };
-  const onlyController = servers.length === 1 && modeOf(servers[0]) === 'controller';
+  const onlyStudioApi = servers.length === 1 && modeOf(servers[0]) === 'studio-api';
 
   const test = async (s: Server) => {
     setChecks(c => ({ ...c, [s.id]: 'pending' }));
@@ -91,9 +91,9 @@ export function Servers({ create, activeMode }: { create?: boolean; activeMode: 
 
   // a ready machine becomes an ordinary server, once per browser
   useEffect(() => {
-    for (const { machine, controller } of tracked.items) {
+    for (const { machine, owner } of tracked.items) {
       if (!canAutoLink(machine) || servers.some(x => x.machine?.id === machine.id)) continue;
-      autoLink(controller, machine).then(s => {
+      autoLink(owner, machine).then(s => {
         if (!s) return;
         setServers(list => (list.some(x => x.machine?.id === machine.id) ? list : [...list, s]));
         test(s);
@@ -119,7 +119,7 @@ export function Servers({ create, activeMode }: { create?: boolean; activeMode: 
         title="Servers"
         description={
           'Each server is the ai-toolkit Go image running somewhere. Add one you already run, or create a GPU server on RunPod, Vast.ai or QuickPod.' +
-          (onlyController ? ' Create your first GPU server through it.' : '')
+          (onlyStudioApi ? ' Create your first GPU server through it.' : '')
         }
         actions={
           <>
@@ -152,7 +152,7 @@ export function Servers({ create, activeMode }: { create?: boolean; activeMode: 
                   <p className="server-name">
                     {s.name}
                     {inUse && <span className="badge tone-accent">In use</span>}
-                    {modeOf(s) === 'controller' && <span className="badge tone-quiet">Controller</span>}
+                    {modeOf(s) === 'studio-api' && <span className="badge tone-quiet">Studio API</span>}
                     {s.machine && <span className="badge tone-quiet">{providerNames[s.machine.provider] ?? s.machine.provider}</span>}
                   </p>
                   <p className="mono server-base">{s.base}</p>
@@ -222,9 +222,9 @@ export function Servers({ create, activeMode }: { create?: boolean; activeMode: 
             {finding && active && canFind && (
               <FindMachines
                 key={active.id}
-                controller={active}
-                onAdopted={(m, controller) => {
-                  tracked.put(controller.id, m);
+                owner={active}
+                onAdopted={(m, owner) => {
+                  tracked.put(owner.id, m);
                   scrollTo(`machine-${m.id}`);
                 }}
               />
@@ -240,9 +240,9 @@ export function Servers({ create, activeMode }: { create?: boolean; activeMode: 
                       linked={linked}
                       inUse={!!linked && linked.id === active?.id}
                       onUse={() => linked && setActiveId(linked.id)}
-                      onChanged={m => tracked.put(t.controller.id, m)}
+                      onChanged={m => tracked.put(t.owner.id, m)}
                       onTerminated={m => {
-                        tracked.put(t.controller.id, m);
+                        tracked.put(t.owner.id, m);
                         // the server entry goes with the machine
                         setServers(list => list.filter(x => x.machine?.id !== m.id));
                       }}
@@ -312,10 +312,10 @@ export function Servers({ create, activeMode }: { create?: boolean; activeMode: 
 
       {creating && (
         <CreateGpuServer
-          controller={active}
+          owner={active}
           onClose={() => setCreating(false)}
-          onCreated={(m, controller) => {
-            tracked.put(controller.id, m);
+          onCreated={(m, owner) => {
+            tracked.put(owner.id, m);
             scrollTo(`machine-${m.id}`);
           }}
           onGuide={kind => {
@@ -328,7 +328,7 @@ export function Servers({ create, activeMode }: { create?: boolean; activeMode: 
           }}
         />
       )}
-      {guide && <ProviderGuide controller={active} initial={guide.kind} onClose={() => setGuide(null)} onAddServer={openForm} />}
+      {guide && <ProviderGuide owner={active} initial={guide.kind} onClose={() => setGuide(null)} onAddServer={openForm} />}
       {toast && (
         <div className="toast" role="status">
           <span>

@@ -1,4 +1,4 @@
-package controller
+package studioapi
 
 import (
 	"encoding/json"
@@ -145,7 +145,7 @@ func TestGateRefusals(t *testing.T) {
 
 	t.Cleanup(SetForTest(false))
 	if rec := serve(h, "POST", "/v1/jobs", "evil.com"); rec.Code != http.StatusTeapot {
-		t.Fatalf("outside controller mode the gate is a no-op: %d", rec.Code)
+		t.Fatalf("outside studio API mode the gate is a no-op: %d", rec.Code)
 	}
 	SetForTest(true)
 
@@ -193,9 +193,9 @@ func TestCheckBind(t *testing.T) {
 func TestFromEnv(t *testing.T) {
 	for v, want := range map[string]bool{"1": true, "true": true, "TRUE": true, "Yes": true, " yes ": true,
 		"": false, "0": false, "no": false, "false": false, "on": false} {
-		t.Setenv("AITK_CONTROLLER", v)
+		t.Setenv("AITK_STUDIO_API", v)
 		if got := FromEnv(); got != want {
-			t.Errorf("AITK_CONTROLLER=%q: FromEnv = %v", v, got)
+			t.Errorf("AITK_STUDIO_API=%q: FromEnv = %v", v, got)
 		}
 	}
 }
@@ -225,19 +225,19 @@ func TestDataDir(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", cfg)
 	t.Setenv("HOME", cfg)
 
-	t.Setenv("AITK_CONTROLLER_DIR", envDir)
+	t.Setenv("AITK_STUDIO_API_DIR", envDir)
 	if got, err := DataDir(flagDir); err != nil || got != flagDir {
 		t.Fatalf("flag first: %q %v", got, err)
 	}
 	if got, err := DataDir(""); err != nil || got != envDir {
 		t.Fatalf("env second: %q %v", got, err)
 	}
-	t.Setenv("AITK_CONTROLLER_DIR", "")
+	t.Setenv("AITK_STUDIO_API_DIR", "")
 	base, err := os.UserConfigDir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := DataDir(""); err != nil || got != filepath.Join(base, "aitk-controller") {
+	if got, err := DataDir(""); err != nil || got != filepath.Join(base, "aitk-studio-api") {
 		t.Fatalf("default: %q %v (config dir %q)", got, err, base)
 	}
 	for _, d := range []string{flagDir, envDir} {

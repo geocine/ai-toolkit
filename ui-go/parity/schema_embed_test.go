@@ -15,7 +15,7 @@ import (
 )
 
 // TestEmbeddedPrismaSchema fails when upstream changed its schema and the
-// copy controller mode creates databases from (internal/store/schema/) did not.
+// copy the studio API creates databases from (internal/store/schema/) did not.
 func TestEmbeddedPrismaSchema(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join(upstreamUI, "prisma", "schema.prisma"))
 	if err != nil {
