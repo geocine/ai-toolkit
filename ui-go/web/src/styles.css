@@ -1937,6 +1937,236 @@ input[aria-invalid='true'] {
 .caption-span .field select.sm {
   margin-bottom: 6px;
 }
+
+/* ---- photo checks (photoUi.tsx) ---- */
+.photo-check {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.photo-check-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  min-width: 0;
+}
+.photo-check-line {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.badge.tone-ok {
+  --c: var(--ok);
+}
+.badge.tone-warn {
+  --c: var(--warn);
+}
+.badge.tone-danger {
+  --c: var(--danger);
+}
+button.badge {
+  border: 0;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color var(--ease), color var(--ease);
+}
+button.badge:hover,
+button.badge.on {
+  background: color-mix(in srgb, var(--c) calc(var(--soft) * 2), transparent);
+}
+button.badge.on {
+  color: var(--text);
+}
+.photo-details {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+}
+.photo-findings {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.photo-findings li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.photo-findings .dot {
+  margin-top: 6px;
+}
+.dot.lv-warn {
+  --c: var(--warn);
+}
+.dot.lv-danger {
+  --c: var(--danger);
+}
+.photo-run {
+  margin-bottom: 0;
+}
+.photo-menu {
+  position: relative;
+  flex: none;
+}
+.photo-menu-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 40;
+  display: grid;
+  min-width: 200px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop);
+  animation: fadeIn 120ms ease;
+}
+.photo-menu-pop > button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--ease);
+}
+.photo-menu-pop > button:hover,
+.photo-menu-pop > button:focus-visible {
+  outline: none;
+  background: var(--surface-2);
+}
+.photo-menu-pop > button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.photo-menu-pop svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  color: var(--text-2);
+}
+.photo-menu-pop .is-danger {
+  color: var(--danger);
+}
+.photo-menu-pop hr {
+  margin: 4px 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+.photo-menu-gap {
+  display: inline-block;
+  width: 14px;
+  flex: none;
+}
+.item-thumb {
+  position: relative;
+}
+.photo-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--surface);
+  border-radius: 999px;
+  background: var(--text-3);
+  box-sizing: content-box;
+}
+.photo-dot.lv-warn {
+  background: var(--warn);
+}
+.item-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+.photo-flags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+}
+.photo-flags .badge {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 22px;
+}
+.photo-waived {
+  font-size: 12px;
+  color: var(--text-3);
+  text-decoration: line-through;
+}
+.photo-pick-list {
+  max-height: 240px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.photo-pick-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 10px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.photo-pick-list li + li {
+  border-top: 1px solid var(--border);
+}
+.photo-compare {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 16px;
+}
+.photo-compare-side {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.photo-compare-img {
+  width: 100%;
+  max-height: 60vh;
+  object-fit: contain;
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+.photo-left-out {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+}
+.photo-left-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr));
+  gap: 8px;
+}
+.photo-left-item .item-media {
+  opacity: 0.6;
+}
 .notify-grid {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr));
   align-items: stretch;

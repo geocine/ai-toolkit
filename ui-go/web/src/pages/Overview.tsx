@@ -8,6 +8,8 @@ import { LifeNotice } from '../lifecycle';
 import { JobRow, JobTableHead } from './Jobs';
 
 const ACTIVE = new Set(['queued', 'starting', 'running', 'stopping']);
+// the cpu queue runs photo checks (face check) beside training
+const queueName = (q: Queue) => (q.gpu_ids === 'cpu' ? 'CPU (photo checks)' : `GPU ${q.gpu_ids}`);
 
 export function Overview() {
   const toast = useToast();
@@ -29,7 +31,7 @@ export function Overview() {
   const toggleQueue = async (q: Queue) => {
     try {
       await api.post(`/v1/queues/${encodeURIComponent(q.gpu_ids)}/${q.running ? 'stop' : 'start'}`);
-      toast.success(`Queue ${q.gpu_ids} ${q.running ? 'stopped' : 'started'}`);
+      toast.success(`${queueName(q)} queue ${q.running ? 'stopped' : 'started'}`);
       refresh();
     } catch (e) {
       toast.error(e);
@@ -169,7 +171,7 @@ export function Overview() {
                   const cur = jobs?.find(j => j.id === q.current_job_id);
                   return (
                     <tr key={q.gpu_ids}>
-                      <td className="cell-title nowrap">GPU {q.gpu_ids}</td>
+                      <td className="cell-title nowrap">{queueName(q)}</td>
                       <td>
                         <StateBadge state={q.running ? 'running' : 'stopped'} />
                       </td>

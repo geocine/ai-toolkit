@@ -1,5 +1,7 @@
 // Shapes of the /v1 API (docs/headless.md; same as the code-mode declaration).
 
+export * from './photoTypes';
+
 export type JobState =
   | 'draft'
   | 'queued'
@@ -65,7 +67,8 @@ export type LossSeries = { keys: string[]; key: string; points: { step: number; 
 export type Queue = { gpu_ids: string; running: boolean; current_job_id: string | null; queued: number };
 export type Dataset = { name: string; path: string; images: number; captions: number; size: number; modified: string };
 export type DatasetItem = { file: string; caption: string | null; size: number; width?: number; height?: number };
-export type DatasetDetail = Dataset & { items: DatasetItem[]; next_cursor: string | null; caption_job: Job | null };
+// photo_job: the newest face check (photo_faces job) for the folder
+export type DatasetDetail = Dataset & { items: DatasetItem[]; next_cursor: string | null; caption_job: Job | null; photo_job?: Job | null };
 export type CaptionOption = { value: unknown; label: string };
 export type Captioner = {
   name: string;
