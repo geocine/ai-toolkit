@@ -359,7 +359,8 @@ function StepImages({ k, dataset, onDone, back }: { k: Knobs; dataset: string; o
   const [serverConvert, setServerConvert] = useState<File[]>([]);
   const [notes, setNotes] = useState<PrepNote[]>([]);
   const [skipped, setSkipped] = useState<string[]>([]);
-  const [measuring, setMeasuring] = useState<{ done: number; total: number; files: File[] } | null>(null);
+  // names: each card's provisional name in the live check made while measuring (prepareImages onMetrics)
+  const [measuring, setMeasuring] = useState<{ done: number; total: number; files: File[]; names?: Map<File, string> } | null>(null);
   const [decisions, setDecisions] = useState<Record<string, PhotoDecision>>({});
   const [review, setReview] = useState<PhotoReview | null>(null);
   // the last judgement of every photo: a left-out photo is not sent again, but its card keeps its flags
@@ -381,6 +382,8 @@ function StepImages({ k, dataset, onDone, back }: { k: Knobs; dataset: string; o
   // the grid). The lock opens only once the render with the new photos is
   // committed, so the next drop sees their names.
   const busyRef = useRef(false);
+  const drops = useRef(0); // drops so far
+  const measuringDrop = useRef(0); // the drop being measured, 0 when none
   const [settled, setSettled] = useState(0);
   const [turnedAway, setTurnedAway] = useState(false);
   useEffect(() => {
@@ -458,12 +461,39 @@ function StepImages({ k, dataset, onDone, back }: { k: Knobs; dataset: string; o
     setPick(null);
     const shown = fs.filter(f => trainable.test(f.name));
     setMeasuring({ done: 0, total: shown.length, files: shown });
+    // a live check about 500 ms in (or at the first photo measured after that),
+    // so flags fill in while the rest is measured; the check at the end judges
+    // the final names. A late answer, after measuring ends, is dropped.
+    const drop = ++drops.current;
+    measuringDrop.current = drop;
+    let sofar: { metrics: PhotoMetrics[]; from: File[] } | null = null;
+    let due = false;
+    const early = () => {
+      due = !sofar;
+      if (!sofar) return;
+      const { metrics, from } = sofar;
+      const body = assessBody();
+      assess(server, { ...body, items: [...body.items, ...metrics] }).then(
+        r => {
+          if (measuringDrop.current !== drop) return;
+          setAssessError(null);
+          setReview(r);
+          setMeasuring(m => m && { ...m, names: new Map(from.map((f, i) => [f, metrics[i].file])) });
+        },
+        e => measuringDrop.current === drop && setAssessError(assessFailure(e)),
+      );
+    };
+    const timer = setTimeout(early, 500);
     try {
       const taken = new Set<string>([...photos.map(p => p.file.name), ...serverConvert.map(f => f.name), ...(await storedNames())]);
       const r = await prepareImages(fs, {
         taken,
         serverConverts: convert,
         onProgress: (done, total) => setMeasuring(m => m && { ...m, done, total }),
+        onMetrics: (metrics, from) => {
+          sofar = { metrics, from };
+          if (due) early();
+        },
       });
       const byName = new Map(r.metrics.map(m => [m.file, m]));
       const imgs = r.ok.filter(f => !isCaption(f));
@@ -489,6 +519,8 @@ function StepImages({ k, dataset, onDone, back }: { k: Knobs; dataset: string; o
     } catch (e) {
       setError(e);
     } finally {
+      clearTimeout(timer);
+      measuringDrop.current = 0;
       setMeasuring(null);
       setSettled(n => n + 1);
     }
@@ -544,7 +576,10 @@ function StepImages({ k, dataset, onDone, back }: { k: Knobs; dataset: string; o
       reason: why.get(p.file.name),
       stored: false,
     })),
-    ...(measuring?.files ?? []).map((f, i) => ({ key: `m${i}`, file: f.name, src: '', blob: f, leftOut: false, stored: false })),
+    ...(measuring?.files ?? []).map((f, i) => {
+      const live = measuring?.names?.get(f);
+      return { key: `m${i}`, file: f.name, src: '', blob: f, item: live ? reviewItems.get(live) : undefined, leftOut: false, stored: false };
+    }),
   ];
   const byFile = (f: string) => grid.find(x => x.file === f);
   // a photo of the grid, or the stored photo a dropped copy duplicates (assess with dataset sets same_as to it)

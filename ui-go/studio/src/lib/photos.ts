@@ -31,14 +31,20 @@ function workersMeasure(): boolean {
 /**
  * Measures each file (section 3 metrics, plus the silent fixes: upright,
  * 16-bit grey to 8-bit, transparency flattened on white). Results are in the
- * order of files; onProgress counts finished files.
+ * order of files; onProgress counts finished files, and onResult gets each
+ * file's result as it finishes (in finishing order; r.id is its index).
  */
-export async function measureFiles(files: File[], onProgress: (done: number, total: number) => void): Promise<WorkOut[]> {
+export async function measureFiles(
+  files: File[],
+  onProgress: (done: number, total: number) => void,
+  onResult?: (r: WorkOut) => void,
+): Promise<WorkOut[]> {
   const out: WorkOut[] = new Array(files.length);
   const sha = !!globalThis.crypto?.subtle;
   let done = 0;
   const finish = (r: WorkOut) => {
     out[r.id] = r;
+    onResult?.(r);
     onProgress(++done, files.length);
   };
   const onMain = async (id: number) => {
