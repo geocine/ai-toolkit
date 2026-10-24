@@ -159,6 +159,10 @@ func FFmpeg() (exe string, env []string) {
 	return ffmpegExe, ffmpegEnv
 }
 
+// HideWindow stops cmd from opening a console window on Windows (a server
+// with no console would flash one per run). It does nothing elsewhere.
+func HideWindow(cmd *exec.Cmd) { hideWindow(cmd) }
+
 var (
 	mu            sync.Mutex
 	ffmpegMissing bool
