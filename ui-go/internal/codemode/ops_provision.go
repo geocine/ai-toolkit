@@ -40,6 +40,13 @@ var provisionOps = []Op{
 		Doc: "The manual setup guide for the provider's console (image, port, env, the fields to fill): for a person who creates the server themselves. Needs no key and never takes a token.",
 		Params: []Param{p("kind", "ProviderKind", "path", ""), opt("image", "string", "query", ""), opt("disk_gb", "number", "query", ""),
 			opt("cors_origin", "string", "query", "the studio origin the server must allow"), opt("generate_token", "boolean", "query", "fill in a fresh AI_TOOLKIT_AUTH token (returned in token)")}},
+	{Group: "providers", Name: "instances", Method: "GET", Path: "/v1/providers/{kind}/instances", Result: "Items<ProviderInstance>",
+		Doc:    "Every aitk server (label aitk-...) on the provider account, newest first, including ones this server lost track of. machine_id is the machine here that tracks it; null means it is not tracked and may still be billing: providers.adopt it, or terminate it in the provider console. Never returns env values.",
+		Params: []Param{p("kind", "ProviderKind", "path", "")}},
+	{Group: "providers", Name: "adopt", Method: "POST", Path: "/v1/providers/{kind}/adopt", Result: "Machine",
+		Doc: "Track an instance from providers.instances (machine_id null) as a machine here, so it can be watched, linked, stopped and terminated. The token is read from the provider's env echo when token_known (RunPod, Vast.ai); otherwise pass the server's AI_TOOLKIT_AUTH (QuickPod always, or a RunPod secret reference). 409 when it is already tracked. It rents nothing.",
+		Params: []Param{p("kind", "ProviderKind", "path", ""), p("provider_id", "string", "body", "from providers.instances"),
+			opt("name", "string", "body", "default <gpu> on <provider>"), opt("token", "string", "body", "its AI_TOOLKIT_AUTH; required when token_known is false")}},
 
 	// machines (GPU servers this server rented)
 	{Group: "machines", Name: "list", Method: "GET", Path: "/v1/machines", Result: "Items<Machine>", Doc: "GPU servers this server rented, newest first.",
@@ -131,6 +138,8 @@ interface MachineLogs { text: string; source: string; truncated: boolean }
 interface GuideEnv { name: string; value: string; secret: boolean; note: string }
 interface GuideField { label: string; value: string; note: string }
 interface SetupGuide { kind: ProviderKind; image: string; port: number; disk_gb: number; env: GuideEnv[]; env_block: string; docker_options: string; fields: GuideField[]; steps: string[]; url_pattern: string; console_url: string; keys_url: string; key_scopes: string[]; token?: string }
+interface ProviderInstance { provider_id: string; label: string; status: MachineStatus; provider_status: string; gpu: string; gpu_count: number; price_per_hour: number | null; machine_id: string | null; token_known: boolean; created_at: string | null }
+interface AdoptRequest { provider_id: string; name?: string; token?: string }
 
 // GPU recommender (internal/gpupick): best value and best speed in the
 // smallest VRAM tier the model fits. It only preselects; it never launches.

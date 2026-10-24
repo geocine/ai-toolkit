@@ -1,12 +1,14 @@
-import { BookOpen, Cpu, Plus } from 'lucide-react';
+import { BookOpen, Cpu, Plus, Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { CreateGpuServer } from '../components/CreateGpuServer';
+import { FindMachines } from '../components/FindMachines';
 import { MachineRow } from '../components/MachineRow';
 import { ProviderGuide } from '../components/ProviderGuide';
 import { ErrorNote, PageHeader, Section } from '../components/ui';
 import { get, type Health, type Server, type SystemInfo } from '../lib/api';
 import { useStudio } from '../lib/context';
 import { autoLink, canAutoLink, providerNames, useMachines } from '../lib/machines';
+import { providers } from '../lib/provision';
 import type { ProviderKind } from '../lib/provisionTypes';
 import { href } from '../lib/route';
 import { uid } from '../lib/store';
@@ -39,8 +41,24 @@ export function Servers({ create, activeMode }: { create?: boolean; activeMode: 
   const [checks, setChecks] = useState<Record<string, Check | 'pending'>>({});
   const [creating, setCreating] = useState(false);
   const [guide, setGuide] = useState<{ kind?: ProviderKind } | null>(null);
+  const [finding, setFinding] = useState(false);
+  // the active server has a provider key: only then can it find GPU servers
+  const [canFind, setCanFind] = useState(false);
   const [toast, setToast] = useState<Server | null>(null);
   const tracked = useMachines(servers);
+
+  useEffect(() => {
+    let live = true;
+    setCanFind(false);
+    if (active)
+      providers(active).then(
+        list => live && setCanFind(list.some(p => p.configured)),
+        () => {},
+      );
+    return () => {
+      live = false;
+    };
+  }, [active?.id, active?.base, active?.token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // open the dialog once, then drop ?create=1 so a reload does not reopen it
   useEffect(() => {
@@ -182,29 +200,59 @@ export function Servers({ create, activeMode }: { create?: boolean; activeMode: 
         </ul>
       )}
 
-      {tracked.items.length > 0 && (
-        <Section title="GPU servers" description="Rented through your servers. They bill at the provider until you terminate them.">
-          <ul className="server-list">
-            {tracked.items.map(t => {
-              const linked = servers.find(x => x.machine?.id === t.machine.id) ?? null;
-              return (
-                <MachineRow
-                  key={t.machine.id}
-                  t={t}
-                  linked={linked}
-                  inUse={!!linked && linked.id === active?.id}
-                  onUse={() => linked && setActiveId(linked.id)}
-                  onChanged={m => tracked.put(t.controller.id, m)}
-                  onTerminated={m => {
-                    tracked.put(t.controller.id, m);
-                    // the server entry goes with the machine
-                    setServers(list => list.filter(x => x.machine?.id !== m.id));
-                  }}
-                  onForgotten={() => tracked.drop(t.machine.id)}
-                />
-              );
-            })}
-          </ul>
+      {(tracked.items.length > 0 || (active && canFind)) && (
+        <Section
+          title="GPU servers"
+          description={
+            tracked.items.length > 0
+              ? 'Rented through your servers. They bill at the provider until you terminate them.'
+              : 'None tracked yet. If a server lost track of one, find it on your provider account.'
+          }
+          actions={
+            active &&
+            canFind && (
+              <button className="btn btn-ghost" aria-expanded={finding} onClick={() => setFinding(f => !f)}>
+                <Search />
+                Find GPU servers on your account
+              </button>
+            )
+          }
+        >
+          <div className="server-list">
+            {finding && active && canFind && (
+              <FindMachines
+                key={active.id}
+                controller={active}
+                onAdopted={(m, controller) => {
+                  tracked.put(controller.id, m);
+                  scrollTo(`machine-${m.id}`);
+                }}
+              />
+            )}
+            {tracked.items.length > 0 && (
+              <ul className="server-list">
+                {tracked.items.map(t => {
+                  const linked = servers.find(x => x.machine?.id === t.machine.id) ?? null;
+                  return (
+                    <MachineRow
+                      key={t.machine.id}
+                      t={t}
+                      linked={linked}
+                      inUse={!!linked && linked.id === active?.id}
+                      onUse={() => linked && setActiveId(linked.id)}
+                      onChanged={m => tracked.put(t.controller.id, m)}
+                      onTerminated={m => {
+                        tracked.put(t.controller.id, m);
+                        // the server entry goes with the machine
+                        setServers(list => list.filter(x => x.machine?.id !== m.id));
+                      }}
+                      onForgotten={() => tracked.drop(t.machine.id)}
+                    />
+                  );
+                })}
+              </ul>
+            )}
+          </div>
         </Section>
       )}
 

@@ -22,6 +22,8 @@ export interface MachineLogs { text: string; source: string; truncated: boolean 
 export interface GuideEnv { name: string; value: string; secret: boolean; note: string }
 export interface GuideField { label: string; value: string; note: string }
 export interface SetupGuide { kind: ProviderKind; image: string; port: number; disk_gb: number; env: GuideEnv[]; env_block: string; docker_options: string; fields: GuideField[]; steps: string[]; url_pattern: string; console_url: string; keys_url: string; key_scopes: string[]; token?: string }
+export interface ProviderInstance { provider_id: string; label: string; status: MachineStatus; provider_status: string; gpu: string; gpu_count: number; price_per_hour: number | null; machine_id: string | null; token_known: boolean; created_at: string | null }
+export interface AdoptRequest { provider_id: string; name?: string; token?: string }
 
 // GPU recommender (internal/gpupick): best value and best speed in the
 // smallest VRAM tier the model fits. It only preselects; it never launches.

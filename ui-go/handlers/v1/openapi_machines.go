@@ -14,6 +14,8 @@ func init() {
 		op{"GET", "/v1/providers/{kind}/offers", "Providers", "GPU offers, cheapest first, with host facts and how well the image fits", offerQuery, "", 200, "object"},
 		op{"GET", "/v1/providers/{kind}/templates", "Providers", "The account's templates (QuickPod launches need one)", nil, "", 200, "object"},
 		op{"GET", "/v1/providers/{kind}/setup", "Providers", "Manual setup guide for the provider's console (no key needed)", []string{"image:string", "disk_gb:integer", "cors_origin:string", "generate_token:boolean"}, "", 200, "object"},
+		op{"GET", "/v1/providers/{kind}/instances", "Providers", "Every aitk-labelled server on the provider account; machine_id when tracked here (never env values)", nil, "", 200, "object"},
+		op{"POST", "/v1/providers/{kind}/adopt", "Providers", "Track an untracked aitk server as a machine here (token from the provider's env echo, or given)", nil, "object", 201, "object"},
 
 		op{"GET", "/v1/machines", "Machines", "GPU servers this server rented, newest first", []string{"active:boolean"}, "", 200, "object"},
 		op{"POST", "/v1/machines", "Machines", "Rent a GPU server (costs money; max_price_per_hour required; 200 for a repeated request_id)", nil, "object", 201, "object"},
