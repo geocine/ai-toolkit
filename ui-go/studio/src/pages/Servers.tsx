@@ -7,7 +7,7 @@ import { ProviderGuide } from '../components/ProviderGuide';
 import { ErrorNote, PageHeader, Section } from '../components/ui';
 import { get, type Health, type Server, type SystemInfo } from '../lib/api';
 import { useStudio } from '../lib/context';
-import { autoLink, canAutoLink, providerNames, useMachines } from '../lib/machines';
+import { autoLink, canAutoLink, clearLinked, mayBill, providerNames, relinked, useMachines, type Tracked } from '../lib/machines';
 import { providers } from '../lib/provision';
 import type { ProviderKind } from '../lib/provisionTypes';
 import { href } from '../lib/route';
@@ -89,16 +89,27 @@ export function Servers({ create, activeMode }: { create?: boolean; activeMode: 
     test(s);
   };
 
-  // a ready machine becomes an ordinary server, once per browser
+  const addLinked = ({ machine, owner }: Tracked) =>
+    autoLink(owner, machine).then(s => {
+      if (!s) return;
+      setServers(list => (list.some(x => x.machine?.id === machine.id) ? list : [...list, s]));
+      test(s);
+      setToast(s);
+    });
+
+  // a ready machine becomes an ordinary server, once per browser; a linked one
+  // that came back at a new address (Vast after Stop and Start) follows it
   useEffect(() => {
-    for (const { machine, owner } of tracked.items) {
-      if (!canAutoLink(machine) || servers.some(x => x.machine?.id === machine.id)) continue;
-      autoLink(owner, machine).then(s => {
-        if (!s) return;
-        setServers(list => (list.some(x => x.machine?.id === machine.id) ? list : [...list, s]));
-        test(s);
-        setToast(s);
-      });
+    for (const t of tracked.items) {
+      const cur = servers.find(x => x.machine?.id === t.machine.id);
+      if (!cur) {
+        if (canAutoLink(t.machine)) addLinked(t);
+        continue;
+      }
+      const next = relinked(cur, t.machine, t.owner);
+      if (!next) continue;
+      setServers(list => list.map(x => (x.id === next.id ? next : x)));
+      test(next);
     }
   }, [tracked.items]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -187,8 +198,13 @@ export function Servers({ create, activeMode }: { create?: boolean; activeMode: 
                   <button
                     className="btn btn-ghost btn-danger"
                     onClick={() => {
-                      if (confirm(`Remove ${s.name} from the studio? The server itself is untouched.`))
-                        setServers(list => list.filter(x => x.id !== s.id));
+                      const billing = mayBill(tracked.items, s.id);
+                      const msg =
+                        `Remove ${s.name} from the studio? The server itself is untouched.` +
+                        (billing
+                          ? ` ${billing} GPU server${billing > 1 ? 's' : ''} it tracks keep${billing > 1 ? '' : 's'} billing at the provider and will no longer show here until you add ${s.name} again.`
+                          : '');
+                      if (confirm(msg)) setServers(list => list.filter(x => x.id !== s.id));
                     }}
                   >
                     Remove
@@ -247,6 +263,10 @@ export function Servers({ create, activeMode }: { create?: boolean; activeMode: 
                         setServers(list => list.filter(x => x.machine?.id !== m.id));
                       }}
                       onForgotten={() => tracked.drop(t.machine.id)}
+                      onLink={() => {
+                        clearLinked(t.machine.id);
+                        addLinked(t);
+                      }}
                     />
                   );
                 })}

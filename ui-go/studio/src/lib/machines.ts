@@ -196,6 +196,29 @@ export async function autoLink(owner: Server, m: Machine): Promise<Server | null
   }
 }
 
+/** Lets a machine linked before (its server since removed by hand) be linked again. */
+export function clearLinked(id: string) {
+  save(LINKED, load<string[]>(LINKED, []).filter(x => x !== id));
+}
+
+/**
+ * The linked server s with the address its machine m has now, or null when
+ * nothing changed. A plain-http machine linked direct keeps its token across
+ * Stop and Start, but Vast hands it a new port, so the saved base goes stale.
+ * Relay links go through the owner and never move.
+ */
+export function relinked(s: Server, m: Machine, owner: Server): Server | null {
+  if (s.machine?.id !== m.id || s.machine.via !== 'direct' || s.machine.control !== owner.id) return null;
+  if (m.status !== 'ready' || m.problem || !m.base_url) return null;
+  const { base, token, via } = linkVia(owner, { name: s.name, base_url: m.base_url, token: s.token, secure: m.secure, relay_path: m.relay_path });
+  if (base === s.base && token === s.token && via === s.machine.via) return null;
+  return { ...s, base, token, machine: { ...s.machine, via } };
+}
+
+/** Machines a saved server tracks that may still bill at the provider (stopped ones can bill for disk). */
+export const mayBill = (items: Tracked[], ownerId: string) =>
+  items.filter(t => t.owner.id === ownerId && !['terminated', 'failed'].includes(t.machine.status)).length;
+
 /** Copies to the clipboard; false when the browser refuses (plain http, old browsers). */
 export async function copyText(text: string): Promise<boolean> {
   try {
