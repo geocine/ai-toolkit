@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/geocine/aitoolkit/internal/imagecheck"
 	"github.com/geocine/aitoolkit/internal/provision"
 	"github.com/geocine/aitoolkit/internal/provision/mockkit"
 	_ "github.com/geocine/aitoolkit/internal/provision/quickpod"
@@ -84,7 +85,7 @@ func TestGuideFields(t *testing.T) {
 	}
 	for label, want := range map[string]string{
 		"Image Path:Tag": provision.DefaultImage, "Select Launch Mode": "docker ENTRYPOINT", "Disk Space": "100",
-		"Extra Filters": "direct_port_count >= 1", "Template Visibility": "Private",
+		"Extra Filters": "direct_port_count >= 1 cuda_max_good >= 13.0 compute_cap >= 800", "Template Visibility": "Private",
 	} {
 		if got := field(t, va, label); got != want {
 			t.Errorf("vast %s = %q, want %q", label, got, want)
@@ -132,6 +133,45 @@ func TestGuideFields(t *testing.T) {
 		if g.ConsoleURL == "" || g.KeysURL == "" || len(g.KeyScopes) == 0 {
 			t.Errorf("%s: console, keys or scopes missing", k)
 		}
+	}
+}
+
+// A hand-made server is only as good as the host picked for it: every guide
+// says, in the step where a host is picked, the image's CUDA floor, driver
+// branch and oldest GPU, and the values are the default image's.
+func TestGuideHostRequirements(t *testing.T) {
+	req, ok := imagecheck.FallbackRequirements(imagecheck.DefaultRepo)
+	if !ok {
+		t.Fatal("no fallback requirements for the default image")
+	}
+	if req.CUDAMin != HostCUDAMin || req.DriverMin != HostDriverMin || len(req.FlashAttnSM) == 0 || slices.Min(req.FlashAttnSM) != HostSMMin {
+		t.Errorf("guide host needs CUDA %s, driver %d, sm_%d; the image needs CUDA %s, driver %d, flash attention from sm_%d",
+			HostCUDAMin, HostDriverMin, HostSMMin, req.CUDAMin, req.DriverMin, slices.Min(req.FlashAttnSM))
+	}
+	pick := map[provision.Kind]string{provision.RunPod: "Deploy On-Demand", provision.Vast: "RENT", provision.QuickPod: "GPU Search"}
+	for _, k := range kinds {
+		g := mustFor(t, k, Options{})
+		i := slices.IndexFunc(g.Steps, func(s string) bool { return strings.Contains(s, pick[k]) })
+		if i < 0 {
+			t.Fatalf("%s: no host-picking step (%q)", k, pick[k])
+		}
+		for _, want := range []string{"CUDA 13.0 or newer (580+)", "RTX 30-series, A100 or newer GPU", "still bills"} {
+			if !strings.Contains(g.Steps[i], want) {
+				t.Errorf("%s: host-picking step lacks %q: %q", k, want, g.Steps[i])
+			}
+		}
+	}
+	rp := mustFor(t, provision.RunPod, Options{})
+	if !strings.Contains(strings.Join(rp.Steps, " "), "CUDA version filter to 13.0") {
+		t.Errorf("runpod: no CUDA version filter in %q", rp.Steps)
+	}
+	va := mustFor(t, provision.Vast, Options{})
+	if n := note(t, va, "Extra Filters"); !strings.Contains(n, "CUDA 13.0 or newer (580+)") {
+		t.Errorf("vast Extra Filters note %q", n)
+	}
+	qp := mustFor(t, provision.QuickPod, Options{})
+	if !strings.Contains(strings.Join(qp.Steps, " "), "max CUDA of 13.0 or newer") {
+		t.Errorf("quickpod: no max CUDA in %q", qp.Steps)
 	}
 }
 

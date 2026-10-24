@@ -6,6 +6,10 @@
 #   ui-go/scripts/build_and_push.sh --push     # build, push all tags, verify
 #   ui-go/scripts/build_and_push.sh --verify   # only verify the pushed :<sha> of HEAD
 #
+# --push needs `docker login ghcr.io` first, with a classic personal access
+# token that has the write:packages scope (docs/deploy.md, "Publishing the
+# first time").
+#
 # Env: IMAGE (default ghcr.io/geocine/aitoolkit-go), UPSTREAM_REF (default main,
 # the branch that mirrors upstream), REBUILD_BASE=1 to rebuild the base image,
 # BASE_INSTALLER=uv to build the base with uv instead of pip (opt-in; the

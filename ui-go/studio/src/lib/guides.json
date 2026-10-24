@@ -57,7 +57,7 @@
       "Open Templates and click Create New Template.",
       "Fill in the fields above. Leave Private Docker Repository unticked, and leave Docker Entrypoint Run Options and On Start Script empty.",
       "Paste the docker options into Docker Options. Keep both parts: -p 8675:8675 publishes the port, and AI_TOOLKIT_AUTH keeps the server from starting without a token.",
-      "Click Create Template. On GPU Search, pick an offer, choose aitk headless under My Templates and click Create.",
+      "Click Create Template. On GPU Search, pick an offer with a max CUDA of 13.0 or newer on an RTX 30-series, A100 or newer GPU: the image needs a driver for CUDA 13.0 or newer (580+). On an older host the image fails, and the rental still bills. Choose aitk headless under My Templates and click Create.",
       "On Pods, wait for running and click Connect. Under Exposed Ports, the 8675 row has an HTTPS link (https://<pod id>-8675.proxy.quickpod.io/) and an HTTP link (http://<ip>:<port>).",
       "When it shows running, copy its URL and add it on the Servers page with the same token."
     ],
@@ -132,7 +132,7 @@
       "Under Environment Variables, add the variables above.",
       "For gated base models, also add HF_TOKEN = {{ RUNPOD_SECRET_hf_token }} after saving your Hugging Face token as the secret hf_token under Settings → Secrets.",
       "Click Save Template.",
-      "Open Pods, click Deploy and pick a GPU. Click Change Template, choose aitk headless and click Deploy On-Demand.",
+      "Open Pods, click Deploy, set the CUDA version filter to 13.0 or newer and pick an RTX 30-series, A100 or newer GPU: the image needs a driver for CUDA 13.0 or newer (580+). On an older host the image fails, and the rental still bills. Click Change Template, choose aitk headless and click Deploy On-Demand.",
       "When the pod shows running, open Connect → HTTP Service: the 8675 row links to https://<pod id>-8675.proxy.runpod.net.",
       "When it shows running, copy its URL and add it on the Servers page with the same token."
     ],
@@ -197,8 +197,8 @@
       },
       {
         "label": "Extra Filters",
-        "value": "direct_port_count >= 1",
-        "note": "Only hosts that can give port 8675 a public port."
+        "value": "direct_port_count >= 1 cuda_max_good >= 13.0 compute_cap >= 800",
+        "note": "Only hosts that can give port 8675 a public port, with a driver for CUDA 13.0 or newer (580+) and an RTX 30-series, A100 or newer GPU."
       },
       {
         "label": "Disk Space",
@@ -215,7 +215,7 @@
       "Open Account → Environment Variables (cloud.vast.ai/account/) and add AI_TOOLKIT_AUTH = <a long random token>. Vast puts it into every instance, so it stays out of the template. Or, with Template Visibility Private, add -e AI_TOOLKIT_AUTH=<a long random token> to Docker Options instead. An account-wide AI_TOOLKIT_AUTH also reaches the servers the studio creates for you, which get their own token, so use the template if you also create servers from the studio. Add HF_TOKEN under Account → Environment Variables for gated base models.",
       "Open Templates (cloud.vast.ai/templates/), click + New and stay on the Config tab.",
       "Fill in the fields above and paste the docker options into Docker Options.",
-      "Click Create & Use, pick an offer and click RENT.",
+      "Click Create & Use, pick an offer and click RENT. The Extra Filters above keep the offers to hosts with a driver for CUDA 13.0 or newer (580+) and an RTX 30-series, A100 or newer GPU. On an older host the image fails, and the rental still bills.",
       "When the instance shows running, open IP Port Info: the line ending in -> 8675/tcp gives the URL http://<ip>:<port>. It is plain http only, so the token crosses the internet unencrypted, and a studio served over https cannot call it directly: use the studio the server serves at /studio/.",
       "When it shows running, copy its URL and add it on the Servers page with the same token."
     ],

@@ -108,7 +108,7 @@ rents a host and again at launch (docs/headless.md, "Images and hosts").
 | CPU | amd64 | arm64 hosts (GH200, GB10) are blocked. |
 | GPU vendor | NVIDIA | AMD (MI300X) is blocked: there is no ROCm build. |
 | GPU | sm_80 or newer: A100, A30, RTX 30-series, RTX A2000-A6000, A10, A40, RTX 40-series, L4, L40, L40S, RTX Ada cards, H100, H200, B200, B300, RTX 50-series, RTX PRO Blackwell | sm_75 (T4, RTX 20-series, GTX 16-series) runs torch but not flash attention and has no native bf16: hidden from offers, a warning when shown. sm_70 and older (V100, Titan V, P100, GTX 10-series) have no kernels and are blocked. The B300 runs the sm_100 kernels and is not yet tested. |
-| Driver | CUDA 13.0 or newer: driver branch 580 or newer | Blocked on every GPU, data-center cards too: the image ships CUDA's forward-compatibility libraries, but they are not verified with it. A driver that cannot be read is a warning. On RunPod, RunPod itself places the pod on a CUDA 13.0 host. |
+| Driver | CUDA 13.0 or newer: driver branch 580 or newer | Blocked on every GPU, data-center cards too: the image ships CUDA's forward-compatibility libraries, but they are not verified with it. A driver that cannot be read is a warning. For servers the studio creates on RunPod, RunPod itself places the pod on a CUDA 13.0 host; a template set up by hand needs the CUDA version filter (docs/providers.md). |
 | Disk | 22 GB just for the image (6.5 GB download + 13.7 GB unpacked + 2 GB) | Blocked below that. The disk a launch asks for is (image + model + 15 GB for checkpoints and caches) × 1.1, rounded up to 10 GB, at least 40 GB, and 100 GB when the model is not known (FLUX.1-dev: 80 GB). Less is a warning. |
 | Download | nothing | The pull time is estimated from the host's reported speed: about 3 minutes at 1376 Mbps, 25 at 73 Mbps. Over 10 minutes is a warning. |
 
@@ -138,12 +138,17 @@ flash-attn version it has no table entry for. `IMAGE`, `UPSTREAM_REF`,
 of the script).
 
 Publishing the first time:
-1. On an amd64 machine with Docker (and buildx, for the `:<sha>` guard), run
+1. Log in to GHCR with a classic personal access token that has the
+   `write:packages` scope:
+   `echo "$GHCR_TOKEN" | docker login ghcr.io -u geocine --password-stdin`.
+   Without it the push itself fails with "unauthorized" or "denied" after the
+   build, before any package exists, so there is no settings page yet.
+2. On an amd64 machine with Docker (and buildx, for the `:<sha>` guard), run
    `build_and_push.sh --push`. GHCR creates the package **private**, so the
    verify step fails with "denied" and the settings URL.
-2. Open `https://github.com/users/geocine/packages/container/aitoolkit-go/settings`
+3. Open `https://github.com/users/geocine/packages/container/aitoolkit-go/settings`
    and set the visibility to Public.
-3. Run `build_and_push.sh --verify`. It runs `image-check --require-go`
+4. Run `build_and_push.sh --verify`. It runs `image-check --require-go`
    inside the pushed image and must exit 0.
 
 Push again whenever the server changes. A GPU server created from the

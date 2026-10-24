@@ -28,6 +28,23 @@ const (
 // TemplateName is the template name every guide suggests.
 const TemplateName = "aitk headless"
 
+// Host requirements of the image (the cu130 build: imagecheck's
+// FallbackRequirements; guide_test keeps them equal). The studio filters
+// hosts on these when it creates a server; a hand-made one is only as good
+// as the host the user picks, so every guide says them where a host is
+// picked. Vast's compute_cap is the compute capability x 100.
+const (
+	HostCUDAMin   = "13.0"
+	HostDriverMin = 580
+	HostSMMin     = 80 // sm_80: RTX 30-series, A100
+	hostGPUs      = "an RTX 30-series, A100 or newer GPU"
+)
+
+var (
+	hostDriver = "a driver for CUDA " + HostCUDAMin + " or newer (" + strconv.Itoa(HostDriverMin) + "+)"
+	hostOlder  = "On an older host the image fails, and the rental still bills."
+)
+
 // LastStep closes every guide.
 const LastStep = "When it shows running, copy its URL and add it on the Servers page with the same token."
 
@@ -172,7 +189,7 @@ func runpodGuide(o Options, token string) provision.SetupGuide {
 			"Under Environment Variables, add the variables above.",
 			"For gated base models, also add HF_TOKEN = {{ RUNPOD_SECRET_hf_token }} after saving your Hugging Face token as the secret hf_token under Settings → Secrets.",
 			"Click Save Template.",
-			"Open Pods, click Deploy and pick a GPU. Click Change Template, choose " + TemplateName + " and click Deploy On-Demand.",
+			"Open Pods, click Deploy, set the CUDA version filter to " + HostCUDAMin + " or newer and pick " + hostGPUs + ": the image needs " + hostDriver + ". " + hostOlder + " Click Change Template, choose " + TemplateName + " and click Deploy On-Demand.",
 			"When the pod shows running, open Connect → HTTP Service: the " + strconv.Itoa(provision.Port) + " row links to https://<pod id>-" + strconv.Itoa(provision.Port) + ".proxy.runpod.net.",
 		},
 		URLPattern: "https://<pod id>-" + strconv.Itoa(provision.Port) + ".proxy.runpod.net",
@@ -199,7 +216,7 @@ func vastGuide(o Options, token string) provision.SetupGuide {
 			{Label: "Template Name", Value: TemplateName},
 			{Label: "Image Path:Tag", Value: o.Image, Note: "The full registry path. Another tag works too."},
 			{Label: "Select Launch Mode", Value: "docker ENTRYPOINT", Note: "Runs the image as built, which starts the server."},
-			{Label: "Extra Filters", Value: "direct_port_count >= 1", Note: "Only hosts that can give port " + port + " a public port."},
+			{Label: "Extra Filters", Value: "direct_port_count >= 1 cuda_max_good >= " + HostCUDAMin + " compute_cap >= " + strconv.Itoa(HostSMMin*10), Note: "Only hosts that can give port " + port + " a public port, with " + hostDriver + " and " + hostGPUs + "."},
 			{Label: "Disk Space", Value: strconv.Itoa(o.DiskGB), Note: "GB, fixed for the life of the instance."},
 			{Label: "Template Visibility", Value: "Private"},
 		},
@@ -210,7 +227,7 @@ func vastGuide(o Options, token string) provision.SetupGuide {
 			"Open Account → Environment Variables (cloud.vast.ai/account/) and add AI_TOOLKIT_AUTH = " + token + ". Vast puts it into every instance, so it stays out of the template. Or, with Template Visibility Private, add -e AI_TOOLKIT_AUTH=" + token + " to Docker Options instead. An account-wide AI_TOOLKIT_AUTH also reaches the servers the studio creates for you, which get their own token, so use the template if you also create servers from the studio. Add HF_TOKEN under Account → Environment Variables for gated base models.",
 			"Open Templates (cloud.vast.ai/templates/), click + New and stay on the Config tab.",
 			"Fill in the fields above and paste the docker options into Docker Options.",
-			"Click Create & Use, pick an offer and click RENT.",
+			"Click Create & Use, pick an offer and click RENT. The Extra Filters above keep the offers to hosts with " + hostDriver + " and " + hostGPUs + ". " + hostOlder,
 			"When the instance shows running, open IP Port Info: the line ending in -> " + port + "/tcp gives the URL http://<ip>:<port>. It is plain http only, so the token crosses the internet unencrypted, and a studio served over https cannot call it directly: use the studio the server serves at /studio/.",
 		},
 		URLPattern: "http://<ip>:<port>",
@@ -246,7 +263,7 @@ func quickpodGuide(o Options, token string) provision.SetupGuide {
 			"Open Templates and click Create New Template.",
 			"Fill in the fields above. Leave Private Docker Repository unticked, and leave Docker Entrypoint Run Options and On Start Script empty.",
 			"Paste the docker options into Docker Options. Keep both parts: -p " + port + ":" + port + " publishes the port, and AI_TOOLKIT_AUTH keeps the server from starting without a token.",
-			"Click Create Template. On GPU Search, pick an offer, choose " + TemplateName + " under My Templates and click Create.",
+			"Click Create Template. On GPU Search, pick an offer with a max CUDA of " + HostCUDAMin + " or newer on " + hostGPUs + ": the image needs " + hostDriver + ". " + hostOlder + " Choose " + TemplateName + " under My Templates and click Create.",
 			"On Pods, wait for running and click Connect. Under Exposed Ports, the " + port + " row has an HTTPS link (https://<pod id>-" + port + ".proxy.quickpod.io/) and an HTTP link (http://<ip>:<port>).",
 		},
 		URLPattern: "https://<pod id>-" + port + ".proxy.quickpod.io/",
