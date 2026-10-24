@@ -75,7 +75,9 @@ one by one; they expire.
 ## Resources
 
 ### System
-- `GET /v1/health` → `{ok, version, upstream_version, started_at}`
+- `GET /v1/health` → `{ok, version, upstream_version, started_at, mode}`;
+  `mode` is `"server"`, or `"controller"` when the server runs with
+  `--controller` / `AITK_CONTROLLER=1`
 - `GET /v1/system` → `{gpus: [...], cpu: {...}, disks: [{path, free, total}], toolkit_root}`
 
 ### Jobs
@@ -501,16 +503,29 @@ decides:
 
 If any job fails the check the server stays up (`state: held`) and says so
 ("results only on this server, not destroying"). Otherwise it stops or
-destroys the server through the provider, detected from the environment:
-RunPod (`RUNPOD_POD_ID`; `DELETE https://rest.runpod.io/v1/pods/{id}`,
-falling back to `POST .../pods/{id}/stop` when the key may not terminate),
-Vast.ai (`CONTAINER_ID` + `CONTAINER_API_KEY`; `DELETE
-https://console.vast.ai/api/v0/instances/{id}/`, stop is `PUT` with
-`{"state": "stopped"}`), `AITK_WHEN_DONE_CMD`, or a plain process exit.
+destroys the server through the provider, detected from the environment
+(or named by `AITK_WHEN_DONE_PROVIDER`: `runpod`, `vast`, `quickpod`,
+`command`, `exit`):
+- RunPod (`RUNPOD_POD_ID`): REST v2, `DELETE https://api.runpod.io/v2/pods/{id}`
+  terminates and `POST .../v2/pods/{id}/action {"action": "stop"}` stops. v2
+  may refuse the pod-scoped `RUNPOD_API_KEY` RunPod injects; until v1 retires
+  on 2026-11-15 the same call is then retried on
+  `https://rest.runpod.io/v1/pods/{id}`. A terminate the key may not do falls
+  back to stop. `AITK_RUNPOD_API_KEY` supplies a full key instead.
+- Vast.ai (`CONTAINER_ID` + `CONTAINER_API_KEY`): `DELETE
+  https://console.vast.ai/api/v0/instances/{id}/`, stop is `PUT` with
+  `{"state": "stopped"}`.
+- QuickPod (`CONTAINER_LABEL`, `QUICKPOD_PORT_8675` and
+  `AITK_QUICKPOD_API_KEY`, which QuickPod does not inject: a launch with
+  `self_destroy_key` puts it there): `GET
+  https://api.quickpod.org/update/api/destroypod?pod_uuid=` removes the pod
+  and its disk (falling back to stop), `.../stoppod` stops it.
+- `AITK_WHEN_DONE_CMD`, or a plain process exit.
+
 With `dry_run` it only logs and emits events.
 
 `Lifecycle = {mode: keep|stop|destroy, on: completed|any, delay_s, dry_run,
-state, deadline, reason, provider: runpod|vast|command|exit, job_id,
+state, deadline, reason, provider: runpod|vast|quickpod|command|exit, job_id,
 job_name, results: [{job_id, job_name, safe, via, detail}], updated_at}`;
 `state` is `off` (keep) | `waiting` | `countdown` | `verifying` | `acting` |
 `held` | `cancelled` | `done` | `failed`.
@@ -723,6 +738,105 @@ private address is refused unless the machine is simulated. Each request
 costs two hops, and this server's `AITK_CORS_ORIGINS` applies. The relay has
 no `aitk` op: agents use `machines.link` and talk to the machine (or its
 `/mcp`) directly.
+
+## Images and hosts
+
+Before a GPU server is rented this server reads what its image needs from
+the registry, without pulling it, and matches that to the host: CPU
+architecture, GPU vendor and compute capability, driver and CUDA, disk,
+pull time and VRAM (`internal/imagecheck`, `internal/hostfit`). Offers carry
+the result as `host` and `fit`, `POST /v1/machines` runs the same checks
+again (422 `image_blocked` with the checks in `error.details`, and no
+provider call is made), and a ready machine runs a CUDA self-check.
+
+- **Registries.** GHCR and Docker Hub only, with anonymous pulls (images
+  must be public). Any other registry is never contacted: the check is the
+  warn `image_unchecked` and a launch is allowed. Registry trouble
+  (unreachable, Docker Hub's limit nearly used) is a warn, never a block,
+  and a check never answers 5xx because a registry is down.
+- **Caches.** A tag's digest is kept 10 min, a missing or private tag 60 s,
+  image facts by digest for the process lifetime; `refresh` re-resolves.
+- **Not published yet.** While `ghcr.io/geocine/aitoolkit-go` cannot be
+  read (not published, private, unreachable), its built-in requirements
+  (`requires.source: "fallback"`: CUDA 13.0, linux/amd64, sm_75 to sm_120)
+  still judge hosts, so offers and recommendations work. The check says
+  once that the image isn't published yet; launches of it stay blocked.
+- **Simulate.** With `AITK_PROVISION_SIMULATE=1` the registry and Hugging
+  Face are in-process mocks (`AITK_PROVISION_SIMULATE_REGISTRY=real` reads
+  the real registry).
+
+Shapes (`studio/src/lib/serverImageTypes.ts` is the exact contract):
+
+- `ImageCheckItem = {level: block|warn|info, code, message, fix?, action?}`;
+  `action = {kind: filter_hosts|show_all|set_disk|use_image|pick_gpu|edit_template, value?}`
+  is a button the studio shows next to the check.
+- `ImageCheck = {ok, level: ok|info|warn|block, image, launch_ref, pinned,
+  host, need, pull, vram, checks}`. `ok` is false when any check blocks;
+  `image` (ImageFacts) is null when the image could not be read;
+  `launch_ref` is the reference a launch sends (a `:<sha>` build tag when
+  the image has one), null when anything blocks; `pinned` is
+  `repo@sha256:...`.
+- `ImageFacts = {ref, repo, tag?, digest, platform_digest, platforms,
+  platform, download_bytes, largest_layer_bytes, layers, unpacked_bytes,
+  unpacked_source, created, labels, env, exposed_ports, go_server, revision?,
+  requires, checked_at, rate_limit?}`. `labels` keeps only
+  `org.opencontainers.image.*` and `io.github.geocine.aitk.*`, and `env` only
+  `CUDA_VERSION`, `NVIDIA_REQUIRE_CUDA` and `NVIDIA_DRIVER_CAPABILITIES`, so
+  nothing secret in an image is echoed.
+- `requires = {platform, cuda_min, driver_min, compat_branches, sm, ptx,
+  flash_attn_sm, torch, flavor, port, api, sources, source?}`.
+- `HostFacts = {provider?, gpu_name?, gpu_count?, vram_gb?, sm?, sm_source?,
+  gpu_class?, gpu_vendor?, cpu_arch?, cuda_max?, cuda_source?, driver?,
+  disk_gb?, inet_down_mbps?, disk_bw_mbps?, ram_gb?, placement_floor?}`; a
+  missing field is unknown. From a caller, `gpu_name` alone fills in the
+  GPU's architecture, class, vendor and VRAM from the GPU table.
+- `DiskNeed = {disk_gb, image_peak_gb, model_gb, work_gb, model_source:
+  hf|table|none|default}` (`disk_gb` is what a launch should ask for, at
+  least 100 without a known model); `PullEstimate = {image_min, model_min,
+  basis, estimate}`; `VramFit = {verdict: fits|tight|no|unknown, note,
+  source: repo|vendor|estimate, recipe?}` (tight names the recipe that makes
+  it fit; VRAM never blocks a launch).
+- `ImageTag = {tag, digest, created, flavor?, cuda_min?, revision?, moving}`;
+  `ImageChoice = {channel: same|latest|flavor|custom|template, label, image,
+  launch_ref, digest, revision?, flavor?, level, why}`; `ImageRecommendation
+  = {choice, alternatives, checks, action?}`; `GpuInfo = {name, sm, vram_gb,
+  class, vendor, platform, aliases, speed, speed_source, verdict, note}`;
+  `HostFit = {model, tiers: [{vram_gb, verdict, note, source, recipe?}],
+  need}`; `CudaCheck = {ok, checked_at, torch, cuda, arch_list, devices:
+  [{index, name, capability, driver}], error, failure}`.
+
+Routes:
+- `POST /v1/images/check {image, platform?, host?, offer?: {provider, offer_id}, model?, disk_gb?, refresh?}` → ImageCheck, 200 even when it blocks (400 only for an empty `image`). `offer` re-reads that offer's host through the 30 s quote cache and wins over `host`; with neither only the image-side checks run. `model` is the job's model section (`ModelRef = {arch, name_or_path?, quantize?, qtype?, low_vram?, resolution?, frames?}`) for the disk need and VRAM; `disk_gb` is the disk the launch will ask for.
+- `GET /v1/images/tags?image=ghcr.io/geocine/aitoolkit-go&limit=8` → `{items: [ImageTag]}`, newest first: `latest`, the flavor channels, versions and recent build tags (`limit` up to 20). 400 for a bad or unchecked reference, 404 for a missing or private repo, 502 when the registry cannot be read.
+- `POST /v1/images/recommend {offer?, host?, model?, prefer?, image?, template_id?, disk_gb?}` → ImageRecommendation. The choice is the build this server runs when it is published and fits (`prefer: "latest"` tries the newest first), else the newest build, else another flavor; a different trainer version is never chosen silently (its first `why` line says so). `choice` is null when every candidate blocks, with `action: filter_hosts` when a host filter would fix it. `image` checks a custom image as the only candidate; `template_id` (QuickPod) checks the image that template runs.
+- `GET /v1/hosts/gpus` → `{items: [GpuInfo]}`: the GPU table (compute capability, nominal VRAM, class, the provider names it matches, relative training `speed` with RTX 4090 = 1) with the default image's `verdict` on each GPU and a `note`. The driver is a fact of each host, so `images.check` judges it, not this list; sm_75 GPUs are a warn because offers hide them by default.
+- `POST /v1/hosts/fit {model, image?, gpus?: [{name?, vram_gb?, count?}], host?}` → HostFit: the VRAM verdict for each GPU given (a known `name` gives its VRAM) or, with none, for 16, 24, 32, 48 and 80 GB, and the disk the model needs with `image`. 400 without `model.arch`.
+- `GET /v1/system/cuda?refresh=1` → CudaCheck, on the machine itself: runs a tiny CUDA kernel through the trainer's torch on every GPU (90 s at most, one run at a time, a success is cached; `refresh=1` runs it again). `failure` names the cause: `no_kernel_image`, `driver_too_old`, `no_gpu`, `torch_missing` or `timeout`. The provisioning service calls it once a machine is ready (`cuda_failed` when it fails; an older image without the route is skipped).
+
+Check codes (`code`), by level:
+
+| level | codes |
+|---|---|
+| block | `image_ref`, `image_denied` (private or missing; for this server's image, not published yet), `image_not_found` (`use_image` offers the newest build), `image_platform`, `image_not_go` (no Go server for the studio to talk to), `image_port`, `image_labels` (the `image-check --require-go` CLI only), `host_cuda`, `host_arch`, `gpu_vendor`, `gpu_sm`, `disk_image` |
+| warn | `image_api`, `image_unchecked`, `image_unreachable`, `image_rate_limited`, `host_cuda_unknown`, `runpod_no_cuda_capacity`, `gpu_sm_flash_attn`, `gpu_sm_hidden` (hosts.gpus only), `disk_model`, `pull_slow`, `vram_no` (an info at launch) |
+| info | `image_sm_unknown`, `image_unpinned`, `image_skew`, `image_same_unpublished`, `image_template_tag`, `host_cuda_placement`, `gpu_sm_unverified`, `gpu_unknown`, `pull_eta`, `vram_tight`, `ram_tight` |
+
+An offer's `fit` is `{level, codes, summary, pull_min, vram}`: the same
+host-side codes and a one-line summary ("Driver too old (CUDA 12.8)",
+"≈ 3 min to pull"). The image's own failure is never in an offer's `fit`;
+`images.check` shows it once.
+
+The code-mode groups are `images` (`check`, `tags`, `recommend`), `hosts`
+(`gpus`, `fit`) and `system.cuda`. An agent checks before it rents:
+```ts
+const offers = (await aitk.providers.offers("vast", { model: "flux", limit: 5 })).items;
+const offer = offers.find((o) => o.fit?.level !== "block");
+const ref = { provider: "vast", offer_id: offer.id };
+const rec = await aitk.images.recommend({ offer: ref, model: { arch: "flux" } });
+if (!rec.choice) return rec.checks; // nothing fits this host; rec.action says what to change
+const check = await aitk.images.check({ image: rec.choice.image, offer: ref, model: { arch: "flux" } });
+return { ok: check.ok, launch_ref: check.launch_ref, disk_gb: check.need?.disk_gb, checks: check.checks };
+```
 
 ## MCP (code mode)
 
