@@ -129,7 +129,14 @@ func TestQualifyEachRejectCode(t *testing.T) {
 		{"other block", with(base, codes("block", "image_platform")), Query{}, RejectFitBlock},
 		{"not decorated", with(base, func(o *provision.Offer, _ *hostfit.Host) { o.Fit = nil }), Query{}, RejectFitBlock},
 		{"unrated GPU", with(base, func(o *provision.Offer, h *hostfit.Host) { o.GPU, h.GPUName = "Mystery 9000", "Mystery 9000" }), Query{}, RejectSpeedUnknown},
-		{"blocked GPU has no speed", with(base, func(o *provision.Offer, h *hostfit.Host) { o.GPU, h.GPUName = "Tesla V100", "Tesla V100" }), Query{}, RejectSpeedUnknown},
+		{"blocked GPU has no speed", with(base, func(o *provision.Offer, h *hostfit.Host) { o.GPU, h.GPUName = "GTX 1080", "GTX 1080" }), Query{}, RejectSpeedUnknown},
+		// an image without SM facts adds no arch code: the table SM still bans sm_7x (D-8)
+		{"Turing, no arch code", with(base, func(o *provision.Offer, h *hostfit.Host) { o.GPU, h.GPUName, h.SM = "Titan RTX", "TITAN RTX", 0 }), Query{}, RejectGPUArch},
+		{"Turing by host SM", with(base, func(o *provision.Offer, h *hostfit.Host) {
+			o.GPU, h.GPUName, h.SM = "Quadro RTX 6000", "Quadro RTX 6000", 75
+		}), Query{}, RejectGPUArch},
+		{"Volta, no arch code", with(base, func(o *provision.Offer, h *hostfit.Host) { o.GPU, h.GPUName = "Tesla V100", "Tesla V100" }), Query{}, RejectGPUArch},
+		{"Ampere by host SM", with(base, func(o *provision.Offer, h *hostfit.Host) { o.GPU, h.GPUName, h.SM = "RTX 3090", "RTX 3090", 86 }), Query{}, ""},
 		{"cuda before inet", with(with(base, codes("block", "host_cuda")), func(_ *provision.Offer, h *hostfit.Host) { h.InetDownMbps = 73 }), Query{}, RejectCUDA},
 	}
 	for _, c := range cases {
@@ -307,11 +314,19 @@ func TestReasonLine(t *testing.T) {
 	qp := with(mk(provision.QuickPod, "q", "RTX 3090", 24, 0.18), func(_ *provision.Offer, h *hostfit.Host) {
 		h.InetDownMbps, h.DiskBWMBps, h.CUDAMax = 732.17, 0, "13.1"
 	})
+	// Vast and QuickPod round MiB/1024: an L4 (23034 MiB) is 22, an A10 (23028) too
+	l4 := with(mk(provision.Vast, "l4", "L4", 23034.0/1024, 0.31), func(o *provision.Offer, h *hostfit.Host) { o.VRAMGB, h.InetDownMbps = 22, 912 })
+	a10 := with(mk(provision.QuickPod, "a10", "A10", 23028.0/1024, 0.29), func(o *provision.Offer, h *hostfit.Host) { o.VRAMGB, h.InetDownMbps = 22, 912 })
+	// a size the table row does not name stays as reported (a 32 GB V100 shares the 16 GB row)
+	v100 := with(mk(provision.Vast, "v100", "Tesla V100", 32, 0.20), func(_ *provision.Offer, h *hostfit.Host) { h.GPUName, h.InetDownMbps = "Tesla V100-SXM2-32GB", 912 })
 	cases := []struct {
 		o     provision.Offer
 		cross bool
 		want  string
 	}{
+		{l4, false, "L4 · 24 GB · $0.31/h · 912 Mbps · CUDA 13.2 OK"},
+		{a10, true, "A10 on QuickPod · 24 GB · $0.29/h · 912 Mbps · CUDA 13.2 OK"},
+		{v100, false, "Tesla V100 · 32 GB · $0.20/h · 912 Mbps · CUDA 13.2 OK"},
 		{rp, false, "RTX 4090 · 24 GB · $0.69/h · net not reported · CUDA 13.0+ by RunPod"},
 		{rp, true, "RTX 4090 on RunPod · 24 GB · $0.69/h · net not reported · CUDA 13.0+ by RunPod"},
 		{rpCatalog, false, "RTX 4090 · 24 GB · $0.69/h · net not reported · CUDA 13.2 OK"},

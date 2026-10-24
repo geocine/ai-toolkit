@@ -620,6 +620,42 @@ func TestFaultsThroughTheMock(t *testing.T) {
 	}
 }
 
+// A full search window answers rate_limited at once (SearchOnly, with the
+// wait as RetryAfter) instead of queueing past the recommender's budget.
+func TestSearchWindowFullFailsFast(t *testing.T) {
+	e := setup(t, mockkit.Options{})
+	ctx := context.Background()
+	for i := range 10 {
+		if _, err := e.c.Offers(ctx, testKey, provision.OfferQuery{MinVRAMGB: 24, DiskGB: 100}); err != nil {
+			t.Fatalf("search %d: %v", i+1, err)
+		}
+	}
+	before := len(e.m.Rec.Requests())
+	_, err := e.c.Offers(ctx, testKey, provision.OfferQuery{MinVRAMGB: 24, DiskGB: 100})
+	var pe *provision.Error
+	if !asError(err, &pe) || pe.Class != provision.ClassRateLimited || !pe.SearchOnly || pe.RetryAfter < 50*time.Second || pe.RetryAfter > 62*time.Second {
+		t.Fatalf("11th search: %+v", pe)
+	}
+	if n := len(e.m.Rec.Requests()); n != before {
+		t.Fatalf("the refused search was sent (%d requests, was %d)", n, before)
+	}
+	if s := e.pace.sleeps(); len(s) != 0 {
+		t.Fatalf("slept %v", s)
+	}
+	// a slot within searchMaxWait is still waited for
+	e.pace.advance(50 * time.Second)
+	if _, err := e.c.Offers(ctx, testKey, provision.OfferQuery{MinVRAMGB: 24, DiskGB: 100}); err != nil {
+		t.Fatalf("after 50 s: %v", err)
+	}
+	if s := e.pace.sleeps(); len(s) != 1 || s[0] > searchMaxWait {
+		t.Fatalf("sleeps %v", s)
+	}
+	// the instance endpoints are untouched by the search window
+	if _, err := e.c.List(ctx, testKey, provision.LabelPrefix); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+}
+
 func TestPlantedKeyNeverInErrors(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
@@ -707,6 +743,13 @@ func TestClassify(t *testing.T) {
 		case "search quota":
 			if e.Message != "Vast's daily search quota is used up until UTC midnight" || e.RetryAfter <= 0 || e.RetryAfter > 24*time.Hour {
 				t.Errorf("quota: %q %v", e.Message, e.RetryAfter)
+			}
+			if !e.SearchOnly {
+				t.Errorf("quota: not SearchOnly, so it would pause the watcher")
+			}
+		default:
+			if e.SearchOnly {
+				t.Errorf("%s: SearchOnly", c.name)
 			}
 		}
 	}

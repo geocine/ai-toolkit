@@ -370,6 +370,10 @@ type Error struct {
 	Status     int // provider HTTP status; 0 = network / ours
 	Message    string
 	RetryAfter time.Duration
+	// SearchOnly marks a limit on offer search alone (Vast's daily search
+	// quota, or its 10-a-minute window): the instance endpoints still answer,
+	// so it never pauses the watcher.
+	SearchOnly bool
 }
 
 func (e *Error) Error() string {

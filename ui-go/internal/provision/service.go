@@ -158,10 +158,12 @@ func (s *Service) wasSeen(r *row) bool {
 	return s.seen[r.ID] || r.Status != StatusCreating
 }
 
-// noteRetry pauses the watcher for k after a rate limit.
+// noteRetry pauses the watcher for k after a rate limit. A limit on offer
+// search alone (SearchOnly) leaves it running: the instance endpoints it
+// reads still answer.
 func (s *Service) noteRetry(k Kind, err error) {
 	var e *Error
-	if !errors.As(err, &e) || (e.Class != ClassRateLimited && e.RetryAfter <= 0) {
+	if !errors.As(err, &e) || (e.Class != ClassRateLimited && e.RetryAfter <= 0) || e.SearchOnly {
 		return
 	}
 	d := e.RetryAfter
@@ -253,19 +255,24 @@ func (s *Service) actions(r *row) []string {
 				out = append(out, "start")
 			}
 		}
-		if r.Status != StatusTerminating && r.Status != StatusTerminated {
+		// while terminating too: a terminate the provider accepted but never
+		// carried out can be sent again (every adapter treats gone as done)
+		if r.Status != StatusTerminated {
 			out = append(out, "terminate")
 		}
 	}
-	if canForget(r) {
+	// a never_listed create has nothing to terminate: forget is offered, and
+	// the server asks for force since it may be billing
+	if canForget(r) || (r.EndedAt == nil && r.Problem == ProblemNeverListed) {
 		out = append(out, "forget")
 	}
 	return out
 }
 
-// canForget: nothing can be billing (ended, or never created at the provider).
+// canForget: nothing can be billing (ended, or refused at the provider). A
+// never_listed create may have been made there, so it needs force.
 func canForget(r *row) bool {
-	return r.EndedAt != nil || (r.ProviderID == "" && r.Status == StatusFailed)
+	return r.EndedAt != nil || (r.ProviderID == "" && r.Status == StatusFailed && r.Problem != ProblemNeverListed)
 }
 
 // ---- providers ----
@@ -612,6 +619,21 @@ func (s *Service) Launch(ctx context.Context, req LaunchRequest, origin string) 
 	if err != nil {
 		s.noteRetry(k, err)
 		err = scrub(err, append([]string{key}, envValues(env)...)...)
+		if ClassOf(err) == ClassUnavailable {
+			// A timeout, a 5xx or an unreadable 2xx: the provider may have
+			// made it. The row stays a live create without a provider id, so
+			// the watcher adopts it by label when it shows up (never_listed
+			// after 5 min if not), max_running keeps counting it and Forget
+			// asks for force.
+			r.Detail = Clip("The create at "+Label(k)+" didn't answer clearly ("+launchDetail(err)+"); it may have been made. Watching for it.", 300)
+			if serr := s.save(lctx, r, before); serr != nil {
+				log.Printf("provision: record unclear launch %s: %v", id, serr)
+				return Machine{}, false, err
+			}
+			s.emit(lctx, r)
+			s.markRefreshed(r.ID, time.Time{}) // due on the next tick
+			return s.machine(r), true, nil
+		}
 		r.Status, r.Detail, r.EndedAt = StatusFailed, launchDetail(err), ms(s.now())
 		if serr := s.save(lctx, r, before); serr != nil {
 			log.Printf("provision: record failed launch %s: %v", id, serr)
@@ -849,8 +871,8 @@ func (s *Service) act(ctx context.Context, id, action string, confirmSelf bool) 
 		if r.isSelf() && !confirmSelf {
 			return Machine{}, bad("This is the server you are using. Send confirm_self.")
 		}
-		if r.Status == StatusTerminating || r.EndedAt != nil {
-			return s.machine(r), nil // already asked, or gone
+		if r.EndedAt != nil {
+			return s.machine(r), nil // gone; a terminating one is asked again
 		}
 		if r.ProviderID == "" {
 			return Machine{}, conflict(Label(r.Provider) + " hasn't listed this machine yet; try again in a minute, or delete it in the " + Label(r.Provider) + " console")

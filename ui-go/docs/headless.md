@@ -762,8 +762,8 @@ Machines (`{id}` is a machine id or the name of a live machine):
 - `PATCH /v1/machines/{id} {name?, token?}` → Machine (`token` is the AI_TOOLKIT_AUTH a template set; it clears `token_mismatch` and re-probes now)
 - `POST /v1/machines/{id}/stop` → Machine (409 unless `stop` is in `actions`)
 - `POST /v1/machines/{id}/start` → Machine (409 unless `start` is in `actions`). Guarded.
-- `POST /v1/machines/{id}/terminate {confirm_self?}` → Machine (`terminating`). Deletes the machine and its disk at the provider; irreversible. On the machine this server runs on (`self`) it needs `confirm_self: true` (else 400).
-- `DELETE /v1/machines/{id}?force=1` → 204: forgets an ended machine (or a failed one that never got a provider id; else 409, because it may still bill). `force=1` forgets it here only: it keeps running and billing at the provider.
+- `POST /v1/machines/{id}/terminate {confirm_self?}` → Machine (`terminating`). Deletes the machine and its disk at the provider; irreversible. Sending it again while `terminating` asks the provider again (for a delete it accepted but has not carried out). On the machine this server runs on (`self`) it needs `confirm_self: true` (else 400).
+- `DELETE /v1/machines/{id}?force=1` → 204: forgets an ended machine (or a failed one that never got a provider id and is not `never_listed`; else 409, because it may still bill). `force=1` forgets it here only: it keeps running and billing at the provider.
 - `POST /v1/machines/{id}/link` → MachineLink: the only response with the machine's token; 409 unless the machine is `ready` and enforces its token. Guarded.
 - `GET /v1/machines/{id}/logs?tail=200` → MachineLogs (tail up to 2000 lines, text clipped to its last 256 KiB)
 
@@ -809,6 +809,10 @@ Money rules:
   `max_price_per_hour` is 409 `conflict` ("The price is now $0.52/h, above
   your limit of $0.47/h ...").
 - `request_id` makes a retry return the same machine instead of renting twice.
+- A create the provider did not answer clearly (a timeout, a 5xx, an
+  unreadable answer) may still have been made: it returns the machine as
+  `creating` with a `detail` saying so, and the watcher picks it up by its
+  label when it appears (`never_listed` after 5 minutes if it does not).
 - `max_running` per provider (default 2) caps live machines: 409 `conflict`
   at the cap.
 - This server never terminates a machine on its own: a machine that is not
@@ -839,7 +843,7 @@ Problems (`problem`, with the human text in `detail`):
 | `no_port` | running over 3 min without a public port for 8675 |
 | `not_ready_timeout` | not ready in time; still billed |
 | `unreachable` | was ready, failing probes for over 5 min |
-| `never_listed` | QuickPod accepted the pod but it never appeared in 5 min |
+| `never_listed` | the create was accepted (QuickPod) or did not answer clearly, and no server appeared in 5 min; it may be billing, so it still counts toward `max_running` and forgetting it needs `force=1` |
 | `provider_error` | the provider reports an error state |
 | `not_refreshed` | a real machine while simulate is on (or the reverse); actions on it are 409 |
 | `cuda_failed`, `pull_slow`, `image_pull_failed` | the image could not run its CUDA check, is pulling far slower than the host predicts, or could not be pulled |

@@ -116,9 +116,21 @@ type rawOffer struct {
 		GeoInfo           string   `json:"geoinfo"`             // "US|Kentucky|Lexington"
 		InetDown          float64  `json:"inet_down"`           // Mbps-like; unit UNCONFIRMED, 0 = not reported
 		DiskBW            float64  `json:"disk_bw"`             // unit UNCONFIRMED, 0 = not reported
+		AvailDiskSpace    float64  `json:"avail_disk_space"`    // GB free on the machine; 0 = not reported
 	} `json:"_machines"`
 
 	raw map[string]any // the row as listed, for hostfit.FromQuickPod
+}
+
+// maxDisk is the most disk this offer can be rented with: max_disk_size,
+// or the machine's free space when that is less (as hostfit.FromQuickPod
+// reads it). 0 = no limit reported.
+func (r rawOffer) maxDisk() int {
+	md := r.MaxDiskSize
+	if a := int(math.Floor(r.Machine.AvailDiskSpace)); a > 0 && (md <= 0 || a < md) {
+		md = a
+	}
+	return md
 }
 
 // host is the row's host facts (driver, CUDA, disk, bandwidth).
@@ -374,8 +386,7 @@ func offerOf(r rawOffer, disk int) provision.Offer {
 		rel := round6(*r.Machine.Reliability / 100)
 		o.Reliability = &rel
 	}
-	if r.MaxDiskSize > 0 {
-		md := r.MaxDiskSize
+	if md := r.maxDisk(); md > 0 {
 		o.MaxDiskGB = &md
 	}
 	return o
@@ -397,7 +408,7 @@ func keep(r rawOffer, q provision.OfferQuery, disk, count int) bool {
 	if q.GPU != "" && !strings.Contains(strings.ToLower(r.GPUType), strings.ToLower(strings.TrimSpace(q.GPU))) {
 		return false
 	}
-	if r.MaxDiskSize > 0 && r.MaxDiskSize < disk {
+	if md := r.maxDisk(); md > 0 && md < disk {
 		return false
 	}
 	if q.Fast {
@@ -473,9 +484,9 @@ func (adapter) Quote(ctx context.Context, key, offerID string, q provision.Offer
 		return provision.Offer{}, provision.Errorf(provision.QuickPod, provision.ClassCapacity, 0, "offer is busy")
 	}
 	disk := diskOf(q)
-	if r := rows[i]; r.MaxDiskSize > 0 && disk > r.MaxDiskSize {
+	if md := rows[i].maxDisk(); md > 0 && disk > md {
 		return provision.Offer{}, provision.Errorf(provision.QuickPod, provision.ClassInvalid, 0,
-			"%d GB of disk is more than this offer's %d GB", disk, r.MaxDiskSize)
+			"%d GB of disk is more than this offer's %d GB", disk, md)
 	}
 	o := offerOf(rows[i], disk)
 	provision.DecorateOffer(&o, rows[i].host(), q)

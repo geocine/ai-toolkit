@@ -80,18 +80,35 @@ func NewLimiter(c Clock) *Limiter {
 // Wait books the next slot for ep and blocks until it comes. A wait cut
 // short by ctx hands its slot back when nobody booked after it.
 func (l *Limiter) Wait(ctx context.Context, ep Endpoint) error {
+	_, err := l.wait(ctx, ep, -1)
+	return err
+}
+
+// WaitAtMost is Wait for a caller that will not queue longer than limit:
+// when ep's next slot is more than limit away it books nothing and returns
+// that wait as busy at once, so the caller can answer "busy, try again in
+// busy" instead of outwaiting its own deadline.
+func (l *Limiter) WaitAtMost(ctx context.Context, ep Endpoint, limit time.Duration) (busy time.Duration, err error) {
+	return l.wait(ctx, ep, max(limit, 0))
+}
+
+// wait books and sleeps; limit < 0 waits as long as it takes.
+func (l *Limiter) wait(ctx context.Context, ep Endpoint, limit time.Duration) (busy time.Duration, err error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return 0, err
 	}
-	b, ok := l.book(ep)
+	b, ok, busy := l.book(ep, limit)
+	if busy > 0 {
+		return busy, nil
+	}
 	if !ok || !b.at.After(b.now) {
-		return nil
+		return 0, nil
 	}
 	if err := l.clock.Sleep(ctx, b.at.Sub(b.now)); err != nil {
 		l.release(ep, b)
-		return err
+		return 0, err
 	}
-	return nil
+	return 0, nil
 }
 
 // booking is one reserved slot: when it was booked, when it is, and the
@@ -101,12 +118,14 @@ type booking struct {
 }
 
 // book reserves the next slot for ep. It reports false for an endpoint
-// without a documented limit.
-func (l *Limiter) book(ep Endpoint) (booking, bool) {
+// without a documented limit. With limit >= 0 a slot more than limit away
+// is not booked: busy is how far away it is.
+func (l *Limiter) book(ep Endpoint, limit time.Duration) (b booking, ok bool, busy time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.clock.Now()
-	b := booking{now: now, at: now}
+	b = booking{now: now, at: now}
+	tooFar := func() bool { return limit >= 0 && b.at.Sub(now) > limit }
 	if ep == EpSearch {
 		l.search = dropBefore(l.search, now.Add(-searchWindow))
 		if n := len(l.search); n >= searchBurst {
@@ -115,12 +134,15 @@ func (l *Limiter) book(ep Endpoint) (booking, bool) {
 				b.at = t
 			}
 		}
+		if tooFar() {
+			return b, true, b.at.Sub(now)
+		}
 		l.search = append(l.search, b.at)
-		return b, true
+		return b, true, 0
 	}
 	gap, ok := minInterval[ep]
 	if !ok {
-		return b, false
+		return b, false, 0
 	}
 	if last, seen := l.last[ep]; seen {
 		b.prev = last
@@ -128,8 +150,11 @@ func (l *Limiter) book(ep Endpoint) (booking, bool) {
 			b.at = t
 		}
 	}
+	if tooFar() {
+		return b, true, b.at.Sub(now)
+	}
 	l.last[ep] = b.at
-	return b, true
+	return b, true, 0
 }
 
 // release hands a cancelled slot back if it is still the latest one booked.

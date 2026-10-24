@@ -207,8 +207,9 @@ func deleteRow(ctx context.Context, id string) error {
 }
 
 // liveCount counts the machines of k that may be billing: listed at the
-// provider and not ended, or still being created. Only rows of the current
-// mode (simulated or real) count, so simulate never blocks real launches.
+// provider and not ended, still being created, or a create that never
+// listed (it may have been made). Only rows of the current mode (simulated
+// or real) count, so simulate never blocks real launches.
 func liveCount(ctx context.Context, k Kind, simulated bool) (int, error) {
 	sim := 0
 	if simulated {
@@ -216,7 +217,8 @@ func liveCount(ctx context.Context, k Kind, simulated bool) (int, error) {
 	}
 	var n int
 	err := state.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM machines WHERE provider = ? AND simulated = ?
-		AND ended_at IS NULL AND (provider_id != '' OR status = ?)`, string(k), sim, string(StatusCreating)).Scan(&n)
+		AND ended_at IS NULL AND (provider_id != '' OR status = ? OR problem = ?)`,
+		string(k), sim, string(StatusCreating), string(ProblemNeverListed)).Scan(&n)
 	return n, err
 }
 
