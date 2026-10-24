@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/geocine/aitoolkit/internal/jsonx"
 	"github.com/geocine/aitoolkit/internal/paths"
+	"github.com/geocine/aitoolkit/internal/photocheck"
+	"github.com/geocine/aitoolkit/internal/photocheck/pyjob"
 	"github.com/geocine/aitoolkit/internal/proc"
 	"github.com/geocine/aitoolkit/internal/settings"
 	"github.com/geocine/aitoolkit/internal/store"
@@ -113,6 +116,28 @@ func writeJobConfig(job *store.Job, trainingFolder, configPath string) error {
 	return os.WriteFile(configPath, out, 0o644)
 }
 
+// scriptFor is the Python command line (after the interpreter) of a job: a
+// face check runs this server's embedded photo_faces.py, written into the
+// job folder; every other job runs the toolkit's run.py. Both take the
+// job's .job_config.json, so the command line carries the job folder (with
+// the job name) and the config, which is how the supervisor recognises a
+// job process after a restart.
+func scriptFor(job *store.Job, trainingFolder, configPath string) ([]string, error) {
+	if job.JobType == photocheck.FaceJobType {
+		script, err := pyjob.Write(trainingFolder)
+		if err != nil {
+			return nil, err
+		}
+		return []string{script, configPath}, nil
+	}
+	runFile := filepath.Join(paths.ToolkitRoot, "run.py")
+	if _, err := os.Stat(runFile); err != nil {
+		log.Printf("run.py not found at path: %s", runFile)
+		return nil, errors.New("run.py not found")
+	}
+	return []string{runFile, configPath}, nil
+}
+
 func jobEnv(ctx context.Context, job *store.Job) []string {
 	env := append(os.Environ(),
 		"AITK_JOB_ID="+job.ID,
@@ -155,16 +180,17 @@ func startAndWatchJob(ctx context.Context, job *store.Job) {
 		return
 	}
 
-	runFile := filepath.Join(paths.ToolkitRoot, "run.py")
-	if _, err := os.Stat(runFile); err != nil {
-		log.Printf("run.py not found at path: %s", runFile)
-		markError(ctx, job.ID, "Error launching job: run.py not found")
+	args, err := scriptFor(job, trainingFolder, configPath)
+	if err != nil {
+		log.Printf("Error launching job %s: %v", job.ID, err)
+		appendJobLog(logPath, "Error launching job process: "+err.Error()+"\n")
+		markError(ctx, job.ID, "Error launching job: "+err.Error())
 		return
 	}
 
 	pid, err := launch(launchSpec{
 		python:         paths.ResolveDetachedPython(),
-		args:           []string{runFile, configPath},
+		args:           args,
 		env:            jobEnv(ctx, job),
 		dir:            paths.ToolkitRoot,
 		logPath:        logPath,
