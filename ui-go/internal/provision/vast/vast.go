@@ -83,6 +83,10 @@ func vramFilterMB(gb int) int { return gb * 1000 }
 // vramGB is the display GB of a gpu_ram value: 24564 MiB -> 24.
 func vramGB(mib float64) int { return int(math.Round(mib / 1024)) }
 
+// location tidies Vast's geolocation, which leaves the region empty on some
+// hosts (", CN").
+func location(geo string) string { return strings.Trim(geo, ", ") }
+
 // ---- transport ----
 
 // ops change how a status maps to a class (PLAN §6.2 errors).
@@ -267,7 +271,7 @@ func (b bundle) offer() provision.Offer {
 		VRAMGB:              vramGB(b.GPURAM),
 		PricePerHour:        b.DPHTotal,
 		StoppedPricePerHour: b.Instance.TotalHour,
-		Location:            b.Geolocation,
+		Location:            location(b.Geolocation),
 		Reliability:         b.Reliability,
 		Availability:        "available",
 		HTTPS:               false,

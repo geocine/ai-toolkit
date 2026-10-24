@@ -144,24 +144,33 @@ const HostRefusal = "This studio API only answers on 127.0.0.1 or localhost. Set
 
 // writeRoots are refused for every method but GET and HEAD: their reads answer
 // from the empty schema and the empty data dir.
-var writeRoots = []string{"/v1/jobs", "/v1/queues", "/v1/datasets", "/v1/bundles", "/v1/uploads", "/v1/lifecycle", "/v1/portable", "/v1/files"}
+var writeRoots = []string{"/v1/jobs", "/v1/queues", "/v1/datasets", "/v1/bundles", "/v1/uploads", "/v1/portable", "/v1/files"}
+
+// refusedRoots are refused for every method: the loop behind them does not run
+// here (lifecycle is in SkippedLoops), so even a read has nothing to answer.
+var refusedRoots = []string{"/v1/lifecycle"}
 
 // Allowed reports whether a request is served in studio API mode. It refuses
 // only what is known to need the trainer; unknown paths fall through to the
 // mux's not_found.
 func Allowed(method, path string) bool {
-	if strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/v1/system/") {
+	if strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/v1/system/") || underAny(path, refusedRoots) {
 		return false
 	}
 	if !strings.HasPrefix(path, "/v1/") || method == http.MethodGet || method == http.MethodHead {
 		return true
 	}
-	for _, root := range writeRoots {
+	return !underAny(path, writeRoots)
+}
+
+// underAny: path is one of roots or below one.
+func underAny(path string, roots []string) bool {
+	for _, root := range roots {
 		if path == root || strings.HasPrefix(path, root+"/") {
-			return false
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 // Gate answers what Allowed refuses, and on an open server (httpx.IsOpen())

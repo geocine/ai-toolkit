@@ -94,6 +94,18 @@ func TestUnits(t *testing.T) {
 	}
 }
 
+func TestLocationDropsEmptyRegion(t *testing.T) {
+	// live offers carry ", CN" when the host has no region
+	for in, want := range map[string]string{", CN": "CN", "Texas, US": "Texas, US", "": "", " , ": ""} {
+		if got := location(in); got != want {
+			t.Errorf("location(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if o := (bundle{Geolocation: ", CN"}).offer(); o.Location != "CN" {
+		t.Errorf("offer location = %q", o.Location)
+	}
+}
+
 func TestInfo(t *testing.T) {
 	info := adapter{}.Info()
 	c := info.Caps

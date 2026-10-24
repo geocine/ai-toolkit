@@ -27,7 +27,9 @@ func TestAllowed(t *testing.T) {
 		{"POST", "/v1/bundles", false},
 		{"POST", "/v1/uploads", false},
 		{"PUT", "/v1/lifecycle", false},
-		{"GET", "/v1/lifecycle", true},
+		{"GET", "/v1/lifecycle", false}, // the lifecycle loop does not run here
+		{"POST", "/v1/lifecycle/cancel", false},
+		{"GET", "/v1/lifecyclex", true},
 		{"POST", "/v1/portable/import", false},
 		{"DELETE", "/v1/files/x", false},
 		{"GET", "/v1/system", true},

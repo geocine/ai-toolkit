@@ -136,7 +136,7 @@ func TestPick(t *testing.T) {
 		in[5].Metrics.Width, in[5].Metrics.Height = 300, 400
 		r := Judge(in, SetState{}, Options{})
 		p := PickBest(in, r, 10, Options{})
-		if len(p.Kept) != 5 || p.Note != "Only 5 photos pass, so all are kept. Add 5 more: add 10 more photos of just them." {
+		if len(p.Kept) != 5 || p.Note != "Only 5 photos pass, so all are kept. Add 10 more photos of just them." {
 			t.Errorf("kept %v, note %q", p.Kept, p.Note)
 		}
 		if !slices.Equal(p.Kept, []string{"p00.jpg", "p01.jpg", "p02.jpg", "p03.jpg", "p04.jpg"}) ||

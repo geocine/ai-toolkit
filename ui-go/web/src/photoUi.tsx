@@ -169,6 +169,29 @@ export type PhotoActions = ReturnType<typeof usePhotoActions>;
 
 // ---- the bar above the grid ----
 
+// a finding's fix (findings[].op), as the studio's Readiness list offers it
+const OP_LABEL: Partial<Record<PhotoFixOp['op'], string>> = {
+  set_aside: 'Leave them out',
+  set_aside_flagged: 'Leave them out',
+  keep_best: 'Pick the best',
+  bake_orientation: 'Turn upright',
+  convert: 'Convert',
+  rename_same_stem: 'Rename',
+};
+const opDone = (op: PhotoFixOp['op'], n: number): string => {
+  if (n === 0) return 'Nothing to change';
+  switch (op) {
+    case 'bake_orientation':
+      return `Turned ${plural(n, 'photo')} upright`;
+    case 'convert':
+      return `Converted ${plural(n, 'file')}`;
+    case 'rename_same_stem':
+      return `Renamed ${plural(n, 'file')}`;
+    default:
+      return `Left out ${plural(n, 'photo')}. Restore brings them back.`;
+  }
+};
+
 type Filter = PhotoFlag | 'flagged' | null;
 const gradeTone = (g: PhotoReview['grade']) => (g === 'A' || g === 'B' ? 'tone-ok' : g === 'F' ? 'tone-danger' : 'tone-warn');
 
@@ -362,10 +385,15 @@ export function PhotoCheckBar({
               {review.findings.map(f => (
                 <li key={f.id}>
                   <span className={`dot ${f.level === 'info' ? '' : f.level === 'block' ? 'lv-danger' : 'lv-warn'}`} />
-                  <span>
+                  <span className="grow">
                     {f.message}
                     {f.fix && <span className="muted"> {f.fix}</span>}
                   </span>
+                  {f.op && OP_LABEL[f.op.op] && (
+                    <button className="btn btn-sm" disabled={!!busy} onClick={() => run(f.id, () => actions.fix([f.op!], n => opDone(f.op!.op, n)))}>
+                      {busy === f.id ? <Spinner /> : null} {OP_LABEL[f.op.op]}
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>

@@ -88,6 +88,8 @@ const flagInfo: Record<PhotoFlag, [label: string, warn: boolean]> = {
 const flagOrder = Object.keys(flagInfo) as PhotoFlag[];
 
 export const flagLabel = (f: PhotoFlag) => flagInfo[f]?.[0] ?? f.replace(/_/g, ' ');
+/** A flag after a count: "1 duplicate", "3 duplicates" (a photo's own label reads "duplicates"). */
+export const countLabel = (f: PhotoFlag, n: number) => (n === 1 && (f === 'duplicate' || f === 'screenshot') ? f : flagLabel(f));
 const flagWarns = (f: PhotoFlag) => flagInfo[f]?.[1] ?? false;
 
 /** Flags "Keep anyway" never waives: the trainer cannot read the file at all (photocheck trainerUnreadable). */
@@ -115,7 +117,7 @@ export function suggested(photos: GridPhoto[]): { files: string[]; flags: PhotoF
     by.set(f, (by.get(f) ?? 0) + 1);
   }
   const flags = suggestedFlags.filter(f => by.has(f));
-  return { files, flags, label: countList(flags.map(f => [by.get(f)!, flagLabel(f)])) };
+  return { files, flags, label: countList(flags.map(f => [by.get(f)!, countLabel(f, by.get(f)!)])) };
 }
 
 const matches = (p: GridPhoto, filter: PhotoFilter) =>
@@ -277,7 +279,7 @@ export function PhotoSummary(p: {
               aria-pressed={filter === f}
               onClick={() => setFilter(filter === f ? null : f)}
             >
-              {c} {flagLabel(f)}
+              {c} {countLabel(f, c)}
             </button>
           ))}
           {filter && (

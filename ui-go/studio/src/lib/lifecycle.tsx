@@ -1,7 +1,7 @@
 // "When done" (docs/headless.md, Unattended runs): what the server does with
 // itself once the work is finished, followed live for the banner and page.
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
-import { call, get, streamEvents, type Server } from './api';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { ApiError, call, get, streamEvents, type Server } from './api';
 
 export type LifeMode = 'keep' | 'stop' | 'destroy';
 export type LifeState = 'off' | 'waiting' | 'countdown' | 'verifying' | 'acting' | 'held' | 'cancelled' | 'done' | 'failed';
@@ -55,20 +55,26 @@ const LifeCtx = createContext<Ctx | null>(null);
 export function LifecycleProvider({ server, children }: { server: Server | null; children: ReactNode }) {
   const [life, setLife] = useState<Lifecycle | null>(null);
   const [error, setError] = useState<unknown>(null);
+  // a server without when done (the studio API answers 409) is not asked again
+  const refused = useRef(false);
 
   const reload = useCallback(() => {
-    if (!server) return;
+    if (!server || refused.current) return;
     get<Lifecycle>(server, '/v1/lifecycle').then(
       l => {
         setLife(l);
         setError(null);
       },
-      e => setError(e),
+      e => {
+        if (e instanceof ApiError && e.status === 409) refused.current = true;
+        setError(e);
+      },
     );
   }, [server]);
 
   useEffect(() => {
     setLife(null);
+    refused.current = false;
     if (!server) return;
     reload();
     const poll = setInterval(reload, 30000);

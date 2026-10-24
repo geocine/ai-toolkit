@@ -351,6 +351,18 @@ func TestKeeper(t *testing.T) {
 		t.Errorf("stored note %q", n)
 	}
 
+	// A copy the trainer skips never keeps over one it reads: the .heic
+	// original of a converted JPEG is the better copy by bytes, not for training.
+	heic := q95
+	heic.File = "photo.heic"
+	r = Judge([]Input{{Metrics: heic}, {Metrics: q40}}, SetState{}, Options{})
+	if len(r.Groups) != 1 || r.Groups[0].Keep != "q40.jpg" {
+		t.Errorf("readable keeper: %+v", r.Groups)
+	}
+	if it := itemOf(t, r, "photo.heic"); !slices.Contains(it.Flags, FlagDuplicate) || it.SameAs != "q40.jpg" {
+		t.Errorf("heic: %+v", it)
+	}
+
 	// Identical bytes are a duplicate without pixels.
 	x, y := good("x.jpg", 9), good("y.jpg", 10)
 	y.SHA256 = x.SHA256
