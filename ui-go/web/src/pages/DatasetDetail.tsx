@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight, FileArchive, FileX, ImagePlus, Save, Sparkles, Trash2, Upload as UploadIcon } from 'lucide-react';
 import { api, ApiError, fmtBytes, imgUrl, joinServerPath, plural, upload } from '../api';
 import { CaptionCheckBar, CaptionDialog, CaptionRun, captionActive } from '../captionUi';
+import { CompareDialog, LeftOut, PhotoCheckBar, PhotoDot, PhotoFlags, PhotoItemMenu, usePhotoActions, usePhotoReview, type PhotoActions } from '../photoUi';
 import { go, href } from '../router';
-import type { DatasetDetail as Detail, DatasetItem } from '../types';
+import type { DatasetDetail as Detail, DatasetItem, PhotoItem, PhotoReview } from '../types';
 import { Bar, Empty, Loading, Spinner, useConfirm, useToast } from '../ui';
 
 const PAGE = 120;
@@ -21,6 +22,8 @@ export function DatasetDetail({ name }: { name: string }) {
   const [over, setOver] = useState(false);
   const [captioning, setCaptioning] = useState(false);
   const [onlyFiles, setOnlyFiles] = useState<Set<string> | null>(null);
+  const [photoFiles, setPhotoFiles] = useState<Set<string> | null>(null);
+  const [compare, setCompare] = useState<[string, string] | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const zipInput = useRef<HTMLInputElement>(null);
   const base = `/v1/datasets/${encodeURIComponent(name)}`;
@@ -44,20 +47,32 @@ export function DatasetDetail({ name }: { name: string }) {
     load();
   }, [load]);
 
-  // while a caption job runs, its progress and the captions it writes
+  // while a caption job or a face check runs, its progress and what it writes
   const active = captionActive(ds?.caption_job);
+  const facing = captionActive(ds?.photo_job);
   const wasActive = useRef(false);
+  const wasFacing = useRef(false);
   useEffect(() => {
     if (wasActive.current && !active && ds?.caption_job) {
       const j = ds.caption_job;
       if (j.state === 'completed') toast.success('Captioning finished');
       else if (j.state === 'stopped') toast.success('Captioning stopped');
     }
+    if (wasFacing.current && !facing && ds?.photo_job?.state === 'completed') toast.success('Face check finished');
     wasActive.current = active;
-    if (!active) return;
+    wasFacing.current = facing;
+    if (!active && !facing) return;
     const id = setInterval(() => document.visibilityState !== 'hidden' && load(), 3000);
     return () => clearInterval(id);
-  }, [active, load]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [active, facing, load]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // the photo review follows the files, their captions and the face check
+  const version = `${ds?.images}|${ds?.size}|${ds?.photo_job?.id}:${ds?.photo_job?.state}|${items.map(i => `${i.file}:${i.caption ?? ''}`).join('|')}`;
+  const photos = usePhotoReview(name, version);
+  const review = photos.review;
+  const photoActions = usePhotoActions(name, photos.setReview, load);
+  const byFile = useMemo(() => new Map((review?.items ?? []).map(i => [i.file, i])), [review]);
+  const shownItems = items.filter(i => (!onlyFiles || onlyFiles.has(i.file)) && (!photoFiles || photoFiles.has(i.file)));
 
   const more = async () => {
     if (!cursor) return;
@@ -197,9 +212,35 @@ export function DatasetDetail({ name }: { name: string }) {
       ) : (
         <>
           <CaptionCheckBar dataset={name} version={items.map(i => i.caption ?? '').join('|')} onFilter={setOnlyFiles} onFixed={load} />
+          {review && review.total > 0 && (
+            <PhotoCheckBar
+              dataset={name}
+              review={review}
+              actions={photoActions}
+              photoJob={ds.photo_job}
+              onFilter={setPhotoFiles}
+              onFaceJob={j => setDs(d => (d ? { ...d, photo_job: j } : d))}
+              onChanged={load}
+              onRefresh={photos.refresh}
+            />
+          )}
           <div className="grid grid-items">
-            {(onlyFiles ? items.filter(i => onlyFiles.has(i.file)) : items).map(it => (
-              <ItemCard key={it.file} dsName={name} folder={ds.path} item={it} onDeleted={() => setItems(x => x.filter(y => y.file !== it.file))} />
+            {shownItems.map(it => (
+              <ItemCard
+                key={it.file}
+                dsName={name}
+                folder={ds.path}
+                item={it}
+                photo={byFile.get(it.file)}
+                review={review}
+                actions={photoActions}
+                onCompare={(a, b) => setCompare([a, b])}
+                onSaved={caption => setItems(x => x.map(y => (y.file === it.file ? { ...y, caption } : y)))}
+                onDeleted={() => {
+                  setItems(x => x.filter(y => y.file !== it.file));
+                  load();
+                }}
+              />
             ))}
           </div>
           {cursor && (
@@ -211,11 +252,33 @@ export function DatasetDetail({ name }: { name: string }) {
           )}
         </>
       )}
+      {review && <LeftOut folder={ds.path} review={review} actions={photoActions} />}
+      {review && compare && <CompareDialog folder={ds.path} review={review} a={compare[0]} b={compare[1]} actions={photoActions} onClose={() => setCompare(null)} />}
     </>
   );
 }
 
-function ItemCard({ dsName, folder, item, onDeleted }: { dsName: string; folder: string; item: DatasetItem; onDeleted: () => void }) {
+function ItemCard({
+  dsName,
+  folder,
+  item,
+  photo,
+  review,
+  actions,
+  onCompare,
+  onSaved,
+  onDeleted,
+}: {
+  dsName: string;
+  folder: string;
+  item: DatasetItem;
+  photo?: PhotoItem;
+  review: PhotoReview | null;
+  actions: PhotoActions;
+  onCompare: (a: string, b: string) => void;
+  onSaved: (caption: string) => void;
+  onDeleted: () => void;
+}) {
   const toast = useToast();
   const confirm = useConfirm();
   const [caption, setCaption] = useState(item.caption ?? '');
@@ -240,6 +303,8 @@ function ItemCard({ dsName, folder, item, onDeleted }: { dsName: string; folder:
       await api.put(`${fileRoute}/captions/${encFile}`, { caption });
       savedRef.current = caption;
       setSaved(caption);
+      // the page's items carry the caption too, so the caption and photo checks see it
+      onSaved(caption);
     } catch (e) {
       toast.error(e);
     } finally {
@@ -263,7 +328,10 @@ function ItemCard({ dsName, folder, item, onDeleted }: { dsName: string; folder:
       ) : isAudio(item.file) ? (
         <img className="item-media" src={`/api/audio/art/${encodeURIComponent(path.slice(0, Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))))}/${encodeURIComponent(item.file.split('/').pop()!)}`} alt="" loading="lazy" />
       ) : (
-        <img className="item-media" src={imgUrl(path, true)} alt={item.file} loading="lazy" />
+        <div className="item-thumb">
+          <img className="item-media" src={imgUrl(path, true)} alt={item.file} loading="lazy" />
+          <PhotoDot item={photo} />
+        </div>
       )}
       <div className="item-head">
         <div style={{ minWidth: 0 }}>
@@ -272,13 +340,18 @@ function ItemCard({ dsName, folder, item, onDeleted }: { dsName: string; folder:
           </div>
           <div className="item-meta">
             {item.width && item.height ? `${item.width} × ${item.height} · ` : ''}
+            {photo?.px ? <span title={`Trains at about ${photo.px} px`}>{photo.px} px · </span> : null}
             {fmtBytes(item.size)}
           </div>
         </div>
-        <button className="icon-btn sm danger" onClick={del} aria-label="Delete file" title="Delete file">
-          <Trash2 size={14} />
-        </button>
+        <div className="item-actions">
+          {photo && review && <PhotoItemMenu item={photo} review={review} actions={actions} onCompare={onCompare} />}
+          <button className="icon-btn sm danger" onClick={del} aria-label="Delete file" title="Delete file">
+            <Trash2 size={14} />
+          </button>
+        </div>
       </div>
+      <PhotoFlags item={photo} />
       <textarea className="caption" rows={3} value={caption} onChange={e => setCaption(e.target.value)} placeholder="No caption" aria-label={`Caption for ${item.file}`} />
       {caption !== saved && (
         <button className="btn btn-sm btn-primary" onClick={save} disabled={saving}>
