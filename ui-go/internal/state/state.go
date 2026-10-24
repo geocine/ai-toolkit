@@ -117,6 +117,47 @@ var migrations = []string{
 	`ALTER TABLE job_policies ADD COLUMN sync_remote TEXT;`,
 	// how many older checkpoints the sync remote keeps (-1: all)
 	`ALTER TABLE job_policies ADD COLUMN keep_checkpoints INTEGER;`,
+	// 4: GPU servers this server launched on RunPod / Vast.ai / QuickPod (keys: settings provision.key.<kind>)
+	`CREATE TABLE machines (
+	  id TEXT PRIMARY KEY, provider TEXT NOT NULL, provider_id TEXT NOT NULL DEFAULT '',
+	  label TEXT NOT NULL, name TEXT NOT NULL, token TEXT NOT NULL,
+	  status TEXT NOT NULL, problem TEXT NOT NULL DEFAULT '', detail TEXT NOT NULL DEFAULT '',
+	  provider_status TEXT NOT NULL DEFAULT '', pending TEXT NOT NULL DEFAULT '',
+	  spec TEXT NOT NULL DEFAULT '{}', base_url TEXT NOT NULL DEFAULT '', endpoints TEXT NOT NULL DEFAULT '[]',
+	  image_launch_ref TEXT NOT NULL DEFAULT '', image_digest TEXT NOT NULL DEFAULT '',
+	  price_per_hour REAL, stopped_price_per_hour REAL, request_id TEXT,
+	  simulated INTEGER NOT NULL DEFAULT 0,
+	  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+	  running_at INTEGER, ready_at INTEGER, last_ok_at INTEGER, ended_at INTEGER);
+	CREATE UNIQUE INDEX machines_request ON machines(request_id) WHERE request_id IS NOT NULL;
+	CREATE UNIQUE INDEX machines_live_name ON machines(name) WHERE ended_at IS NULL;
+	CREATE INDEX machines_provider ON machines(provider, ended_at);`,
+	// 5: photo checks: per-content analysis (never per path); no face templates
+	`CREATE TABLE photo_metrics (
+		sha256  TEXT NOT NULL,
+		version INTEGER NOT NULL,      -- photocheck.MetricsVersion
+		data    TEXT NOT NULL,         -- Metrics JSON (file omitted)
+		seen_at INTEGER NOT NULL,      -- unix ms; refreshed at most daily, batched
+		PRIMARY KEY (sha256, version)
+	);
+	CREATE INDEX photo_metrics_seen ON photo_metrics (seen_at);
+	CREATE TABLE photo_faces (
+		sha256  TEXT NOT NULL,
+		algo    INTEGER NOT NULL,      -- photocheck.FaceAlgo
+		data    TEXT NOT NULL,         -- FaceData JSON: boxes, landmarks, scores, sharpness, light, text boxes
+		seen_at INTEGER NOT NULL,
+		PRIMARY KEY (sha256, algo)
+	);
+	CREATE INDEX photo_faces_seen ON photo_faces (seen_at);
+	CREATE TABLE photo_sets (
+		dir        TEXT PRIMARY KEY,   -- clean absolute dataset folder
+		kind       TEXT,               -- person | style | object (NULL: person)
+		reference  TEXT,               -- sha256 of the "this is them" photo
+		decisions  TEXT NOT NULL DEFAULT '{}',  -- {sha256: "keep" | "intended"}
+		derived    TEXT NOT NULL DEFAULT '{}',  -- {crop sha256: parent sha256}
+		identity   TEXT,               -- Identity JSON: set_sig, model, job_id, at, faces, cos (f16 matrix)
+		updated_at INTEGER NOT NULL
+	);`,
 }
 
 // NodeID identifies this server (stable across restarts, new per database):
