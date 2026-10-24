@@ -1,0 +1,231 @@
+{
+  "quickpod": {
+    "kind": "quickpod",
+    "image": "ghcr.io/geocine/aitoolkit-go:latest",
+    "port": 8675,
+    "disk_gb": 100,
+    "env": [
+      {
+        "name": "AI_TOOLKIT_AUTH",
+        "value": "<a long random token>",
+        "secret": true,
+        "note": "In the template's docker options, so the server never starts without a token."
+      },
+      {
+        "name": "AITK_CORS_ORIGINS",
+        "value": "<your studio origin>",
+        "secret": false,
+        "note": "Lets your studio call the server from the browser."
+      }
+    ],
+    "env_block": "",
+    "docker_options": "-p 8675:8675 -e AI_TOOLKIT_AUTH=<a long random token> -e AITK_CORS_ORIGINS=<your studio origin>",
+    "fields": [
+      {
+        "label": "Template Type",
+        "value": "GPU",
+        "note": ""
+      },
+      {
+        "label": "Runtime",
+        "value": "Pod",
+        "note": "Not VM."
+      },
+      {
+        "label": "Template Name",
+        "value": "aitk headless",
+        "note": ""
+      },
+      {
+        "label": "Docker Image Path",
+        "value": "ghcr.io/geocine/aitoolkit-go:latest",
+        "note": "The tag goes in the path: there is no separate tag field."
+      },
+      {
+        "label": "Disk Space",
+        "value": "100",
+        "note": "GB. Only the default: you pick the size again at launch."
+      },
+      {
+        "label": "Launch Mode",
+        "value": "Docker Entrypoint",
+        "note": "Uses the image's entrypoint, which starts the server."
+      }
+    ],
+    "steps": [
+      "Sign in at console.quickpod.io and add credit under Settings. QuickPod support is in beta. For the studio to create pods for you later, a key under Settings → Secure API keys needs Pods read, Pods write, Templates read, Account read and Profile read.",
+      "Open Templates and click Create New Template.",
+      "Fill in the fields above. Leave Private Docker Repository unticked, and leave Docker Entrypoint Run Options and On Start Script empty.",
+      "Paste the docker options into Docker Options. Keep both parts: -p 8675:8675 publishes the port, and AI_TOOLKIT_AUTH keeps the server from starting without a token.",
+      "Click Create Template. On GPU Search, pick an offer, choose aitk headless under My Templates and click Create.",
+      "On Pods, wait for running and click Connect. Under Exposed Ports, the 8675 row has an HTTPS link (https://<pod id>-8675.proxy.quickpod.io/) and an HTTP link (http://<ip>:<port>).",
+      "When it shows running, copy its URL and add it on the Servers page with the same token."
+    ],
+    "url_pattern": "https://<pod id>-8675.proxy.quickpod.io/",
+    "console_url": "https://console.quickpod.io/templates",
+    "keys_url": "https://console.quickpod.io/settings",
+    "key_scopes": [
+      "pods:read",
+      "pods:write",
+      "templates:read",
+      "account:read",
+      "profile:read"
+    ]
+  },
+  "runpod": {
+    "kind": "runpod",
+    "image": "ghcr.io/geocine/aitoolkit-go:latest",
+    "port": 8675,
+    "disk_gb": 100,
+    "env": [
+      {
+        "name": "AI_TOOLKIT_AUTH",
+        "value": "<a long random token>",
+        "secret": true,
+        "note": "The server asks for it on every request. A RunPod secret works too: {{ RUNPOD_SECRET_aitk_token }}."
+      },
+      {
+        "name": "AITK_CORS_ORIGINS",
+        "value": "<your studio origin>",
+        "secret": false,
+        "note": "Lets your studio call the server from the browser."
+      },
+      {
+        "name": "HF_TOKEN",
+        "value": "{{ RUNPOD_SECRET_hf_token }}",
+        "secret": true,
+        "note": "Optional, for gated base models: save your Hugging Face token as the RunPod secret hf_token first."
+      }
+    ],
+    "env_block": "AI_TOOLKIT_AUTH=<a long random token>\nAITK_CORS_ORIGINS=<your studio origin>",
+    "docker_options": "",
+    "fields": [
+      {
+        "label": "Name",
+        "value": "aitk headless",
+        "note": ""
+      },
+      {
+        "label": "Visibility",
+        "value": "Private",
+        "note": "The template holds your token."
+      },
+      {
+        "label": "Container Image",
+        "value": "ghcr.io/geocine/aitoolkit-go:latest",
+        "note": "A public image, so Container Registry Credentials stay empty."
+      },
+      {
+        "label": "Container Disk",
+        "value": "100",
+        "note": "GB for models, datasets and checkpoints. It is wiped when the pod stops, so keep results on a remote and terminate the pod when you are done."
+      },
+      {
+        "label": "Expose HTTP Ports",
+        "value": "8675",
+        "note": ""
+      }
+    ],
+    "steps": [
+      "Sign in at console.runpod.io, open Templates and click New Template.",
+      "Set Template Type to Pod and Compute type to NVIDIA GPU, then fill in the fields above. Leave Container Start Command empty: the image starts the server itself.",
+      "Under Environment Variables, add the variables above.",
+      "For gated base models, also add HF_TOKEN = {{ RUNPOD_SECRET_hf_token }} after saving your Hugging Face token as the secret hf_token under Settings → Secrets.",
+      "Click Save Template.",
+      "Open Pods, click Deploy and pick a GPU. Click Change Template, choose aitk headless and click Deploy On-Demand.",
+      "When the pod shows running, open Connect → HTTP Service: the 8675 row links to https://<pod id>-8675.proxy.runpod.net.",
+      "When it shows running, copy its URL and add it on the Servers page with the same token."
+    ],
+    "url_pattern": "https://<pod id>-8675.proxy.runpod.net",
+    "console_url": "https://console.runpod.io",
+    "keys_url": "https://console.runpod.io/user/settings",
+    "key_scopes": [
+      "pods:read",
+      "pods:write",
+      "catalog:read",
+      "templates:read"
+    ]
+  },
+  "vast": {
+    "kind": "vast",
+    "image": "ghcr.io/geocine/aitoolkit-go:latest",
+    "port": 8675,
+    "disk_gb": 100,
+    "env": [
+      {
+        "name": "AI_TOOLKIT_AUTH",
+        "value": "<a long random token>",
+        "secret": true,
+        "note": "Under Account → Environment Variables, so it stays out of the template. Or, with Template Visibility Private, as -e AI_TOOLKIT_AUTH=<a long random token> in Docker Options. An account-wide value also reaches the servers the studio creates for you."
+      },
+      {
+        "name": "OPEN_BUTTON_PORT",
+        "value": "8675",
+        "secret": false,
+        "note": "Points the instance's Open button at the server."
+      },
+      {
+        "name": "AITK_CORS_ORIGINS",
+        "value": "<your studio origin>",
+        "secret": false,
+        "note": "Lets your studio call the server from the browser."
+      },
+      {
+        "name": "HF_TOKEN",
+        "value": "<your Hugging Face token>",
+        "secret": true,
+        "note": "Optional, for gated base models. Also under Account → Environment Variables."
+      }
+    ],
+    "env_block": "",
+    "docker_options": "-p 8675:8675 -e OPEN_BUTTON_PORT=8675 -e AITK_CORS_ORIGINS=<your studio origin>",
+    "fields": [
+      {
+        "label": "Template Name",
+        "value": "aitk headless",
+        "note": ""
+      },
+      {
+        "label": "Image Path:Tag",
+        "value": "ghcr.io/geocine/aitoolkit-go:latest",
+        "note": "The full registry path. Another tag works too."
+      },
+      {
+        "label": "Select Launch Mode",
+        "value": "docker ENTRYPOINT",
+        "note": "Runs the image as built, which starts the server."
+      },
+      {
+        "label": "Extra Filters",
+        "value": "direct_port_count >= 1",
+        "note": "Only hosts that can give port 8675 a public port."
+      },
+      {
+        "label": "Disk Space",
+        "value": "100",
+        "note": "GB, fixed for the life of the instance."
+      },
+      {
+        "label": "Template Visibility",
+        "value": "Private",
+        "note": ""
+      }
+    ],
+    "steps": [
+      "Open Account → Environment Variables (cloud.vast.ai/account/) and add AI_TOOLKIT_AUTH = <a long random token>. Vast puts it into every instance, so it stays out of the template. Or, with Template Visibility Private, add -e AI_TOOLKIT_AUTH=<a long random token> to Docker Options instead. An account-wide AI_TOOLKIT_AUTH also reaches the servers the studio creates for you, which get their own token, so use the template if you also create servers from the studio. Add HF_TOKEN under Account → Environment Variables for gated base models.",
+      "Open Templates (cloud.vast.ai/templates/), click + New and stay on the Config tab.",
+      "Fill in the fields above and paste the docker options into Docker Options.",
+      "Click Create & Use, pick an offer and click RENT.",
+      "When the instance shows running, open IP Port Info: the line ending in -> 8675/tcp gives the URL http://<ip>:<port>. It is plain http only, so the token crosses the internet unencrypted, and a studio served over https cannot call it directly: use the studio the server serves at /studio/.",
+      "When it shows running, copy its URL and add it on the Servers page with the same token."
+    ],
+    "url_pattern": "http://<ip>:<port>",
+    "console_url": "https://cloud.vast.ai/templates/",
+    "keys_url": "https://cloud.vast.ai/manage-keys/",
+    "key_scopes": [
+      "user_read",
+      "instance_read",
+      "instance_write"
+    ]
+  }
+}

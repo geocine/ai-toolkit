@@ -34,9 +34,13 @@ The container needs a GPU, port 8675 exposed over HTTP, and the env vars.
 
 | Provider | How |
 |---|---|
-| RunPod | Template: container image above, *Expose HTTP Ports* `8675`, env vars in the template. Reach it at `https://<pod id>-8675.proxy.runpod.net`. `PUBLIC_KEY` enables SSH (upstream's start script). |
+| RunPod | Template: container image above, *Expose HTTP Ports* `8675`, env vars in the template. Reach it at `https://<pod id>-8675.proxy.runpod.net`. `PUBLIC_KEY` enables SSH (upstream's start script). Stop and terminate go through RunPod's API v2. |
 | Vast.ai | Image above; *Docker options* `-p 8675:8675 -e ...`. Use the mapped port shown on the instance. |
+| QuickPod | Template: *Docker Image Path* above, *Docker Options* `-p 8675:8675 -e AI_TOOLKIT_AUTH=... -e ...`. Use the URL under *Connect*, *Exposed Ports*. |
 | Lambda, any VM | `docker run` as in the quick start (NVIDIA Container Toolkit installed). |
+
+Or create one from the studio: docs/providers.md (step-by-step template
+guides for all three are there too).
 
 Disks can be ephemeral: training state lives on the remote. Mount
 `/root/.cache/huggingface` only to keep base models across restarts on the
@@ -95,10 +99,21 @@ same machine.
 | `AITK_WHEN_DONE_ON` (`completed`) | `any` also triggers when the last job failed. |
 | `AITK_WHEN_DONE_BUNDLE` | A remote to keep each finished run in as a resumable bundle (`bundles/<name>_step<step>.zip`, docs/bundle-format.md) before acting. Pushed when missing, verified by size, and preferred over the sync and upload checks. It holds the newest checkpoint, or every one when the job keeps older checkpoints (`keep_checkpoints`); `AITK_WHEN_DONE_BUNDLE_CHECKPOINTS=all|latest` forces either. |
 | `AITK_WHEN_DONE_DRY_RUN` (`0`) | Log and emit events instead of calling the provider. |
-| `AITK_WHEN_DONE_PROVIDER` (auto) | `runpod`, `vast`, `command` or `exit`. Auto: `AITK_WHEN_DONE_CMD`, else RunPod (`RUNPOD_POD_ID`), else Vast.ai (`CONTAINER_ID` + `CONTAINER_API_KEY`), else the process exits. |
+| `AITK_WHEN_DONE_PROVIDER` (auto) | `runpod`, `vast`, `quickpod`, `command` or `exit`. Auto: `AITK_WHEN_DONE_CMD`, else RunPod (`RUNPOD_POD_ID`), else Vast.ai (`CONTAINER_ID` + `CONTAINER_API_KEY`), else QuickPod (`CONTAINER_LABEL` + `QUICKPOD_PORT_8675` + `AITK_QUICKPOD_API_KEY`), else the process exits. |
 | `AITK_RUNPOD_API_KEY` | A full RunPod key (the pod's own `RUNPOD_API_KEY` may only be allowed to stop, not terminate; then the pod is stopped and its disk still billed). |
 | `AITK_VAST_API_KEY` | Overrides Vast.ai's per-instance `CONTAINER_API_KEY`. |
+| `AITK_QUICKPOD_API_KEY` | A QuickPod key with `pods:write`: QuickPod gives a pod no key of its own, so without it the pod cannot stop or destroy itself. |
 | `AITK_WHEN_DONE_CMD` | Shell command that ends the server instead (gets `AITK_WHEN_DONE_ACTION=stop\|destroy`). |
+
+**Provisioning** (creating GPU servers from this server; docs/providers.md)
+| Variable | Meaning |
+|---|---|
+| `AITK_PROVISION_RUNPOD_KEY`, `AITK_PROVISION_VAST_KEY`, `AITK_PROVISION_QUICKPOD_KEY` | Provider keys used when none was saved through the API. Never the self-terminate keys above, so a GPU server does not become a launcher. |
+| `AITK_PROVISION_PROVIDERS` (all) | Comma list of providers to offer (`runpod,vast,quickpod`). |
+| `AITK_PROVISION_MAX_RUNNING` (`2`) | Live machines per provider, 1 to 20, unless set per provider through the API. |
+| `AITK_PROVISION_READY_TIMEOUT` (`20m`) | When a machine that never answered is marked failed. It is not terminated and still bills. |
+| `AITK_PROVISION_SIMULATE` (`0`) | `1` answers every provider from in-process mocks: no credits, no provider calls. Local testing only. |
+| `AITK_PROVISION_SIMULATE_DELAY` (`15s`) | How long a simulated machine takes to come up. |
 
 **Server** (rarely needed)
 `PORT` (8675), `AI_TOOLKIT_UI_DIR` (frontend dir), `MODELS_PATH`,
