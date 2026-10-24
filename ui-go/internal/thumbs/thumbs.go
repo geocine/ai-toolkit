@@ -2,7 +2,11 @@
 // ?thumb=1. Mirrors the generator in ui/cron/fileServer.ts (which matches the
 // Python SampleConfig._generate_thumbnail): a center-cropped square written
 // atomically into the sibling .thumbs folder as <name>.<ext>.jpg, or
-// <name>.<ext>.png when the source has alpha.
+// <name>.<ext>.png when the source has alpha. Image thumbs are turned upright
+// by their EXIF orientation. A thumb carries the mtime of the source it was
+// made from, and one whose mtime differs is stale: that catches an edit, a
+// replacement with an older date, and thumbs made before orientation was
+// applied (by older code, ui/cron/fileServer.ts or the sampler).
 package thumbs
 
 import (
@@ -29,6 +33,7 @@ import (
 	"golang.org/x/image/draw"
 	_ "golang.org/x/image/webp"
 
+	"github.com/geocine/aitoolkit/internal/imgmeta"
 	"github.com/geocine/aitoolkit/internal/paths"
 )
 
@@ -68,14 +73,54 @@ func Base(sourcePath string) string {
 	return filepath.Join(filepath.Dir(sourcePath), ".thumbs", filepath.Base(sourcePath))
 }
 
-// Lookup returns an existing thumb for base (.png first, then .jpg).
+// source is the file a Base path was made from: <dir>/<name>.
+func source(base string) string {
+	return filepath.Join(filepath.Dir(filepath.Dir(base)), filepath.Base(base))
+}
+
+// Lookup returns an existing thumb for base (.png first, then .jpg), or ""
+// when there is none or it was not made from the source as it is now (Ensure
+// then makes a new one). When the source cannot be read, any thumb is
+// returned.
 func Lookup(base string) (string, os.FileInfo) {
+	var srcMtime time.Time
+	if st, err := os.Stat(source(base)); err == nil {
+		srcMtime = st.ModTime()
+	}
+	return lookup(base, srcMtime)
+}
+
+// lookup returns the thumb for base unless its mtime differs from
+// sourceMtime (a zero sourceMtime accepts any thumb).
+func lookup(base string, sourceMtime time.Time) (string, os.FileInfo) {
 	for _, c := range []string{base + ".png", base + ".jpg"} {
 		if st, err := os.Stat(c); err == nil && st.Mode().IsRegular() {
+			if !sourceMtime.IsZero() && !madeFrom(c, st.ModTime(), sourceMtime) {
+				return "", nil
+			}
 			return c, st
 		}
 	}
 	return "", nil
+}
+
+// madeFrom reports whether the thumb at path, with mtime thumbMtime, was made
+// from a source with mtime sourceMtime.
+func madeFrom(path string, thumbMtime, sourceMtime time.Time) bool {
+	if thumbMtime.Equal(sourceMtime) {
+		return true
+	}
+	mu.Lock()
+	s, ok := stamps[path]
+	mu.Unlock()
+	return ok && s.source.Equal(sourceMtime) && s.thumb.Equal(thumbMtime)
+}
+
+// Orientation is the EXIF orientation (1..8) of an image file's bytes, 1 when
+// it has none. It reads the whole file: a WebP keeps its EXIF chunk after the
+// image data. Orient(Fit(img, n), Orientation(data)) is the upright preview.
+func Orientation(data []byte) int {
+	return imgmeta.SniffHead(data).Exif.Orientation
 }
 
 // The manager provisions a portable FFmpeg at <repo>/.ffmpeg (see
@@ -108,6 +153,12 @@ func resolveFfmpeg() (string, []string) {
 	return local, env
 }
 
+// FFmpeg is the ffmpeg the thumbnails use: the manager's portable build when
+// present, else "ffmpeg" from PATH. A nil env means the process environment.
+func FFmpeg() (exe string, env []string) {
+	return ffmpegExe, ffmpegEnv
+}
+
 var (
 	mu            sync.Mutex
 	ffmpegMissing bool
@@ -116,6 +167,10 @@ var (
 	// against a broken file on every poll
 	failed   = map[string]bool{}
 	inFlight = map[string]*pending{}
+	// thumbs whose mtime the filesystem would not set to their source's
+	// (Chtimes refused or ignored), so they still count as fresh instead of
+	// being made again on every request
+	stamps = map[string]stamp{}
 	// a gallery burst can request hundreds of missing thumbs at once
 	slots = make(chan struct{}, 4)
 )
@@ -125,10 +180,36 @@ type pending struct {
 	path string
 }
 
-// Ensure generates the thumb for sourcePath at base when possible and returns
-// the path it wrote, or "" when none could be generated (unsupported format,
-// no ffmpeg, corrupt file). Concurrent calls for one base share the work.
+type stamp struct{ source, thumb time.Time }
+
+// Ensure returns the thumb for sourcePath at base, generating it when it is
+// missing or was made from another sourceMtime, or "" when none could be
+// generated (unsupported format, no ffmpeg, corrupt file). A video or audio
+// source keeps a thumb of any age when ffmpeg is missing: the sampler or the
+// old UI may have made it. Concurrent calls for one base share the work.
 func Ensure(sourcePath, base string, sourceMtime time.Time) string {
+	if p, _ := lookup(base, sourceMtime); p != "" {
+		return p
+	}
+	p := ensure(sourcePath, base, sourceMtime)
+	if p == "" && !canGenerate(sourcePath) {
+		p, _ = lookup(base, time.Time{})
+	}
+	return p
+}
+
+// canGenerate reports whether generate can make a thumb for sourcePath.
+func canGenerate(sourcePath string) bool {
+	ext := strings.ToLower(filepath.Ext(sourcePath))
+	if imageExts[ext] {
+		return true
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	return (videoExts[ext] || audioExts[ext]) && !ffmpegMissing
+}
+
+func ensure(sourcePath, base string, sourceMtime time.Time) string {
 	failKey := fmt.Sprintf("%s:%d", base, sourceMtime.UnixNano())
 	mu.Lock()
 	if failed[failKey] {
@@ -145,7 +226,7 @@ func Ensure(sourcePath, base string, sourceMtime time.Time) string {
 	mu.Unlock()
 
 	slots <- struct{}{}
-	written, err := generate(sourcePath, base)
+	written, err := generate(sourcePath, base, sourceMtime)
 	<-slots
 	if err != nil {
 		log.Printf("Failed to generate thumbnail for %s: %v", sourcePath, err)
@@ -162,7 +243,7 @@ func Ensure(sourcePath, base string, sourceMtime time.Time) string {
 	return written
 }
 
-func generate(sourcePath, base string) (string, error) {
+func generate(sourcePath, base string, sourceMtime time.Time) (string, error) {
 	ext := strings.ToLower(filepath.Ext(sourcePath))
 	isImage, isVideo, isAudio := imageExts[ext], videoExts[ext], audioExts[ext]
 	mu.Lock()
@@ -174,6 +255,7 @@ func generate(sourcePath, base string) (string, error) {
 
 	var img image.Image
 	hasAlpha := false
+	orientation := 1
 	if isImage {
 		data, err := os.ReadFile(sourcePath)
 		if err != nil {
@@ -185,6 +267,7 @@ func generate(sourcePath, base string) (string, error) {
 			return "", err
 		}
 		hasAlpha = HasAlpha(img)
+		orientation = Orientation(data)
 	}
 	suffix := ".jpg"
 	if hasAlpha {
@@ -201,7 +284,7 @@ func generate(sourcePath, base string) (string, error) {
 	var err error
 	switch {
 	case isImage:
-		err = writeImageThumb(img, hasAlpha, tmpPath)
+		err = writeImageThumb(img, hasAlpha, orientation, tmpPath)
 	case isVideo:
 		err = runFfmpeg("-i", sourcePath, "-frames:v", "1", "-vf", squareVF, "-q:v", "2", tmpPath)
 	default:
@@ -224,7 +307,32 @@ func generate(sourcePath, base string) (string, error) {
 		os.Remove(tmpPath)
 		return "", err
 	}
+	// a stale thumb under the other suffix would win in Lookup (.png first)
+	if hasAlpha {
+		os.Remove(base + ".jpg")
+	} else {
+		os.Remove(base + ".png")
+	}
+	stampThumb(thumbPath, sourceMtime)
 	return thumbPath, nil
+}
+
+// stampThumb sets the thumb's mtime to its source's, which is what makes it
+// fresh in lookup. Where the filesystem does not keep that mtime, the pair is
+// remembered for this process instead.
+func stampThumb(thumbPath string, sourceMtime time.Time) {
+	if sourceMtime.IsZero() {
+		return
+	}
+	os.Chtimes(thumbPath, time.Now(), sourceMtime)
+	st, err := os.Stat(thumbPath)
+	mu.Lock()
+	defer mu.Unlock()
+	if err == nil && !st.ModTime().Equal(sourceMtime) {
+		stamps[thumbPath] = stamp{source: sourceMtime, thumb: st.ModTime()}
+	} else {
+		delete(stamps, thumbPath)
+	}
 }
 
 var squareVF = fmt.Sprintf("crop='min(iw,ih)':'min(iw,ih)',scale=%d:%d", Size, Size)
@@ -284,12 +392,14 @@ func Cover(img image.Image, hasAlpha bool) draw.Image {
 	return dst
 }
 
-func writeImageThumb(img image.Image, hasAlpha bool, out string) error {
+func writeImageThumb(img image.Image, hasAlpha bool, orientation int, out string) error {
 	f, err := os.Create(out)
 	if err != nil {
 		return err
 	}
-	thumb := Cover(img, hasAlpha)
+	// the crop is centred, so turning the square is the same as cropping the
+	// upright image, at thumb size instead of full size
+	thumb := Orient(Cover(img, hasAlpha), orientation)
 	if hasAlpha {
 		err = png.Encode(f, thumb)
 	} else {
@@ -299,6 +409,51 @@ func writeImageThumb(img image.Image, hasAlpha bool, out string) error {
 		err = cerr
 	}
 	return err
+}
+
+// Orient turns img upright for an EXIF orientation (1..8): mirrors for 2 and
+// 4, a half turn for 3, and for 5-8 a quarter turn (with a mirror for 5 and
+// 7) that swaps width and height. Other values return img unchanged. The
+// result has img's pixel type when that is RGBA or NRGBA.
+func Orient(img draw.Image, orientation int) draw.Image {
+	if orientation < 2 || orientation > 8 {
+		return img
+	}
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	dst := image.Rect(0, 0, w, h)
+	if orientation >= 5 {
+		dst = image.Rect(0, 0, h, w)
+	}
+	var out draw.Image
+	if _, ok := img.(*image.NRGBA); ok {
+		out = image.NewNRGBA(dst)
+	} else {
+		out = image.NewRGBA(dst)
+	}
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			var dx, dy int
+			switch orientation {
+			case 2:
+				dx, dy = w-1-x, y
+			case 3:
+				dx, dy = w-1-x, h-1-y
+			case 4:
+				dx, dy = x, h-1-y
+			case 5:
+				dx, dy = y, x
+			case 6:
+				dx, dy = h-1-y, x
+			case 7:
+				dx, dy = h-1-y, w-1-x
+			case 8:
+				dx, dy = y, w-1-x
+			}
+			out.Set(dx, dy, img.At(b.Min.X+x, b.Min.Y+y))
+		}
+	}
+	return out
 }
 
 // Fit scales img down so neither side exceeds maxPx, keeping its aspect
