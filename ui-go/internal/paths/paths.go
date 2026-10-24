@@ -23,6 +23,19 @@ var (
 	DBPath                = filepath.Join(ToolkitRoot, "aitk_db.db")
 )
 
+// SetRoot moves ToolkitRoot to dir and recomputes every path above from it.
+// Controller mode calls it with its data dir before anything opens a file,
+// so its folders are the (empty) ones there, never ~/datasets or ~/output
+// next to wherever the binary was started.
+func SetRoot(dir string) {
+	ToolkitRoot = dir
+	DefaultTrainFolder = filepath.Join(dir, "output")
+	DefaultDatasetsFolder = filepath.Join(dir, "datasets")
+	DefaultDataRoot = filepath.Join(dir, "data")
+	DefaultModelsFolder = filepath.Join(dir, "models")
+	DBPath = filepath.Join(dir, "aitk_db.db")
+}
+
 func resolveRoot() string {
 	if v := strings.TrimSpace(os.Getenv("AI_TOOLKIT_ROOT")); v != "" {
 		if abs, err := filepath.Abs(v); err == nil {

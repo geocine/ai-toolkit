@@ -571,6 +571,6 @@ type NotifyKind = "started" | "resumed" | "sample" | "checkpoint" | "completed" 
 type NotifySink = { id: string; kind: "ntfy" | "discord" | "telegram" | "pushover" | "webhook"; target: string; source: "env" | "api"; created_at: string };
 type NotifyConfig = { sinks: NotifySink[]; events: NotifyKind[] | null; kinds: NotifyKind[]; public_url: string; studio_url: string; sample_every_s: number };
 type NotifyResult = { sink: string; kind: string; target: string; ok: boolean; detail: string };
-type Health = { ok: boolean; version: string; upstream_version: string; started_at: string };
+type Health = { ok: boolean; version: string; upstream_version: string; started_at: string; mode: "server" | "controller" };
 type SystemInfo = { gpus: any[]; cpu: any; disks: { path: string; free: number; total: number }[]; toolkit_root: string };
 `

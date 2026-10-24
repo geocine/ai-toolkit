@@ -33,11 +33,17 @@ func CORS(next http.Handler) http.Handler {
 		h := w.Header()
 		h.Set("Access-Control-Allow-Origin", origin)
 		h.Add("Vary", "Origin")
-		h.Set("Access-Control-Expose-Headers", "Content-Disposition, Content-Range, Content-Length, ETag, Accept-Ranges")
+		// Retry-After: a cross-origin studio shows "try again in N s" on rate_limited
+		h.Set("Access-Control-Expose-Headers", "Content-Disposition, Content-Range, Content-Length, ETag, Accept-Ranges, Retry-After")
 		if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
 			h.Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS")
 			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Content-Range, Last-Event-ID, Range, If-None-Match, Accept, Mcp-Session-Id, Mcp-Protocol-Version")
 			h.Set("Access-Control-Max-Age", "600")
+			// Chrome's private-network preflight: an https page calling a
+			// controller on http://127.0.0.1 asks first
+			if strings.EqualFold(r.Header.Get("Access-Control-Request-Private-Network"), "true") {
+				h.Set("Access-Control-Allow-Private-Network", "true")
+			}
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
