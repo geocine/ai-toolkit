@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Fake curl for build_and_push_test.sh: logs the call to $SHIM_LOG and prints
+# $SHIM_CURL_CODE as the HTTP status (what -w '%{http_code}' would print). 000
+# is a request that never got an answer, so it also exits 28 like a timeout.
+set -u
+printf 'curl | %s\n' "$*" >>"$SHIM_LOG"
+code=${SHIM_CURL_CODE:-200}
+printf '%s' "$code"
+[[ "$code" != 000 ]] || exit 28

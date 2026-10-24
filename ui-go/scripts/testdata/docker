@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Fake docker for build_and_push_test.sh. Every call is appended to $SHIM_LOG
+# (one line, arguments separated by " | "); the answers come from SHIM_* env:
+#   SHIM_BASE_EXISTS=1        the base image is already built
+#   SHIM_IMAGE_EXISTS=0       the image to verify is not local (--verify pulls it)
+#   SHIM_PULL_EXIT            exit code of docker pull
+#   SHIM_ENV                  Config.Env lines of the base
+#   SHIM_SIZE                 .Size of the base
+#   SHIM_PROBE                output of the torch probe (key=value lines)
+#   SHIM_BUILDX=0             docker buildx is not installed
+#   SHIM_REMOTE_DIGEST        digest of an already pushed :<sha> (unset: none)
+#   SHIM_LOCAL_DIGESTS        RepoDigests of the local image, one per line
+#   SHIM_HAS_IMAGECHECK=0     the server has no image-check subcommand: it starts
+#                             serving until timeout stops it
+#   SHIM_TIMEOUT_EXIT         what timeout then exits with (default 124)
+#   SHIM_IMAGECHECK_EXIT      exit code of aitk-server image-check
+set -u
+
+line=
+for a in "$@"; do line+="${line:+ | }${a//$'\n'/\n}"; done
+printf '%s\n' "$line" >>"$SHIM_LOG"
+
+has() { local want=$1 a; shift; for a in "$@"; do [[ "$a" == "$want" ]] && return 0; done; return 1; }
+
+case "${1:-}" in
+  image)
+    [[ "${2:-}" == inspect ]] || exit 1
+    if [[ "${3:-}" != -f ]]; then
+      case "${3:-}" in
+        aitoolkit-upstream:*) [[ "${SHIM_BASE_EXISTS:-0}" == 1 ]] ;;
+        *) [[ "${SHIM_IMAGE_EXISTS:-1}" == 1 ]] ;;
+      esac
+      exit
+    fi
+    case "$4" in
+      *Config.Env*) printf '%s\n' "${SHIM_ENV-PATH=/usr/local/bin:/usr/bin
+NVIDIA_REQUIRE_CUDA=cuda>=13.0 brand=unknown,driver>=535,driver<536 brand=tesla,driver>=570,driver<571
+NVIDIA_VISIBLE_DEVICES=all}" ;;
+      *.Size*) echo "${SHIM_SIZE:-13689223168}" ;;
+      *RepoDigests*) [[ -n "${SHIM_LOCAL_DIGESTS:-}" ]] && printf '%s\n' "$SHIM_LOCAL_DIGESTS" ;;
+      *) exit 1 ;;
+    esac
+    ;;
+  build)
+    # The base build reads its context from stdin.
+    [[ "${!#}" == - ]] && cat >/dev/null
+    exit 0
+    ;;
+  run)
+    if has python3 "$@"; then
+      printf '%s\n' "${SHIM_PROBE-torch=2.13.0+cu130
+cuda=13.0
+sm=75,80,86,90,100,120
+ptx=
+flash_attn=2.8.3+cu130torch2.13}"
+    elif has image-check "$@"; then
+      [[ "${SHIM_HAS_IMAGECHECK:-1}" == 1 ]] || exit "${SHIM_TIMEOUT_EXIT:-124}"
+      exit "${SHIM_IMAGECHECK_EXIT:-0}"
+    fi
+    ;;
+  pull) exit "${SHIM_PULL_EXIT:-0}" ;;
+  buildx)
+    [[ "${SHIM_BUILDX:-1}" == 1 ]] || exit 1
+    [[ "${2:-}" == version ]] && exit 0
+    [[ -n "${SHIM_REMOTE_DIGEST:-}" ]] || exit 1
+    echo "\"$SHIM_REMOTE_DIGEST\""
+    ;;
+  push) exit 0 ;;
+  *) exit 1 ;;
+esac
