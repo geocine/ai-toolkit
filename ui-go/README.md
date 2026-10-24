@@ -86,7 +86,9 @@ media routes), `MODELS_PATH`, `AI_TOOLKIT_DB_JOURNAL_MODE`, plus
 
 Production is one image configured by env vars (no compose): see
 [docs/deploy.md](docs/deploy.md) for the variables, provider setup and how a
-job continues on another provider.
+job continues on another provider. To rent a GPU server on RunPod, Vast.ai
+or QuickPod from the studio, or set one up by hand, see
+[docs/providers.md](docs/providers.md).
 
 ```bash
 ui-go/scripts/build_and_push.sh          # base: upstream's docker/Dockerfile at the merge-base; then the Go layer

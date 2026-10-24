@@ -10,7 +10,9 @@ training.
 ## What it does
 
 - **Servers**: add as many as you like (base URL + token, kept in this
-  browser's localStorage), test them, switch between them.
+  browser's localStorage), test them, switch between them. Create a GPU
+  server on RunPod, Vast.ai or QuickPod through the active server, or follow
+  the step-by-step template guide (`ui-go/docs/providers.md`).
 - **Presets**: a built-in *Krea 2 · character LoKr* preset made from
   `krea_lokr.yml` / `krea_lokr_male.yml` and your Krea notes, with female /
   male / man prompt sets and VLM caption prompt templates. Import any
@@ -66,3 +68,17 @@ docker run ... -e AITK_CORS_ORIGINS=https://studio.example.com ghcr.io/geocine/a
 
 Images are loaded from the server's public media routes (`/api/img/...`, no
 token needed, like upstream's UI).
+
+## Try GPU servers without credits
+
+Run the server with simulated providers, then the dev studio:
+
+```bash
+cd ui-go
+AITK_PROVISION_SIMULATE=1 AI_TOOLKIT_AUTH=dev go run .
+cd studio && npm run dev     # in a second terminal
+```
+
+Add the server `/aitk` with token `dev`, then *Create a GPU server* with any
+key. Nothing calls RunPod, Vast.ai or QuickPod; the keys that fail on purpose
+(`sim_full`, `sim_broke`, ...) are listed in `ui-go/docs/providers.md`.
