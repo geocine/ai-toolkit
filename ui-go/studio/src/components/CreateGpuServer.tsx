@@ -5,22 +5,31 @@ import type { NotifyConfig } from '../lib/lifecycle';
 import { perHour, providerNames } from '../lib/machines';
 import { launch, offers as listOffers, providers, removeKey, setKey, templates as listTemplates, testKey } from '../lib/provision';
 import type { Machine, Offer, OfferQuery, Provider, ProviderKind, ProviderTemplate, WhenDone } from '../lib/provisionTypes';
+import { archName, checkImage, DEFAULT_IMAGE, gb, imageTag, minutes, modelArchs, recommendImage, type ImageCheckRequest, type ImageRecommendRequest } from '../lib/serverImage';
+import type { CheckAction, ImageCheck, ImageCheckItem, ImageRecommendation, ImageRequirements } from '../lib/serverImageTypes';
 import { Dialog } from './Dialog';
+import { FitBadge, VramBadge } from './FitBadge';
+import { ImageDialog } from './ImageDialog';
+import { CheckList, diskBreakdown, diskParts, ImageRow, imageName } from './ImageRow';
 import { Callout, Empty, ErrorNote, useLoad } from './ui';
 
-const DEFAULT_IMAGE = 'ghcr.io/geocine/aitoolkit-go:latest';
-const OUR_REPO = 'ghcr.io/geocine/aitoolkit-go';
 const vramSteps = [0, 16, 24, 48, 80];
 const countSteps = [1, 2, 4, 8];
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-/** The repository of an image reference, without @digest or :tag (a registry port stays). */
-export function imageRepo(ref: string): string {
-  const r = ref.trim().split('@')[0];
-  const colon = r.lastIndexOf(':');
-  return colon > r.lastIndexOf('/') ? r.slice(0, colon) : r;
+/** "RTX 30-series or newer" from the image's SASS targets (sm_75 is hidden from offers by default). */
+function gpuFloor(sm: number[]): string {
+  const min = Math.min(...sm.filter(x => x > 75));
+  if (!Number.isFinite(min)) return '';
+  if (min <= 86) return 'RTX 30-series or newer';
+  if (min <= 89) return 'RTX 40-series or newer';
+  if (min >= 120) return 'RTX 50-series or newer';
+  return `sm_${min} or newer`;
 }
+
+/** A request's answer, kept with the key it was asked for, so a stale one never shows for new inputs. */
+type Answer<T> = { key: string; data: T | null; error: unknown };
 
 /** The first "$N.NN/h" in a message, as a number. */
 function priceIn(msg: string): number | null {
@@ -78,7 +87,7 @@ export function parseEnv(text: string, p: Provider | null, server: ServerEnv = {
   return { env, error: null };
 }
 
-type LaunchProblem = { text: string; link?: string };
+type LaunchProblem = { text: string; link?: string; checks?: ImageCheckItem[] };
 
 /**
  * Create a GPU server (PLAN §11): through the active server, pick a provider,
@@ -86,12 +95,15 @@ type LaunchProblem = { text: string; link?: string };
  */
 export function CreateGpuServer({
   controller,
+  model,
   onClose,
   onCreated,
   onGuide,
   onAddServer,
 }: {
   controller: Server | null;
+  /** The model arch of the run the user came from, for "What will you train?". */
+  model?: string;
   onClose: () => void;
   onCreated: (m: Machine, controller: Server) => void;
   onGuide: (kind?: ProviderKind) => void;
@@ -117,16 +129,18 @@ export function CreateGpuServer({
         </Empty>
       </Dialog>
     );
-  return <CreateForm controller={controller} onClose={onClose} onCreated={onCreated} onGuide={onGuide} />;
+  return <CreateForm controller={controller} model={model} onClose={onClose} onCreated={onCreated} onGuide={onGuide} />;
 }
 
 function CreateForm({
   controller: s,
+  model,
   onClose,
   onCreated,
   onGuide,
 }: {
   controller: Server;
+  model?: string;
   onClose: () => void;
   onCreated: (m: Machine, controller: Server) => void;
   onGuide: (kind?: ProviderKind) => void;
@@ -207,12 +221,57 @@ function CreateForm({
   const [count, setCount] = useState(1);
   const [cloud, setCloud] = useState<'secure' | 'community'>('secure');
   const [disk, setDisk] = useState('100');
+  const [diskTouched, setDiskTouched] = useState(false); // until then the disk follows what the image and model need
+  const [arch, setArch] = useState(model && modelArchs.some(m => m.arch === model) ? model : '');
+  const [fast, setFast] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   const [offerList, setOfferList] = useState<Offer[] | null>(null);
   const [offerError, setOfferError] = useState<unknown>(null);
   const [offersLoading, setOffersLoading] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [offerId, setOfferId] = useState<string | null>(null);
   const diskGb = Number(disk) || 0;
+  const diskOk = diskGb >= 20 && diskGb <= 2000;
+
+  // QuickPod templates (loaded below) decide the image there
+  const [tpls, setTpls] = useState<ProviderTemplate[] | null>(null);
+  const [tplError, setTplError] = useState<unknown>(null);
+  const [templateId, setTemplateId] = useState('');
+  const tpl = tpls?.find(t => t.id === templateId) ?? null;
+  const fromTemplate = !!caps?.template_required;
+  // the image the user picked in the Change dialog; null follows images.recommend
+  const [picked, setPicked] = useState<string | null>(null);
+
+  // The offers are judged against the image the Image row settles on: the
+  // template's, the picked one, or what images.recommend picks with no host
+  // (this server's build when it is published, else latest). The row's own
+  // recommend follows the chosen offer, so it cannot feed the offers query.
+  const [baseRec, setBaseRec] = useState<Answer<ImageRecommendation> | null>(null);
+  const wantBase = !!p && configured && !fromTemplate;
+  useEffect(() => {
+    if (!wantBase || baseRec?.key === s.id) return;
+    let live = true;
+    const key = s.id;
+    // a slow registry never holds the offers for long: they then use the server's default
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), 8000);
+    recommendImage(s, {}, ac.signal)
+      .then(
+        data => live && setBaseRec({ key, data, error: null }),
+        error => live && setBaseRec({ key, data: null, error }),
+      )
+      .finally(() => clearTimeout(t));
+    return () => {
+      live = false;
+      clearTimeout(t);
+      ac.abort();
+    };
+  }, [s.id, wantBase]); // eslint-disable-line react-hooks/exhaustive-deps
+  const baseNow = baseRec?.key === s.id ? baseRec : null;
+  // a failed or empty answer leaves image unset: the server then judges its default
+  const offersImage = fromTemplate ? tpl?.image : (picked ?? baseNow?.data?.choice?.image);
+  const offersSettled = fromTemplate ? tpls != null || tplError != null : picked != null || !!baseNow;
+
   const q: OfferQuery = {
     gpu: gpu.trim() || undefined,
     min_vram_gb: minVram || undefined,
@@ -220,6 +279,10 @@ function CreateForm({
     cloud: caps?.cloud_choice ? cloud : undefined,
     disk_gb: diskGb >= 20 ? diskGb : undefined,
     limit: 50,
+    image: offersImage || undefined,
+    model: arch || undefined,
+    fast: fast && caps?.reports_inet ? true : undefined,
+    show_all: showAll || undefined,
   };
   const qKey = JSON.stringify(q);
   const seq = useRef(0);
@@ -228,6 +291,7 @@ function CreateForm({
       setOfferList(null);
       return;
     }
+    if (!offersSettled) return; // asked once the image is known, not for the default first
     const n = ++seq.current;
     setOffersLoading(true);
     const t = setTimeout(async () => {
@@ -243,7 +307,7 @@ function CreateForm({
       }
     }, 400);
     return () => clearTimeout(t);
-  }, [s.id, p?.kind, configured, qKey, refresh]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [s.id, p?.kind, configured, qKey, offersSettled, refresh]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     setOfferId(null);
     setOfferList(null); // another provider's offers never show under this one
@@ -254,9 +318,6 @@ function CreateForm({
   const offerPrice = !offer ? 0 : requote?.id === offer.id && requote.was === offer.price_per_hour ? requote.price : offer.price_per_hour;
 
   // QuickPod templates
-  const [tpls, setTpls] = useState<ProviderTemplate[] | null>(null);
-  const [tplError, setTplError] = useState<unknown>(null);
-  const [templateId, setTemplateId] = useState('');
   useEffect(() => {
     setTpls(null);
     setTplError(null);
@@ -269,11 +330,92 @@ function CreateForm({
       setTplError,
     );
   }, [s.id, p?.kind, configured]); // eslint-disable-line react-hooks/exhaustive-deps
-  const tpl = tpls?.find(t => t.id === templateId) ?? null;
+
+  // image: images.recommend picks it for the offer (QuickPod: checks the
+  // template's), then images.check judges it on the offer's host
+  const modelRef = arch ? { arch } : undefined;
+  const offerRef = offer && p ? { provider: p.kind, offer_id: offer.id } : undefined;
+  // the disk is left out: it follows the check's need, and the check judges it
+  const recReq: ImageRecommendRequest = fromTemplate ? { template_id: templateId || undefined, offer: offerRef, model: modelRef } : { offer: offerRef, model: modelRef };
+  const recKey = JSON.stringify([s.id, recReq]);
+  const [rec, setRec] = useState<Answer<ImageRecommendation> | null>(null);
+  const recSeq = useRef(0);
+  const wantRec = !!p && configured && (!fromTemplate || !!templateId);
+  useEffect(() => {
+    if (!wantRec) return;
+    const n = ++recSeq.current;
+    const t = setTimeout(() => {
+      recommendImage(s, recReq).then(
+        data => n === recSeq.current && setRec({ key: recKey, data, error: null }),
+        error => n === recSeq.current && setRec({ key: recKey, data: null, error }),
+      );
+    }, 300);
+    return () => clearTimeout(t);
+  }, [recKey, wantRec]); // eslint-disable-line react-hooks/exhaustive-deps
+  const recNow = rec?.key === recKey ? rec : null;
+  const image = fromTemplate ? (tpl?.image ?? '') : (picked ?? rec?.data?.choice?.image ?? DEFAULT_IMAGE);
+  // the recommended image is checked once it is known, not the default first
+  const imageSettled = fromTemplate || picked != null || !!recNow;
+
+  const checkReq: ImageCheckRequest = { image, offer: offerRef, model: modelRef, disk_gb: diskOk ? diskGb : undefined };
+  const [recheck, setRecheck] = useState(0); // bumped when a launch was refused for the image
+  const checkKey = JSON.stringify([s.id, checkReq, recheck]);
+  const [check, setCheck] = useState<Answer<ImageCheck> | null>(null);
+  const checkSeq = useRef(0);
+  const live = !!p && configured && !!image.trim();
+  const wantCheck = live && imageSettled;
+  useEffect(() => {
+    if (!wantCheck) return;
+    const n = ++checkSeq.current;
+    const t = setTimeout(() => {
+      checkImage(s, checkReq).then(
+        data => n === checkSeq.current && setCheck({ key: checkKey, data, error: null }),
+        error => n === checkSeq.current && setCheck({ key: checkKey, data: null, error }),
+      );
+    }, 300);
+    return () => clearTimeout(t);
+  }, [checkKey, wantCheck]); // eslint-disable-line react-hooks/exhaustive-deps
+  const checkNow = check?.key === checkKey ? check : null;
+  const checking = live && !checkNow;
+  // while a check is in flight the last answer stays on screen, marked as checking
+  const shown = checkNow ?? check;
+  const blocks = checkNow?.data?.checks.filter(c => c.level === 'block') ?? [];
+  // the server re-checks every launch, so a slow check stops holding Create after 3 s
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    setSlow(false);
+    if (!checking) return;
+    const t = setTimeout(() => setSlow(true), 3000);
+    return () => clearTimeout(t);
+  }, [checking, checkKey]);
+  const need = shown?.data?.need ?? null;
+  useEffect(() => {
+    if (diskTouched || !need) return;
+    const want = Math.ceil(Math.min(need.disk_gb, offer?.max_disk_gb ?? Infinity));
+    if (want >= 20 && want <= 2000) setDisk(String(want));
+  }, [need?.disk_gb, offer?.max_disk_gb, diskTouched]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [changing, setChanging] = useState(false);
+  const offersAnchor = useRef<HTMLDivElement>(null);
+  // QuickPod: the template's tag note (edit_template), which images.check does not give;
+  // otherwise the resolver's notes on the recommended build
+  const recNotes = (recNow?.data?.checks ?? []).filter(c =>
+    fromTemplate ? c.action?.kind === 'edit_template' : picked == null && (c.code === 'image_same_unpublished' || c.code === 'image_skew'),
+  );
+  // this server's build won't run on the host, so the choice is a newer one:
+  // the resolver says so only in the first why line, and it is never silent
+  const recChoice = recNow?.data?.choice;
+  if (!fromTemplate && picked == null && recChoice?.channel === 'latest' && recChoice.why[0]?.startsWith('Newer build than this server'))
+    recNotes.push({ level: 'info', code: 'image_newer_build', message: `${recChoice.why[0]}.` });
+  // QuickPod runs only the template's image, so a "use this image" fix means editing the template
+  const forTemplate = (checks: ImageCheckItem[]): ImageCheckItem[] =>
+    !fromTemplate
+      ? checks
+      : checks.map(c =>
+          c.action?.kind === 'use_image' ? { ...c, action: { kind: 'edit_template', value: typeof c.action.value === 'string' ? imageTag(c.action.value) || undefined : undefined } } : c,
+        );
 
   // settings
   const [name, setName] = useState('');
-  const [image, setImage] = useState(DEFAULT_IMAGE);
   const [remote, setRemote] = useState('');
   const [copyNotify, setCopyNotify] = useState(false);
   const [copyHf, setCopyHf] = useState(false);
@@ -319,7 +461,38 @@ function CreateForm({
   const label = p?.label ?? '';
   const defaultName = offer ? `${offer.gpu} on ${label}` : '';
   const price = offer ? perHour(offerPrice) : '';
-  const ready = !!p && configured && !!offer && !diskError && !envParsed.error && (!caps?.template_required || !!templateId) && !!image.trim();
+  const imageHolds = blocks.length > 0 || (checking && !slow);
+  const ready = !!p && configured && !!offer && !diskError && !envParsed.error && (!caps?.template_required || !!templateId) && !!image.trim() && !imageHolds;
+
+  const onAction = (a: CheckAction) => {
+    switch (a.kind) {
+      case 'filter_hosts':
+        setShowAll(false);
+        if (a.value === 'fast') setFast(true);
+        break;
+      case 'show_all':
+        setShowAll(true);
+        break;
+      case 'set_disk':
+        if (Number(a.value) > 0) {
+          setDisk(String(a.value));
+          setDiskTouched(true);
+        }
+        break;
+      case 'use_image':
+        if (fromTemplate) {
+          if (p?.console_url) window.open(p.console_url, '_blank', 'noreferrer');
+        } else if (typeof a.value === 'string' && a.value) setPicked(a.value);
+        break;
+      case 'pick_gpu':
+        setOfferId(null);
+        offersAnchor.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        break;
+      case 'edit_template':
+        if (p?.console_url) window.open(p.console_url, '_blank', 'noreferrer');
+        break;
+    }
+  };
 
   const sending = useRef(false);
   const create = async () => {
@@ -372,6 +545,10 @@ function CreateForm({
         // the key step replaces the form, so the reason shows there
         setKeyError(new Error(`${label} refused the key: ${msg}`));
         setChangingKey(true);
+      } else if (code === 'image_blocked') {
+        const d = e instanceof ApiError ? (e.details as { checks?: ImageCheckItem[] } | undefined) : undefined;
+        setProblem({ text: msg, checks: Array.isArray(d?.checks) ? d.checks : undefined });
+        setRecheck(n => n + 1); // judge again: the server saw something this dialog did not
       } else if (code === 'rate_limited') {
         const after = e instanceof ApiError ? e.retryAfter : null;
         setProblem({ text: after ? `${label} is busy. Try again in ${after} s.` : msg });
@@ -404,12 +581,23 @@ function CreateForm({
                 {offer.gpu}
                 {offer.gpu_count > 1 ? ` × ${offer.gpu_count}` : ''} on {label} · about {price} while running
                 {offer.stopped_price_per_hour != null ? `, ${perHour(offer.stopped_price_per_hour)} stopped` : ''}
+                {shown?.data?.image && (
+                  <span className="create-summary-image">
+                    Image: {imageName(shown.data.image, image)}
+                    {shown.data.image.download_bytes > 0 ? ` · ${gb(shown.data.image.download_bytes)}` : ''}
+                    {shown.data.pull ? `, about ${minutes(shown.data.pull.image_min)} to download` : ''}
+                  </span>
+                )}
+                <span className="create-summary-disk">
+                  Disk: {diskGb} GB
+                  {need ? (diskGb >= need.disk_gb ? ` (${diskParts(need, arch ? archName(arch) : undefined)})` : ` (needs ${need.disk_gb} GB)`) : ''}
+                </span>
               </p>
             )}
             <button className="btn btn-ghost" onClick={onClose}>
               Cancel
             </button>
-            <button className="btn btn-primary" onClick={create} disabled={!ready || busy}>
+            <button className="btn btn-primary" onClick={create} disabled={!ready || busy} title={blocks.length > 0 ? 'Fix what blocks the launch first' : undefined}>
               {busy ? 'Creating…' : offer ? `Create for ${price}` : 'Create'}
             </button>
           </>
@@ -478,6 +666,17 @@ function CreateForm({
               <div className="offer-filters">
                 <input className="offer-search" value={gpu} onChange={e => setGpu(e.target.value)} placeholder="Search, e.g. 4090" aria-label="Search GPUs" />
                 <label className="field-inline">
+                  <span>What will you train?</span>
+                  <select value={arch} onChange={e => setArch(e.target.value)}>
+                    <option value="">Not sure yet</option>
+                    {modelArchs.map(m => (
+                      <option key={m.arch} value={m.arch}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field-inline">
                   <span>Min VRAM</span>
                   <select value={minVram} onChange={e => setMinVram(Number(e.target.value))}>
                     {vramSteps.map(v => (
@@ -510,30 +709,77 @@ function CreateForm({
                 )}
                 <label className="field-inline">
                   <span>Disk (GB)</span>
-                  <input className="offer-disk" type="number" min={20} max={2000} inputMode="numeric" value={disk} onChange={e => setDisk(e.target.value)} aria-invalid={!!diskError} />
+                  <input
+                    className="offer-disk"
+                    type="number"
+                    min={20}
+                    max={2000}
+                    inputMode="numeric"
+                    value={disk}
+                    onChange={e => {
+                      setDisk(e.target.value);
+                      setDiskTouched(true);
+                    }}
+                    aria-invalid={!!diskError}
+                  />
                 </label>
+                {caps?.reports_inet && (
+                  <label className="check offer-fast">
+                    <input type="checkbox" checked={fast} onChange={e => setFast(e.target.checked)} />
+                    Fast hosts only (500 Mbps+)
+                  </label>
+                )}
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRefresh(r => r + 1)} disabled={offersLoading}>
                   <RefreshCw />
                   Refresh
                 </button>
               </div>
-              {diskError && <small className="field-error">{diskError}</small>}
+              {diskError ? (
+                <small className="field-error">{diskError}</small>
+              ) : (
+                need && <small>Needs {diskBreakdown(need, arch ? archName(arch) : undefined)}.</small>
+              )}
             </div>
-            <OfferList kind={p.kind} offers={offerList} loading={offersLoading && !offerList} error={offerError} selected={offerId} onSelect={setOfferId} />
+            <div ref={offersAnchor} className="offer-block">
+              <OfferHeader
+                offers={offerList}
+                showAll={showAll}
+                onShowAll={setShowAll}
+                name={shown?.data?.image?.go_server ? imageName(shown.data.image, image).replace(/ · .*$/, '') : ''}
+                requires={shown?.data?.image?.requires ?? null}
+              />
+              <OfferList
+                kind={p.kind}
+                offers={offerList}
+                loading={offersLoading && !offerList}
+                error={offerError}
+                selected={offerId}
+                onSelect={setOfferId}
+                model={arch ? archName(arch) : ''}
+              />
+            </div>
 
             {caps?.template_required && (
               <TemplateStep tpls={tpls} error={tplError} templateId={templateId} setTemplateId={setTemplateId} tpl={tpl} onGuide={() => onGuide(p.kind)} />
             )}
 
             <div className="form-grid create-settings">
+              {(!fromTemplate || tpl) && (
+                <ImageRow
+                  label={fromTemplate && tpl ? `Image (from template ${tpl.name})` : 'Image'}
+                  image={image}
+                  check={shown?.data ? { ...shown.data, checks: forTemplate(shown.data.checks) } : null}
+                  checking={checking}
+                  error={shown?.error ?? null}
+                  hasHost={!!offer}
+                  extra={recNotes}
+                  onChange={fromTemplate ? undefined : () => setChanging(true)}
+                  onAction={onAction}
+                />
+              )}
               <label className="field">
                 <span>Name</span>
                 <input value={name} onChange={e => setName(e.target.value)} placeholder={defaultName || 'Named after the GPU'} maxLength={64} />
-              </label>
-              <label className="field">
-                <span>Image</span>
-                <input className="mono" value={image} onChange={e => setImage(e.target.value)} spellCheck={false} autoCapitalize="off" />
-                {image.trim() && imageRepo(image) !== OUR_REPO && <small className="warn">Not the aitk image. The server must answer /v1 on port 8675 with AI_TOOLKIT_AUTH.</small>}
               </label>
               <label className="field field-wide">
                 <span>Keep results on</span>
@@ -617,18 +863,35 @@ function CreateForm({
               </details>
             </div>
 
-            {problem && (
-              <Callout kind="danger">
-                {problem.text}
-                {problem.link && (
-                  <>
-                    {' '}
-                    <a href={problem.link} target="_blank" rel="noreferrer">
-                      Open the {label} console
-                    </a>
-                  </>
-                )}
-              </Callout>
+            {changing && (
+              <ImageDialog
+                server={s}
+                rec={rec?.data ?? null}
+                recError={rec?.error ?? null}
+                current={image}
+                auto={picked == null}
+                context={{ offer: offerRef, model: modelRef, disk_gb: diskOk ? diskGb : undefined }}
+                onPick={setPicked}
+                onClose={() => setChanging(false)}
+              />
+            )}
+
+            {problem?.checks && problem.checks.length > 0 ? (
+              <CheckList checks={forTemplate(problem.checks)} onAction={onAction} />
+            ) : (
+              problem && (
+                <Callout kind="danger">
+                  {problem.text}
+                  {problem.link && (
+                    <>
+                      {' '}
+                      <a href={problem.link} target="_blank" rel="noreferrer">
+                        Open the {label} console
+                      </a>
+                    </>
+                  )}
+                </Callout>
+              )
             )}
           </>
         )}
@@ -726,6 +989,53 @@ function KeyStep({
 
 const availability: Record<Offer['availability'], string> = { high: 'High availability', medium: 'Some availability', low: 'Low availability', available: 'Available' };
 
+/**
+ * The line above the offers (IMAGE-PLAN §6.2): which hosts are left out for
+ * the image, and the switch to show them marked instead.
+ */
+function OfferHeader({
+  offers,
+  showAll,
+  onShowAll,
+  name,
+  requires,
+}: {
+  offers: Offer[] | null;
+  showAll: boolean;
+  onShowAll: (v: boolean) => void;
+  name: string;
+  requires: ImageRequirements | null;
+}) {
+  if (!offers) return null;
+  // the offers were not judged (an image that could not be read): every host shows
+  if (offers.length > 0 && offers.every(o => !o.fit)) {
+    return showAll ? null : <p className="offer-head">Couldn't check which hosts run this image, so every host is shown.</p>;
+  }
+  if (showAll)
+    return (
+      <p className="offer-head">
+        <span>Showing every host. Hosts that can't run the image are marked.</span>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => onShowAll(false)}>
+          Show only hosts that fit
+        </button>
+      </p>
+    );
+  const terms = [requires?.cuda_min ? `CUDA ${requires.cuda_min}+` : '', requires ? gpuFloor(requires.sm ?? []) : ''].filter(Boolean);
+  return (
+    <p className="offer-head">
+      <span>
+        Only hosts that can run {name || 'the image'}
+        {terms.length > 0 && ` (${terms.join(', ')})`} are shown.
+      </span>
+      <button type="button" className="btn btn-ghost btn-sm" onClick={() => onShowAll(true)}>
+        Show all hosts
+      </button>
+    </p>
+  );
+}
+
+const vramLine: Record<string, (m: string) => string> = { fits: m => `fits ${m}`, tight: m => `${m} fits only with a recipe`, no: m => `${m} doesn't fit` };
+
 function OfferList({
   kind,
   offers,
@@ -733,6 +1043,7 @@ function OfferList({
   error,
   selected,
   onSelect,
+  model,
 }: {
   kind: ProviderKind;
   offers: Offer[] | null;
@@ -740,6 +1051,8 @@ function OfferList({
   error: unknown;
   selected: string | null;
   onSelect: (id: string) => void;
+  /** The display name of the model being trained, '' when not chosen. */
+  model: string;
 }) {
   if (error) return <ErrorNote error={error} />;
   if (loading || !offers)
@@ -755,25 +1068,43 @@ function OfferList({
     <div className="offer-list" role="radiogroup" aria-label="Offers">
       {offers.map(o => {
         const on = o.id === selected;
+        const fit = o.fit;
+        const blocked = fit?.level === 'block';
         const facts = [
-          `${o.vram_gb} GB`,
+          fit?.pull_min != null ? `≈ ${minutes(fit.pull_min)} to download` : '',
+          model && fit && vramLine[fit.vram] ? vramLine[fit.vram](model) : '',
           o.location || (kind === 'runpod' ? `${providerNames.runpod} picks the data center` : ''),
           o.reliability != null ? `${Math.round(o.reliability * 100)}% reliable` : '',
           availability[o.availability] ?? '',
           o.https ? 'https' : 'plain http',
         ].filter(Boolean);
         return (
-          <button key={o.id} type="button" role="radio" aria-checked={on} className={on ? 'offer is-selected' : 'offer'} onClick={() => onSelect(o.id)}>
+          <button
+            key={o.id}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            aria-disabled={blocked || undefined}
+            disabled={blocked}
+            title={blocked ? fit?.summary : undefined}
+            className={on ? 'offer is-selected' : blocked ? 'offer is-blocked' : 'offer'}
+            onClick={() => !blocked && onSelect(o.id)}
+          >
             <span className="offer-main">
               <span className="offer-gpu">
                 {o.gpu}
                 {o.gpu_count > 1 ? ` × ${o.gpu_count}` : ''}
+                <VramBadge gb={o.vram_gb} verdict={fit?.vram} model={model} />
               </span>
               <span className="offer-facts">{facts.join(' · ')}</span>
+              {blocked && fit?.summary && <span className="offer-why">{fit.summary}</span>}
             </span>
             <span className="offer-price">
               <span className="offer-rate">{perHour(o.price_per_hour)}</span>
               {o.stopped_price_per_hour != null && <span className="offer-stopped">{perHour(o.stopped_price_per_hour)} stopped</span>}
+            </span>
+            <span className="offer-fit">
+              <FitBadge fit={fit} />
             </span>
           </button>
         );
