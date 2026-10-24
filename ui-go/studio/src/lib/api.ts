@@ -1,19 +1,31 @@
 // Client for one headless ai-toolkit server (/v1, docs/headless.md).
+import type { ProviderKind } from './provisionTypes';
 
 export interface Server {
   id: string;
   name: string;
   base: string; // "https://pod-8675.proxy.runpod.net", or "/aitk" through the dev proxy
   token: string;
+  /** Set when the studio linked a GPU server it created (lib/machines.ts). */
+  machine?: {
+    id: string;
+    control: string; // Server.id of the controller that created it
+    provider: ProviderKind;
+    via: 'direct' | 'relay';
+  };
 }
 
 export class ApiError extends Error {
+  /** Seconds from Retry-After on a 429, when the browser lets us read it. */
+  retryAfter: number | null = null;
+  /** error.details from the body, when the server sent any. */
+  details: unknown = undefined;
   constructor(public status: number, public code: string, message: string) {
     super(message);
   }
 }
 
-const trimBase = (b: string) => b.replace(/\/+$/, '');
+export const trimBase = (b: string) => b.replace(/\/+$/, '');
 
 export function url(s: Server, path: string): string {
   return trimBase(s.base) + path;
@@ -28,26 +40,35 @@ function headers(s: Server, extra?: HeadersInit): Headers {
 async function fail(res: Response): Promise<never> {
   let code = 'http_' + res.status;
   let message = res.statusText || `HTTP ${res.status}`;
+  let details: unknown;
   try {
     const body = await res.json();
     if (body?.error?.code) code = body.error.code;
+    details = body?.error?.details;
     if (body?.error?.message) message = body.error.message;
     else if (typeof body?.error === 'string') message = body.error;
   } catch {
     /* not JSON */
   }
-  throw new ApiError(res.status, code, message);
+  const err = new ApiError(res.status, code, message);
+  err.details = details;
+  const after = Number(res.headers.get('Retry-After'));
+  if (after > 0) err.retryAfter = after;
+  throw err;
 }
 
-export async function call<T>(s: Server, method: string, path: string, body?: unknown): Promise<T> {
+/** signal aborts the request, e.g. AbortSignal.timeout for a poll that must not hang. */
+export async function call<T>(s: Server, method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   let res: Response;
   try {
     res = await fetch(url(s, path), {
       method,
       headers: headers(s, body === undefined ? undefined : { 'Content-Type': 'application/json' }),
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal,
     });
   } catch (e) {
+    if (signal?.aborted) throw new ApiError(0, 'network', `${s.base} did not answer in time.`);
     throw new ApiError(0, 'network', `cannot reach ${s.base} (${e instanceof Error ? e.message : e}). ` +
       'Check the URL, and that the server allows this origin (AITK_CORS_ORIGINS).');
   }
@@ -56,7 +77,7 @@ export async function call<T>(s: Server, method: string, path: string, body?: un
   return res.json() as Promise<T>;
 }
 
-export const get = <T,>(s: Server, path: string) => call<T>(s, 'GET', path);
+export const get = <T,>(s: Server, path: string, signal?: AbortSignal) => call<T>(s, 'GET', path, undefined, signal);
 export const post = <T,>(s: Server, path: string, body?: unknown) => call<T>(s, 'POST', path, body ?? {});
 export const del = <T,>(s: Server, path: string) => call<T>(s, 'DELETE', path);
 

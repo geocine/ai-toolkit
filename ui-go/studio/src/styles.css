@@ -3410,3 +3410,500 @@ a.runs-row:hover {
 .life-held .callout {
   margin: 0;
 }
+
+/* ---- provisioning: GPU servers, offers, setup guide ---- */
+
+.page-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.machine-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.server-name {
+  flex-wrap: wrap;
+}
+
+.machine-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+  font-size: 13px;
+}
+
+.machine-meta {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.machine-via,
+.machine-copied {
+  font-size: 13px;
+}
+
+.machine-copied {
+  align-self: center;
+}
+
+.machine-self {
+  margin-top: 8px;
+  color: var(--danger);
+}
+
+.machine-callout-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.machine-token {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.machine-token .field {
+  flex: 1 1 220px;
+}
+
+.machine-token .btn {
+  height: var(--ctl);
+}
+
+.menu {
+  position: relative;
+}
+
+.menu-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 40;
+  display: grid;
+  min-width: 200px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop);
+}
+
+.menu-pop > button,
+.menu-pop > a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--ease);
+}
+
+.menu-pop > button:hover,
+.menu-pop > a:hover,
+.menu-pop > button:focus-visible,
+.menu-pop > a:focus-visible {
+  outline: none;
+  background: var(--surface-2);
+}
+
+.menu-pop svg {
+  width: 14px;
+  height: 14px;
+  color: var(--text-2);
+}
+
+.menu-pop .is-danger,
+.menu-pop .is-danger svg {
+  color: var(--danger);
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  z-index: 90;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100vw - 32px);
+  padding: 10px 10px 10px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop);
+  font-size: 13px;
+}
+
+.toast strong {
+  font-weight: 600;
+}
+
+/* create dialog */
+
+.create .field > .seg {
+  margin-top: 2px;
+}
+
+.seg-badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.seg button.is-on .seg-badge {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.create-unverified,
+.create-env {
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.create-unverified > summary,
+.create-env > summary {
+  width: fit-content;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.create-unverified ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  list-style: disc;
+  display: grid;
+  gap: 4px;
+}
+
+.create-env[open] > summary {
+  margin-bottom: 6px;
+}
+
+.create-settings {
+  gap: 18px 24px;
+}
+
+.create-settings .callout {
+  margin: 8px 0 0;
+}
+
+.field small.warn {
+  color: var(--warn);
+}
+
+.create-summary {
+  flex: 1 1 100%;
+  color: var(--text-2);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.create-empty-actions {
+  justify-content: center;
+}
+
+.key-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 14px;
+}
+
+.key-line .badge {
+  margin-left: 4px;
+}
+
+.key-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.key-row input {
+  flex: 1 1 220px;
+}
+
+.offer-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.offer-filters .offer-search {
+  flex: 1 1 180px;
+  width: auto;
+}
+
+.offer-filters .field-inline {
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.offer-filters .field-inline select {
+  width: auto;
+}
+
+.offer-filters .offer-disk {
+  width: 88px;
+}
+
+.offer-list {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.offer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  min-height: 60px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--ease), background-color var(--ease);
+}
+
+.offer:hover {
+  border-color: var(--border-strong);
+}
+
+.offer.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.offer:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.offer.is-skeleton {
+  cursor: default;
+  background: var(--surface-2);
+  animation: pulse 1.8s ease-in-out infinite;
+}
+
+.offer-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.offer-gpu {
+  font-weight: 600;
+}
+
+.offer-facts {
+  font-size: 12px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.offer-price {
+  display: grid;
+  justify-items: end;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.offer-rate {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+.offer-stopped {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.offer-empty {
+  padding: 16px 0;
+  text-align: center;
+}
+
+/* ids, images and env in inputs */
+.create input.mono,
+.create textarea.mono,
+.guide input.mono {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+/* setup guide */
+
+.guide-inputs {
+  gap: 16px;
+}
+
+.guide-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.guide-row input {
+  flex: 1;
+}
+
+.guide-row .btn,
+.guide-block-head .btn,
+.guide-field .btn {
+  flex-shrink: 0;
+}
+
+.guide-fields {
+  display: grid;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.guide-field {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.6fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+}
+
+.guide-field + .guide-field {
+  border-top: 1px solid var(--border);
+}
+
+.guide-field dt {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.guide-field dd {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+}
+
+.guide-field dd .mono {
+  overflow-wrap: anywhere;
+}
+
+.guide-field small {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.guide-block {
+  display: grid;
+  gap: 8px;
+}
+
+.guide-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.env-block {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 767px) {
+  .page-actions {
+    justify-content: flex-start;
+  }
+
+  .dialog-backdrop:has(.dialog-form.create) {
+    padding: 0;
+  }
+
+  .dialog:has(.dialog-form.create) {
+    width: 100%;
+    max-height: 100dvh;
+    height: 100dvh;
+    border-radius: 0;
+    border: 0;
+  }
+
+  .offer-list {
+    max-height: none;
+  }
+
+  .offer-filters .field-inline {
+    flex: 1 1 140px;
+  }
+
+  .offer-filters .field-inline select,
+  .offer-filters .offer-disk {
+    flex: 1;
+    width: auto;
+  }
+
+  .guide-field {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .guide-field dt {
+    grid-column: 1 / -1;
+  }
+
+  .toast {
+    left: 16px;
+    right: 16px;
+    transform: none;
+    justify-content: space-between;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .offer.is-skeleton {
+    animation: none;
+  }
+}
