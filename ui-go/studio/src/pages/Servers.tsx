@@ -1,8 +1,13 @@
-import { Plus } from 'lucide-react';
-import { useState } from 'react';
+import { BookOpen, Cpu, Plus } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { CreateGpuServer } from '../components/CreateGpuServer';
+import { MachineRow } from '../components/MachineRow';
+import { ProviderGuide } from '../components/ProviderGuide';
 import { ErrorNote, PageHeader, Section } from '../components/ui';
 import { get, type Health, type Server, type SystemInfo } from '../lib/api';
 import { useStudio } from '../lib/context';
+import { autoLink, canAutoLink, providerNames, useMachines } from '../lib/machines';
+import type { ProviderKind } from '../lib/provisionTypes';
 import { uid } from '../lib/store';
 
 type Check = { ok: true; health: Health; system: SystemInfo } | { ok: false; error: unknown };
@@ -19,12 +24,18 @@ async function check(s: Server): Promise<Check> {
 
 // served by the server itself (/studio/): that server is the natural first one
 const sameOrigin = () => (window.location.pathname.startsWith('/studio') ? window.location.origin : '');
-const blank = (): Server => ({ id: uid(), name: '', base: sameOrigin(), token: '' });
+const blank = (token = ''): Server => ({ id: uid(), name: '', base: sameOrigin(), token });
+
+const scrollTo = (id: string) => setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
 
 export function Servers() {
   const { servers, setServers, active, setActiveId } = useStudio();
   const [draft, setDraft] = useState<Server | null>(servers.length ? null : blank());
   const [checks, setChecks] = useState<Record<string, Check | 'pending'>>({});
+  const [creating, setCreating] = useState(false);
+  const [guide, setGuide] = useState<{ kind?: ProviderKind } | null>(null);
+  const [toast, setToast] = useState<Server | null>(null);
+  const tracked = useMachines(servers);
 
   const test = async (s: Server) => {
     setChecks(c => ({ ...c, [s.id]: 'pending' }));
@@ -41,18 +52,52 @@ export function Servers() {
     test(s);
   };
 
+  // a ready machine becomes an ordinary server, once per browser
+  useEffect(() => {
+    for (const { machine, controller } of tracked.items) {
+      if (!canAutoLink(machine) || servers.some(x => x.machine?.id === machine.id)) continue;
+      autoLink(controller, machine).then(s => {
+        if (!s) return;
+        setServers(list => (list.some(x => x.machine?.id === machine.id) ? list : [...list, s]));
+        test(s);
+        setToast(s);
+      });
+    }
+  }, [tracked.items]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 10_000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  const openForm = (token = '') => {
+    setGuide(null);
+    setDraft(blank(token));
+    scrollTo('server-form');
+  };
+
   return (
     <>
       <PageHeader
         title="Servers"
-        description="Each server is the ai-toolkit Go image running somewhere: RunPod, Vast, your own box. The URL and token stay in this browser."
+        description="Each server is the ai-toolkit Go image running somewhere. Add one you already run, or create a GPU server on RunPod, Vast.ai or QuickPod."
         actions={
-          !draft && (
-            <button className="btn btn-primary" onClick={() => setDraft(blank())}>
-              <Plus />
-              Add server
+          <>
+            <button className="btn btn-ghost" onClick={() => setGuide({})}>
+              <BookOpen />
+              Set up a template yourself
             </button>
-          )
+            {!draft && (
+              <button className="btn" onClick={() => openForm()}>
+                <Plus />
+                Add server
+              </button>
+            )}
+            <button className="btn btn-primary" onClick={() => setCreating(true)}>
+              <Cpu />
+              Create a GPU server
+            </button>
+          </>
         }
       />
       {servers.length > 0 && (
@@ -60,14 +105,17 @@ export function Servers() {
           {servers.map(s => {
             const c = checks[s.id];
             const inUse = s.id === active?.id;
+            const via = s.machine?.via === 'relay' ? servers.find(x => x.id === s.machine?.control) : undefined;
             return (
               <li key={s.id} className="card server">
                 <div className="server-main">
                   <p className="server-name">
                     {s.name}
                     {inUse && <span className="badge tone-accent">In use</span>}
+                    {s.machine && <span className="badge tone-quiet">{providerNames[s.machine.provider] ?? s.machine.provider}</span>}
                   </p>
                   <p className="mono server-base">{s.base}</p>
+                  {s.machine?.via === 'relay' && <p className="quiet-note">Through the relay on {via?.name ?? 'the server that created it'}</p>}
                   {c === 'pending' && (
                     <p className="server-check conn conn-checking">
                       <span className="dot" aria-hidden />
@@ -111,9 +159,36 @@ export function Servers() {
         </ul>
       )}
 
+      {tracked.items.length > 0 && (
+        <Section title="GPU servers" description="Rented through your servers. They bill at the provider until you terminate them.">
+          <ul className="server-list">
+            {tracked.items.map(t => {
+              const linked = servers.find(x => x.machine?.id === t.machine.id) ?? null;
+              return (
+                <MachineRow
+                  key={t.machine.id}
+                  t={t}
+                  linked={linked}
+                  inUse={!!linked && linked.id === active?.id}
+                  onUse={() => linked && setActiveId(linked.id)}
+                  onChanged={m => tracked.put(t.controller.id, m)}
+                  onTerminated={m => {
+                    tracked.put(t.controller.id, m);
+                    // the server entry goes with the machine
+                    setServers(list => list.filter(x => x.machine?.id !== m.id));
+                  }}
+                  onForgotten={() => tracked.drop(t.machine.id)}
+                />
+              );
+            })}
+          </ul>
+        </Section>
+      )}
+
       {draft && (
         <Section title={servers.some(s => s.id === draft.id) ? 'Edit server' : 'New server'}>
           <form
+            id="server-form"
             className="card form-grid server-form"
             onSubmit={e => {
               e.preventDefault();
@@ -162,6 +237,42 @@ export function Servers() {
             </div>
           </form>
         </Section>
+      )}
+
+      {creating && (
+        <CreateGpuServer
+          controller={active}
+          onClose={() => setCreating(false)}
+          onCreated={(m, controller) => {
+            tracked.put(controller.id, m);
+            scrollTo(`machine-${m.id}`);
+          }}
+          onGuide={kind => {
+            setCreating(false);
+            setGuide({ kind });
+          }}
+          onAddServer={() => {
+            setCreating(false);
+            openForm();
+          }}
+        />
+      )}
+      {guide && <ProviderGuide controller={active} initial={guide.kind} onClose={() => setGuide(null)} onAddServer={openForm} />}
+      {toast && (
+        <div className="toast" role="status">
+          <span>
+            Added <strong>{toast.name}</strong> to your servers
+          </span>
+          <button
+            className="btn btn-sm"
+            onClick={() => {
+              setActiveId(toast.id);
+              setToast(null);
+            }}
+          >
+            Use it
+          </button>
+        </div>
       )}
     </>
   );
