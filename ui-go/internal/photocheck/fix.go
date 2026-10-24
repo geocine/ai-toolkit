@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/geocine/aitoolkit/internal/collation"
 	"github.com/geocine/aitoolkit/internal/state"
@@ -22,8 +23,9 @@ import (
 // the earlier ops left it. Without apply nothing is written: the changes
 // are worked out on a copy of the dataset in memory and the review is the
 // judge's view of that copy. Photos are never deleted: set_aside moves them
-// (with their caption and thumbs) into .set_aside/, and a format change
-// moves the original there too. Only remove_face_crops deletes, and only
+// (with their caption and thumbs) into .set_aside/, and a bake or a
+// convert moves the original there too, even when the new file keeps its
+// name. Only remove_face_crops deletes, and only
 // the crops face_crops wrote. Every change purges the photo's thumbs and
 // trainer caches. The handler checks for training and caption jobs first.
 
@@ -61,9 +63,13 @@ func ApplyFix(ctx context.Context, dir string, req FixRequest) (*Fix, error) {
 	if req.Apply {
 		unlock = lockDir(dir)
 	}
+	// deferred too, so a panic in an op never leaves the dataset locked
+	var once sync.Once
+	release := func() { once.Do(unlock) }
+	defer release()
 	s, err := loadWith(ctx, dir, settleWait, true, req.Apply)
 	if err != nil {
-		unlock()
+		release()
 		return nil, err
 	}
 	ops := make([]FixOp, len(req.Ops))
@@ -79,7 +85,7 @@ func ApplyFix(ctx context.Context, dir string, req FixRequest) (*Fix, error) {
 		dry := &fixer{ctx: ctx, s: s.clone(), opts: opts, changes: []Change{}, dirty: true}
 		for _, op := range ops {
 			if err := dry.run(op); err != nil {
-				unlock()
+				release()
 				return nil, err
 			}
 		}
@@ -92,15 +98,15 @@ func ApplyFix(ctx context.Context, dir string, req FixRequest) (*Fix, error) {
 			if serr := f.save(); serr != nil {
 				log.Printf("photocheck: fix %s: %v", dir, serr)
 			}
-			unlock()
+			release()
 			return nil, err
 		}
 	}
 	if err := f.save(); err != nil {
-		unlock()
+		release()
 		return nil, err
 	}
-	unlock()
+	release()
 	out := &Fix{Changes: f.changes, Applied: req.Apply}
 	if !req.Apply {
 		out.Review = f.review()
@@ -585,9 +591,10 @@ func (f *fixer) targets(op string, files []string, pick func(Item) bool) ([]Item
 }
 
 // rewrite replaces a photo with a new file written by write (from the
-// original's path to the new path). A new extension takes the same stem
-// when it is free (else _2, …, with the caption copied along) and moves the
-// original into .set_aside/. The new file is measured right away when
+// original's path to the new path). The original always moves into
+// .set_aside/, so restore can bring it back. A new extension takes the
+// same stem when it is free (else _2, …, with the caption copied along);
+// the same extension takes the original's name. The new file is measured right away when
 // applied; in a preview it borrows the old metrics with patch applied.
 func (f *fixer) rewrite(e *entry, ext, op, reason string, write func(src, dst string) error, patch func(*Metrics)) error {
 	from := e.rel
@@ -616,15 +623,23 @@ func (f *fixer) rewrite(e *entry, ext, op, reason string, write func(src, dst st
 	if f.apply {
 		f.settle(e)
 		if sameFile {
-			tmp := filepath.Join(filepath.Dir(e.abs), "."+filepath.Base(e.abs)+".orig")
-			if err := os.Rename(e.abs, tmp); err != nil {
+			// the new file is written beside the original (a dot file, so
+			// nothing lists it), the original goes into .set_aside/ like any
+			// other format change, then the new file takes its name
+			tmp := filepath.Join(filepath.Dir(e.abs), "."+filepath.Base(e.abs)+".new"+filepath.Ext(e.abs))
+			if err := write(e.abs, tmp); err != nil {
+				os.Remove(tmp)
 				return err
 			}
-			if err := write(tmp, abs); err != nil {
-				os.Rename(tmp, e.abs)
+			if err := f.moveAside(e, "the original of "+to, false); err != nil {
+				os.Remove(tmp)
 				return err
 			}
-			os.Remove(tmp)
+			f.changes = f.changes[:len(f.changes)-1] // the bake or convert change says it
+			if err := os.Rename(tmp, abs); err != nil {
+				os.Remove(tmp)
+				return err
+			}
 			PurgeDerived(f.s.dir, from)
 		} else {
 			if err := write(e.abs, abs); err != nil {
@@ -660,24 +675,18 @@ func (f *fixer) rewrite(e *entry, ext, op, reason string, write func(src, dst st
 			}
 			m = &c
 		}
-		if !sameFile {
-			if err := f.moveAside(e, "", false); err != nil {
-				return err
-			}
-			f.changes = f.changes[:len(f.changes)-1]
+		if err := f.moveAside(e, "", false); err != nil {
+			return err
 		}
+		f.changes = f.changes[:len(f.changes)-1]
 	}
-	if sameFile {
-		e.m, e.sha = m, sha
-	} else {
-		st, _ := os.Stat(abs)
-		n := &entry{rel: to, abs: abs, info: st, sha: sha, m: m}
-		if st == nil {
-			n.info = e.info
-		}
-		f.s.items = append(f.s.items, n)
-		sortEntries(f.s.items)
+	st, _ := os.Stat(abs)
+	n := &entry{rel: to, abs: abs, info: st, sha: sha, m: m}
+	if st == nil {
+		n.info = e.info
 	}
+	f.s.items = append(f.s.items, n)
+	sortEntries(f.s.items)
 	c := Change{File: from, Op: op, Reason: reason}
 	if to != from {
 		c.To = to

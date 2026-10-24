@@ -194,8 +194,14 @@ func convertFFmpeg(src, dst string) error {
 }
 
 // decodeUpright decodes a photo and turns it upright by its EXIF
-// orientation. It returns the EXIF the output keeps.
-func decodeUpright(src string) (image.Image, imgmeta.Exif, error) {
+// orientation. It returns the EXIF the output keeps. A decoder that panics
+// on a hostile file gives an error, as in Measure.
+func decodeUpright(src string) (img image.Image, ex imgmeta.Exif, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			img, ex, err = nil, imgmeta.Exif{}, fmt.Errorf("cannot decode %s: %v", filepath.Base(src), r)
+		}
+	}()
 	data, err := os.ReadFile(src)
 	if err != nil {
 		return nil, imgmeta.Exif{}, err
@@ -208,7 +214,7 @@ func decodeUpright(src string) (image.Image, imgmeta.Exif, error) {
 	if int64(cfg.Width)*int64(cfg.Height) > convertMaxPixels {
 		return nil, sn.Exif, fmt.Errorf("%s is %dx%d, too large to convert here", filepath.Base(src), cfg.Width, cfg.Height)
 	}
-	img, _, err := image.Decode(bytes.NewReader(data))
+	img, _, err = image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, sn.Exif, fmt.Errorf("cannot decode %s: %w", filepath.Base(src), err)
 	}

@@ -191,7 +191,8 @@ full by `aitk_api` and in `studio/src/lib/photoTypes.ts`.
   order: `set_aside {files}`, `restore {files | all}`, `set_aside_flagged {flags?}` (default
   `duplicate`, `tiny`, `unreadable`), `keep_best {n?}` (the best n for quality and variety; the rest are
   set aside), `bake_orientation`, `convert` (bmp, gif, tiff, heic where `convert` lists it, gray16,
-  transparent, cmyk and huge to JPEG or PNG with the same stem; a JPEG is re-encoded at quality 95),
+  transparent, cmyk and huge to JPEG or PNG with the same stem; a JPEG is re-encoded at quality 95;
+  for both, the original goes into `.set_aside/`, so `restore` can bring it back),
   `rename_same_stem`, `face_crops {max?}`, `remove_face_crops`. An unknown op is 400 listing the valid
   ops. With `apply`, 409 while a training run (queued, running or stopping) reads the dataset or a
   caption job writes it; a face check never blocks. Every change drops the photo's thumbnails and its
@@ -202,6 +203,7 @@ full by `aitk_api` and in `studio/src/lib/photoTypes.ts`.
   purpose); null clears. They are stored by content, so they survive a rename.
 - `DELETE /v1/datasets/{name}/photos/analysis` → 204: forgets the dataset's scores, face results,
   face-to-face similarities, reference and decisions. The photos stay. Deleting the dataset forgets them too.
+  Scores and face results for photos that another dataset also holds are kept for that dataset.
 - `POST /v1/datasets/{name}/photos/faces {text?}` → 201 Job (type `photo_faces`, ref the dataset folder,
   `gpu_ids` `cpu`) plus `warnings`, already queued: the face check (below). 409 while one is queued,
   running or stopping for the dataset; 400 when it has no photos or more than 2,000 (split the dataset).
