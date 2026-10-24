@@ -92,4 +92,8 @@ func Register(mux *http.ServeMux) {
 	httpx.Handle(mux, "GET /v1/keys", listKeys)
 	httpx.Handle(mux, "POST /v1/keys", createKey)
 	httpx.Handle(mux, "DELETE /v1/keys/{id}", deleteKey)
+
+	for _, fn := range extraRoutes {
+		fn(mux)
+	}
 }

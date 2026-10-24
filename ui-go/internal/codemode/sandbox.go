@@ -142,6 +142,14 @@ aitk.bundles.wait = async function (id, options) {
 };
 `
 
+// preludes are feature JS (e.g. a group's wait helper) run right after
+// prelude, in registration order; feature files add them from init().
+var preludes []string
+
+// RegisterPrelude adds JS that every run executes after the built-in prelude,
+// with aitk and AitkError defined. An error in it fails the run.
+func RegisterPrelude(js string) { preludes = append(preludes, js) }
+
 // Run executes code and never panics; problems come back in Result.Error.
 func Run(ctx context.Context, code string, opt Options) (res Result) {
 	start := time.Now()
@@ -333,6 +341,11 @@ func (r *run) install() error {
 
 	if _, err := vm.RunString(prelude); err != nil {
 		return err
+	}
+	for _, js := range preludes {
+		if _, err := vm.RunString(js); err != nil {
+			return err
+		}
 	}
 	r.errCtor = vm.Get("AitkError")
 	// nothing else from the host: no require, fetch, process or timers
