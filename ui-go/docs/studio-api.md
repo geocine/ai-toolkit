@@ -129,4 +129,5 @@ honest result, and a simulated click-through ends at *Ready and linked*.
   answers, but nothing here uses the GPUs it lists.
 - The console is not served: `/` redirects to `/studio/`.
 - The bundle, portable, lifecycle and upload loops do not run, so *When done*
-  is for the GPU servers it launches, not for the studio API.
+  is for the GPU servers it launches, not for the studio API
+  (`/v1/lifecycle` answers 409).

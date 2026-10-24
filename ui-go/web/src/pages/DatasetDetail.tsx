@@ -73,6 +73,12 @@ export function DatasetDetail({ name }: { name: string }) {
   const photoActions = usePhotoActions(name, photos.setReview, load);
   const byFile = useMemo(() => new Map((review?.items ?? []).map(i => [i.file, i])), [review]);
   const shownItems = items.filter(i => (!onlyFiles || onlyFiles.has(i.file)) && (!photoFiles || photoFiles.has(i.file)));
+  // a filter can name files the listing leaves out because the trainer skips them (a .heic)
+  const unlisted = useMemo(() => {
+    if (!photoFiles || !review) return [];
+    const listed = new Set(items.map(i => i.file));
+    return review.items.filter(i => photoFiles.has(i.file) && !listed.has(i.file) && i.flags.some(f => f === 'unsupported' || f === 'unreadable')).map(i => i.file);
+  }, [photoFiles, review, items]);
 
   const more = async () => {
     if (!cursor) return;
@@ -243,6 +249,12 @@ export function DatasetDetail({ name }: { name: string }) {
               />
             ))}
           </div>
+          {unlisted.length > 0 && (
+            <p className="small muted" style={{ marginTop: 12 }}>
+              Not in the grid because the trainer skips {unlisted.length === 1 ? 'it' : 'them'}: <span className="mono">{unlisted.join(', ')}</span>.
+              {review?.findings.some(f => f.op?.op === 'convert') ? ' Details offers Convert.' : ''}
+            </p>
+          )}
           {cursor && (
             <div className="row" style={{ justifyContent: 'center', marginTop: 16 }}>
               <button className="btn" onClick={more}>

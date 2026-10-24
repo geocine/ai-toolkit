@@ -42,6 +42,18 @@ function localOf(l: Local, id: string): { at: number; preset: Preset | null } | 
 
 const strip = ({ updatedAt: _u, ...p }: Preset) => p;
 
+/** JSON with object keys sorted: the server stores configs with its own key order. */
+export function canonical(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
+  if (v && typeof v === 'object')
+    return `{${Object.keys(v)
+      .filter(k => (v as Record<string, unknown>)[k] !== undefined)
+      .sort()
+      .map(k => `${JSON.stringify(k)}:${canonical((v as Record<string, unknown>)[k])}`)
+      .join(',')}}`;
+  return JSON.stringify(v) ?? 'null';
+}
+
 /** One sync with server: pull newer server copies, then push newer local ones. Returns the local changes to store. */
 export async function syncPresets(server: Server, l: Local): Promise<Changes> {
   let remote: Remote[];
@@ -88,7 +100,7 @@ export async function syncPresets(server: Server, l: Local): Promise<Changes> {
     const theirs = byId.get(id);
     // an unedited built-in follows this studio's shipped version, whatever its time
     const stale =
-      !!theirs && isBuiltIn(id) && !!mine.preset && !mine.preset.edited && !theirs.edited && !theirs.deleted && JSON.stringify(theirs.base) !== JSON.stringify(mine.preset.base);
+      !!theirs && isBuiltIn(id) && !!mine.preset && !mine.preset.edited && !theirs.edited && !theirs.deleted && canonical(theirs.base) !== canonical(mine.preset.base);
     if (theirs && theirs.updated_at >= mine.at && !stale) continue;
     try {
       if (mine.preset) {

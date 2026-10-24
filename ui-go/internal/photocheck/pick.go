@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"slices"
-	"strings"
 
 	"github.com/geocine/aitoolkit/internal/collation"
 )
@@ -177,11 +176,13 @@ func (k *picker) run() {
 		}
 		slices.Sort(k.picked) // file order reads better than quality order here
 		if count < k.n {
-			note := fmt.Sprintf("Only %d photos pass, so all are kept. Add %d more", count, k.n-count)
+			// the set's own hint says how many to add when it has one: a second
+			// count beside it ("Add 10 more: add 3 more ...") reads as a contradiction
+			note := fmt.Sprintf("Only %d photos pass, so all are kept.", count)
 			if len(k.r.Hints) > 0 {
-				note += ": " + lowerFirst(k.r.Hints[0])
+				note += " " + k.r.Hints[0]
 			} else {
-				note += "."
+				note += fmt.Sprintf(" Add %d more.", k.n-count)
 			}
 			k.out.Note = note
 		}
@@ -699,11 +700,4 @@ func (k *picker) leftReason(i int) string {
 		return "very like " + k.pool[best].file + ", which was picked"
 	}
 	return fmt.Sprintf("only %d were asked for", k.n)
-}
-
-func lowerFirst(s string) string {
-	if s == "" {
-		return s
-	}
-	return strings.ToLower(s[:1]) + s[1:]
 }

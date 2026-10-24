@@ -72,7 +72,7 @@ export function Servers({ create, activeMode }: { create?: boolean; activeMode: 
     if (c && c !== 'pending' && c.ok) return c.health.mode ?? 'server';
     return s.id === active?.id ? activeMode : null;
   };
-  const onlyStudioApi = servers.length === 1 && modeOf(servers[0]) === 'studio-api';
+  const onlyStudioApi = servers.length === 1 && modeOf(servers[0]) === 'studio-api' && tracked.items.length === 0;
 
   const test = async (s: Server) => {
     setChecks(c => ({ ...c, [s.id]: 'pending' }));
@@ -130,7 +130,7 @@ export function Servers({ create, activeMode }: { create?: boolean; activeMode: 
         title="Servers"
         description={
           'Each server is the ai-toolkit Go image running somewhere. Add one you already run, or create a GPU server on RunPod, Vast.ai or QuickPod.' +
-          (onlyStudioApi ? ' Create your first GPU server through it.' : '')
+          (onlyStudioApi ? ' Your studio API below creates the first one.' : '')
         }
         actions={
           <>
@@ -178,7 +178,11 @@ export function Servers({ create, activeMode }: { create?: boolean; activeMode: 
                     <p className="server-check conn conn-up">
                       <span className="dot" aria-hidden />
                       Reachable{c.health.upstream_version ? ` · ai-toolkit ${c.health.upstream_version}` : ''} ·{' '}
-                      {c.system.gpus.length ? c.system.gpus.map(g => g.name).join(', ') : 'no GPU reported'}
+                      {c.health.mode === 'studio-api'
+                        ? 'no trainer, creates GPU servers'
+                        : c.system.gpus.length
+                          ? c.system.gpus.map(g => g.name).join(', ')
+                          : 'no GPU reported'}
                     </p>
                   )}
                   {c && c !== 'pending' && !c.ok && <ErrorNote error={c.error} />}

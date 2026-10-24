@@ -289,14 +289,26 @@ func (j *judge) closest(i int, c []int, edges []pair) string {
 	return best
 }
 
-// keeperOf picks the copy to keep (section 4.2): a stored photo when there
-// is one; then in focus (sharp >= KeeperFocus x the best), the higher
-// compression bucket floor(log2(bytes/pixel)), sharper, more pixels, more
-// bytes, and the first file.
+// keeperOf picks the copy to keep (section 4.2): one the trainer reads when
+// there is one (a converted JPEG over its .heic original); then a stored
+// photo when there is one; then in focus (sharp >= KeeperFocus x the best),
+// the higher compression bucket floor(log2(bytes/pixel)), sharper, more
+// pixels, more bytes, and the first file.
 func (j *judge) keeperOf(ms []*photo) *photo {
 	cands := ms
-	if slices.ContainsFunc(ms, func(p *photo) bool { return p.Existing }) {
-		cands = slices.DeleteFunc(slices.Clone(ms), func(p *photo) bool { return !p.Existing })
+	unread := func(p *photo) bool {
+		for f := range p.flags {
+			if trainerUnreadable[f] {
+				return true
+			}
+		}
+		return false
+	}
+	if slices.ContainsFunc(cands, unread) && slices.ContainsFunc(cands, func(p *photo) bool { return !unread(p) }) {
+		cands = slices.DeleteFunc(slices.Clone(cands), unread)
+	}
+	if slices.ContainsFunc(cands, func(p *photo) bool { return p.Existing }) {
+		cands = slices.DeleteFunc(slices.Clone(cands), func(p *photo) bool { return !p.Existing })
 	}
 	best := 0.0
 	for _, p := range cands {

@@ -2876,6 +2876,12 @@ a.runs-row:hover {
     margin-bottom: 20px;
   }
 
+  /* a wide action (Find GPU servers on your account) must not squeeze the title */
+  .section-head {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
   .page-head h1,
   .run-title h1 {
     font-size: 20px;
@@ -4267,6 +4273,11 @@ a.runs-row:hover {
 
 .field small.warn {
   color: var(--warn);
+}
+
+.dialog-foot .callout {
+  flex: 1 1 100%;
+  margin: 0;
 }
 
 .create-summary {

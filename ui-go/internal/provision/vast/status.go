@@ -137,7 +137,7 @@ func (in instance) toInstance() provision.Instance {
 		GPU:                 in.GPUName,
 		GPUCount:            in.NumGPUs,
 		VRAMGB:              vramGB(in.GPURAM),
-		Location:            in.Geolocation,
+		Location:            location(in.Geolocation),
 		PricePerHour:        in.DPHTotal,
 		StoppedPricePerHour: in.Instance.TotalHour,
 		Env:                 extraEnv(in.ExtraEnv),

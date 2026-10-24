@@ -560,6 +560,15 @@ function CreateForm({
   // launch
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<LaunchProblem | null>(null);
+  // a reason belongs to the provider it came from
+  useEffect(() => setProblem(null), [kind]);
+  // a reason shows in the footer next to Create; image checks are long and
+  // sit under the form, below the fold of a long offer list
+  const problemChecks = problem?.checks && problem.checks.length > 0 ? problem.checks : null;
+  const problemAnchor = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (problemChecks) problemAnchor.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [problemChecks]);
   const rid = useRef(requestId()); // kept for the dialog's life, so a retried request rents once
   const label = p?.label ?? '';
   const defaultName = offer ? `${offer.gpu} on ${label}` : '';
@@ -681,6 +690,19 @@ function CreateForm({
         p &&
         configured && (
           <>
+            {problem && !problemChecks && (
+              <Callout kind="danger">
+                {problem.text}
+                {problem.link && (
+                  <>
+                    {' '}
+                    <a href={problem.link} target="_blank" rel="noreferrer">
+                      Open the {label} console
+                    </a>
+                  </>
+                )}
+              </Callout>
+            )}
             {offer && (
               <p className="create-summary">
                 {offer.gpu}
@@ -1000,22 +1022,10 @@ function CreateForm({
               />
             )}
 
-            {problem?.checks && problem.checks.length > 0 ? (
-              <CheckList checks={forTemplate(problem.checks)} onAction={onAction} />
-            ) : (
-              problem && (
-                <Callout kind="danger">
-                  {problem.text}
-                  {problem.link && (
-                    <>
-                      {' '}
-                      <a href={problem.link} target="_blank" rel="noreferrer">
-                        Open the {label} console
-                      </a>
-                    </>
-                  )}
-                </Callout>
-              )
+            {problemChecks && (
+              <div ref={problemAnchor}>
+                <CheckList checks={forTemplate(problemChecks)} onAction={onAction} />
+              </div>
             )}
           </>
         )}
