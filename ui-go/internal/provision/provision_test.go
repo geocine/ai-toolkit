@@ -128,6 +128,20 @@ func TestLookupHonoursProvidersEnv(t *testing.T) {
 	}
 }
 
+func TestV1AuthReadsOnce(t *testing.T) {
+	for msg, want := range map[string]string{
+		"Invalid user key":  "Vast.ai rejected the API key.",
+		"Unauthorized":      "Vast.ai rejected the API key.",
+		"invalid api key.":  "Vast.ai rejected the API key.",
+		"":                  "Vast.ai rejected the API key.",
+		"key expired today": "Vast.ai rejected the API key: key expired today",
+	} {
+		if _, got, _, _ := V1(Errorf(Vast, ClassAuth, 401, "%s", msg)); got != want {
+			t.Errorf("%q: %q, want %q", msg, got, want)
+		}
+	}
+}
+
 func TestV1EveryClass(t *testing.T) {
 	cases := []struct {
 		class  Class
