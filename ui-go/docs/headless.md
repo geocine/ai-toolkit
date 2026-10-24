@@ -31,6 +31,9 @@ never extended. Tables (owned by `internal/state`, embedded migrations):
 | `file_hashes` | sha256 cache keyed by path + size + mtime |
 | `settings` | fork settings; GPU providers keep `provision.key.<kind>` (the provider API key, write-only) and `provision.max_running.<kind>` |
 | `machines` | GPU servers rented through `/v1/machines`: provider, ids, status, problem, token, spec (never env values), image digest and launch ref |
+| `photo_metrics` | photo-check measurements per file content (sha256 + metrics version): sharpness, exposure, hashes, EXIF; dropped 90 days after a review last read them |
+| `photo_faces` | face-check results per file content: boxes, landmarks, scores, face sharpness and light (no face templates) |
+| `photo_sets` | per dataset folder: subject kind, reference photo, keep/intended decisions, face crops' parents and the last face check's face-to-face similarities; dropped with the folder |
 
 ## Conventions (`/v1`)
 
@@ -134,8 +137,12 @@ with step 0 and no trainer progress yet).
 `Dataset = {name, path, images, captions, size, modified}`
 - `GET /v1/datasets` → `{items: [Dataset]}`
 - `POST /v1/datasets {name}` → 201 Dataset (name used as given if it is a safe folder name, else 400)
-- `GET /v1/datasets/{name}?cursor=&limit=` → Dataset + `{items: [{file, caption, size, width?, height?}], next_cursor}`
-- `POST /v1/datasets/{name}/files` multipart `files[]` → `{items: [file names]}`
+- `GET /v1/datasets/{name}?cursor=&limit=` → Dataset + `{items: [{file, caption, size, width?, height?}], next_cursor, caption_job, photo_job}`
+  (`width` and `height` are upright, after the EXIF orientation; `photo_job` is the newest face check, or null)
+- `POST /v1/datasets/{name}/files?on_conflict=replace|rename|skip` multipart `files[]` → `UploadResult = {items: [saved names], renamed: [{from, to}], skipped: [..]}`:
+  `replace` (default) overwrites a file of that name; `rename` saves a different file under a taken name as `<stem>_2<ext>`
+  (then `_3`, ...) and skips the same content, and a `.txt` in the same request follows its image's new name; `skip`
+  never overwrites
 - `POST /v1/datasets/{name}/archive` body = zip (or multipart `file`) → `{added: n, skipped: [..]}` (safe extraction: no traversal, no symlinks, size and count limits)
 - `PUT /v1/datasets/{name}/files/{file...}` body = the file's bytes → item (creates or replaces it; may contain `/`; hidden names refused)
 - `POST /v1/datasets/{name}/import {url, file?, caption?}` → `{added, files: [..], skipped: [..]}`: the server downloads an http(s) URL; a zip is unpacked like `/archive`, an image/video is saved as `file` (default: from Content-Disposition or the URL, the extension sniffed from the bytes when missing) with `caption` written beside it
@@ -156,7 +163,101 @@ with step 0 and no trainer progress yet).
   dataset. `GET /v1/datasets/{name}` returns the newest as `caption_job`.
 - `PUT /v1/datasets/{name}/captions/{file...} {caption}` → item
 - `DELETE /v1/datasets/{name}/files/{file...}` → 204 (also removes its caption)
-- `DELETE /v1/datasets/{name}` → 204 (409 while a queued or running job, or a caption job, reads it)
+- `DELETE /v1/datasets/{name}` → 204 (409 while a queued or running job, or a caption job, reads it; its photo analysis is forgotten)
+
+#### Photo checks
+What is wrong with each photo for training, found before a GPU is paid for.
+The server measures every stored photo once (sharpness, exposure, hashes,
+EXIF, format), keeps the numbers by file content, and judges the set with the
+same rules the studio applies in the browser before upload. The shapes
+(`PhotoReview`, `PhotoFix`, `PhotoMetrics`, `PhotoFixOp`, ...) are declared in
+full by `aitk_api` and in `studio/src/lib/photoTypes.ts`.
+
+- `POST /v1/photos/assess {items, kind?, resolution?, dataset?, pick?, decisions?, captions?}` → PhotoReview:
+  judges `PhotoMetrics` measured elsewhere (the studio measures before upload). At most 2,000 items
+  and a 4 MiB body (413 over it). With `dataset`, that dataset's stored photos join the duplicate pass
+  (they show only in `groups` and `same_as`). `items: []` is valid and returns `convert`, the formats
+  this server converts.
+- `GET /v1/datasets/{name}/photos/check?kind=&resolution=&pick=&wait_ms=` → PhotoReview: walks the
+  dataset like the trainer (dot folders and `_controls/` skipped), lists `.set_aside/` separately as
+  `set_aside`, and lists formats the trainer skips (heic, heif, avif, jxl, bmp, gif, tiff) as
+  `unsupported`. Photos not measured yet are analysed in the background; the call waits up to `wait_ms`
+  (default 3000, max 20000), then answers with `pending > 0`, so poll until `pending == 0`. `resolution`
+  is the run's, `1024` or `512,768,1024`. `kind` (`person`, `style`, `object`) defaults to the stored
+  kind, then `person`. `pick=n` adds `pick`, the best n.
+- `POST /v1/datasets/{name}/photos/fix {ops, files?, apply?, kind?, resolution?}` →
+  `{changes: [{file, op, to?, reason?}], applied, review}`. A preview unless `apply: true`. Ops run in
+  order: `set_aside {files}`, `restore {files | all}`, `set_aside_flagged {flags?}` (default
+  `duplicate`, `tiny`, `unreadable`), `keep_best {n?}` (the best n for quality and variety; the rest are
+  set aside), `bake_orientation`, `convert` (bmp, gif, tiff, heic where `convert` lists it, gray16,
+  transparent, cmyk and huge to JPEG or PNG with the same stem; a JPEG is re-encoded at quality 95),
+  `rename_same_stem`, `face_crops {max?}`, `remove_face_crops`. An unknown op is 400 listing the valid
+  ops. With `apply`, 409 while a training run (queued, running or stopping) reads the dataset or a
+  caption job writes it; a face check never blocks. Every change drops the photo's thumbnails and its
+  trainer caches (`_latent_cache`, `_t_e_cache`, `_clip_vision_cache`) and emits `dataset.changed`.
+- `PUT /v1/datasets/{name}/photos/settings {kind?, reference?, decisions?}` → PhotoReview: the subject
+  kind, the "this is them" reference photo (by file; null clears) and per-photo decisions by file:
+  `keep` (keep anyway: waives its warnings) or `intended` (no face, sunglasses or black and white on
+  purpose); null clears. They are stored by content, so they survive a rename.
+- `DELETE /v1/datasets/{name}/photos/analysis` → 204: forgets the dataset's scores, face results,
+  face-to-face similarities, reference and decisions. The photos stay. Deleting the dataset forgets them too.
+
+Leaving a photo out moves it, with its caption and thumbnail, to `<dataset>/.set_aside/<file>`; nothing
+is deleted. The trainer, the captioner, the dataset listing, bundles and portable sync skip dot folders,
+and `restore` moves it back (`_2`, `_3`, ... on a name clash). Set-aside photos keep their analysis.
+
+A review's `items` carry per photo `flags` (with a plain `notes` line for each), `level`, `usable`, and
+for copies `group`, `keeper` and `same_as`. The flags:
+
+| Flags | Level | Meaning |
+|---|---|---|
+| `unreadable`, `unsupported`, `huge` | warn | The trainer skips it: it reads JPEG, PNG and WebP only, under about 179 MP. |
+| `gray16`, `transparent` | warn | Read wrongly: 16-bit grey clips to white; transparency is dropped and the hidden colour trains. |
+| `same_stem` | warn | Two files with the same name before the extension share one caption. |
+| `animated`, `cmyk`, `rotated`, `generated`, `derived` | info | First frame only; colours can shift; stored sideways (the auto-captioner reads it sideways); made by an image model; a face crop. |
+| `duplicate` | warn | The same picture as another photo (resized, re-saved or mirrored); the group's `keep` is the better copy. |
+| `similar`, `burst` | info | Close to another photo; taken within 2 s of another (a burst counts once toward variety). |
+| `tiny`, `small` | warn | Under 512 px on the short side; trains below the run's resolution (the trainer never scales photos up). |
+| `blurry`, `dark`, `bright`, `screenshot`, `bars` | warn | Soft even in its sharpest part; mostly shadow; large white areas; a screen capture; black or flat bars on the edges. |
+| `upscaled`, `flat`, `grayscale`, `strong_color`, `noisy`, `compressed`, `from_screen`, `aspect` | info | Enlarged, low contrast, no colour, a strong filter, grain, low JPEG quality, a screen size with no camera data, very wide or tall. |
+| `mentions_covered`, `mentions_people`, `mentions_text`, `mentions_tone`, `mentions_screen` | info | The caption mentions sunglasses or a hat, other people, text, black and white, a screen. |
+| `no_face`, `others`, `small_face`, `face_blurry`, `not_them`, `watermark` | warn | From the face check. |
+| `face_cut`, `backlit`, `identity_check`, `smoothed`, `text` | info | From the face check. |
+
+The rest of the review:
+- `findings`: dataset-level `{id, level, message, fix?, files?, op?}`, ranked block, warn, info. `op` is a
+  ready-to-send fixPhotos op (`duplicates` → `set_aside_flagged` with `duplicate`). Ids: `count_none`
+  (block), `count_very_low`, `count_low`, `count_high`, `duplicates`, `format_problems`, `low_res_share`,
+  `to_look_at`, `two_people`, `identity_outliers`, `one_session`, `same_outfit`, `same_place`,
+  `grayscale_mix`, `filter_consistent`, `people_in_captions`, `look_mismatch`, `era_span`,
+  `orientation_tags`, `shot_gap`, `angle_gap`, `face_crops_offer`, `faces_unchecked`, `faces_stale`, `pending`.
+- `usable`: photos not set aside, not a spare copy of a duplicate, and with no warning left (`keep`
+  waives them). A burst counts once.
+- `grade` (`grade_line` says it in words), the first rule that matches: F under 5 usable (or over 30 %
+  of the faces look like someone else), D under 10, C under 15, two coverage gaps, two different people
+  or a photo that may show someone else, B under 20 or one gap, A otherwise. A person set whose faces are not checked is `provisional` and gets B at best. The gaps are
+  the coverage rules `shot_gap`, `angle_gap`, `one_session`, `same_outfit` and `same_place`, counted
+  only where there is data (`basis` lists what the grade rests on).
+- `coverage` (dated photos, sessions, span, and shot, angle, outfit and place counts where known) and
+  `hints`: at most 3 things to add.
+- `pick` (with `pick=n`, or `keep_best`): `kept` in pick order and `left_out` with one reason each. It
+  favours quality and variety and takes at most one photo per burst. It never picks files the trainer
+  skips (unreadable, unsupported, huge), even when marked `keep`. Unless marked `keep`, it also leaves
+  out files the trainer reads wrongly (gray16, transparent), tiny photos, screenshots and photos with
+  someone else in them (not_them, others). Default n: person 25, style 30, object 20.
+- `faces`: the face check's state (`available` is false on a server without it), `thresholds` (the
+  numbers the rules use) and `convert`.
+
+Uploads are measured right away in the background, so a check after upload answers fast. `jobs.preflight`
+adds photo lines (copies, low resolution, files read wrongly, the grade); they never block.
+
+Privacy: photos and everything derived from them stay on this server and in the browser that shows
+them. There is no third-party API. Logs carry file names and scores only, and photo-check data never
+goes through notifications. Scores and face-to-face similarity numbers are kept with the dataset in the
+server database. Face templates are not stored. The SFace weights (Apache-2.0) were trained by their
+authors on public face datasets (CASIA-WebFace, VGGFace2 and MS-Celeb-1M per the SFace paper;
+MS-Celeb-1M was withdrawn by Microsoft in 2019). The check runs only when you click Check faces, and
+only on your server.
 
 ### Files
 Generic access inside the allowed roots: `datasets`, `training`, `data`, `models`.
@@ -989,6 +1090,10 @@ through `machines.link`). Bodies that are not JSON:
   `links.create`) sign the download instead of fetching it, so the agent
   gets a URL it can hand to a person or to another server;
 - `bundles.wait(id)` polls an import or push until it settles, like `jobs.wait`.
+
+Photo checks are `datasets.checkPhotos` (poll while `pending > 0`), `datasets.fixPhotos`,
+`datasets.photoSettings`, `datasets.forgetPhotos` and `photos.assess` (Datasets, Photo checks). An
+agent can send a finding's `op` to `fixPhotos` as it is, and look at a flagged photo with `aitk_view`.
 
 GPU servers are the `providers` group (`list`, `setKey`, `removeKey`, `test`,
 `offers`, `recommend`, `templates`, `setup`; `hosts.recommend` searches every

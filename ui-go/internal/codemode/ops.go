@@ -133,9 +133,10 @@ var Ops = []Op{
 		Doc: "Write one file (image, caption, ...) from base64, replacing it. For files up to 16 MiB; larger ones go by URL (importUrl).",
 		Params: []Param{p("name", "string", "path", ""), p("file", "string", "path", "file name in the dataset (may contain /)"),
 			p("base64", "string", "body", "file contents, base64")}},
-	{Group: "datasets", Name: "uploadFiles", Method: "POST", Path: "/v1/datasets/{name}/files", Result: "Items<string>", Mode: ModeMultipart,
-		Doc:    "Add several files from base64 (16 MiB each at most).",
-		Params: []Param{p("name", "string", "path", ""), p("files", "{ name: string; base64: string }[]", "body", "")}},
+	{Group: "datasets", Name: "uploadFiles", Method: "POST", Path: "/v1/datasets/{name}/files", Result: "UploadResult", Mode: ModeMultipart,
+		Doc: "Add several files from base64 (16 MiB each at most). on_conflict says what a taken name does: replace (default), rename (saved as <stem>_2<ext>; the same content is skipped; a .txt in the same call follows its image's new name) or skip. items lists the saved names.",
+		Params: []Param{p("name", "string", "path", ""), p("files", "{ name: string; base64: string }[]", "body", ""),
+			opt("on_conflict", `"replace" | "rename" | "skip"`, "query", "when a file of that name exists (default replace)")}},
 	{Group: "datasets", Name: "uploadArchive", Method: "POST", Path: "/v1/datasets/{name}/archive", Result: "ArchiveResult", Mode: ModeBase64,
 		Doc:    "Unpack a zip of images and captions given as base64 (16 MiB at most; larger ones by URL with importUrl).",
 		Params: []Param{p("name", "string", "path", ""), p("base64", "string", "body", "zip contents, base64")}},
@@ -507,7 +508,7 @@ type LossSeries = { keys: string[]; key: string; points: { step: number; value: 
 type Queue = { gpu_ids: string; running: boolean; current_job_id: string | null; queued: number };
 type Dataset = { name: string; path: string; images: number; captions: number; size: number; modified: string };
 type DatasetItem = { file: string; caption: string | null; size: number; width?: number; height?: number };
-type DatasetDetail = Dataset & { items: DatasetItem[]; next_cursor: string | null; caption_job: Job | null };
+type DatasetDetail = Dataset & { items: DatasetItem[]; next_cursor: string | null; caption_job: Job | null; photo_job: Job | null };
 type CaptionOption = { value: unknown; label: string };
 type Preflight = { ok: boolean; checks: { level: "block" | "warn" | "info"; message: string; fix?: string }[] };
 type Preset = { id: string; name: string; description?: string; builtIn?: boolean; edited?: boolean; base: JobConfig; defaults?: Record<string, unknown>; promptSets?: Record<string, string[]>; captionTemplates?: Record<string, string>; notes?: { title: string; body: string }[]; updated_at: number; deleted?: boolean };
