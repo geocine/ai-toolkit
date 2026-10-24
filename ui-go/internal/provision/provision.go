@@ -416,7 +416,7 @@ func V1(err error) (code, message string, retryAfter time.Duration, ok bool) {
 	p := Label(e.Provider)
 	switch e.Class {
 	case ClassAuth:
-		return v1api.CodeProviderAuth, p + " rejected the API key: " + e.Message, 0, true
+		return v1api.CodeProviderAuth, authMessage(p, e.Message), 0, true
 	case ClassCredit:
 		return v1api.CodeInsufficientCredit, p + " says the balance is too low: " + e.Message, 0, true
 	case ClassCapacity:
@@ -436,6 +436,21 @@ func V1(err error) (code, message string, retryAfter time.Duration, ok bool) {
 	default:
 		return v1api.CodeRemoteFailed, p + " did not answer: " + e.Message, 0, true
 	}
+}
+
+// bareRejections are provider texts that only restate a rejected key.
+var bareRejections = map[string]bool{
+	"unauthorized": true, "forbidden": true, "invalid user key": true, "invalid api key": true, "invalid key": true,
+}
+
+// authMessage says once that p rejected the key, with the provider's reason
+// when it adds one ("Vast.ai rejected the API key." for "Invalid user key").
+func authMessage(p, msg string) string {
+	reason := strings.TrimSpace(msg)
+	if bareRejections[strings.ToLower(strings.TrimRight(reason, ". "))] || reason == "" {
+		return p + " rejected the API key."
+	}
+	return p + " rejected the API key: " + reason
 }
 
 // ---- secrets and tokens ----

@@ -198,7 +198,8 @@ function CreateForm({
       });
       setKeySaves(n => n + 1);
     } catch (e) {
-      setKeyError(e instanceof ApiError && e.code === 'provider_auth' ? new Error(`${p.label} did not accept that key: ${e.message}`) : e);
+      // provider_auth already names the provider and its reason
+      setKeyError(e);
     } finally {
       setKeyText(''); // never kept, never stored in the browser
       setKeyBusy(false);
@@ -657,7 +658,7 @@ function CreateForm({
         setProblem({ text: `Not enough credit at ${label}. Add some, then try again.`, link: p.console_url });
       } else if (code === 'provider_auth') {
         // the key step replaces the form, so the reason shows there
-        setKeyError(new Error(`${label} refused the key: ${msg}`));
+        setKeyError(new Error(msg)); // names the provider and its reason
         setChangingKey(true);
       } else if (code === 'image_blocked') {
         const d = e instanceof ApiError ? (e.details as { checks?: ImageCheckItem[] } | undefined) : undefined;
