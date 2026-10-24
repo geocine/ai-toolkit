@@ -1,7 +1,24 @@
 import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, Copy, Rocket, Sparkles, Square, X } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import YAML from 'yaml';
+import { CompareDialog } from '../components/CompareDialog';
+import { Confirm } from '../components/Dialog';
 import { Dropzone } from '../components/Dropzone';
+import { FaceCheck } from '../components/FaceCheck';
+import {
+  DecidePairs,
+  PhotoGrid,
+  PhotoMenu,
+  PhotoSummary,
+  PhotoThumb,
+  groupKey,
+  partnerOf,
+  suggested,
+  type GridPhoto,
+  type PhotoAction,
+  type PhotoFilter,
+} from '../components/PhotoGrid';
+import { FaceCropOffer, Readiness } from '../components/Readiness';
 import { Callout, ErrorNote, NeedServer, PageHeader, Progress, useLoad } from '../components/ui';
 import {
   ApiError,
@@ -30,7 +47,22 @@ import { buildConfig, knobsFor, validate, withSubject, type Knobs, type Preset, 
 import { go } from '../lib/route';
 import { save, useStored } from '../lib/store';
 import { bytes } from '../lib/format';
-import { batches, prepareImages, trainable } from '../lib/images';
+import { batches, prepareImages, trainable, type PrepNote } from '../lib/images';
+import { assess, checkPhotos, fixPhotos, photoSettings } from '../lib/photos';
+import type {
+  PhotoAssess,
+  PhotoDecision,
+  PhotoFix,
+  PhotoFixOp,
+  PhotoFlag,
+  PhotoGroup,
+  PhotoItem,
+  PhotoMetrics,
+  PhotoPick,
+  PhotoReview,
+  PhotoSettingsPatch,
+  UploadResult,
+} from '../lib/photoTypes';
 import { PresetNotes } from './Presets';
 
 const steps = ['Subject', 'Images', 'Captions', 'Settings', 'Launch'] as const;
@@ -214,22 +246,361 @@ function StepSubject(props: {
 
 // ---- 2. images ----
 
+/** A photo picked in this browser, not uploaded yet. Left out, it never uploads. */
+type LocalPhoto = { key: string; file: File; metrics?: PhotoMetrics; leftOut: boolean };
+
+let localSeq = 0;
+const stemOf = (name: string) => name.replace(/\.[^.]+$/, '');
+const isCaption = (f: File) => /\.txt$/i.test(f.name);
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** The quiet note of what getting the photos ready did on its own. */
+function prepLine(notes: PrepNote[]): string {
+  const n = (w: PrepNote['what']) => notes.filter(x => x.what === w).length;
+  return [
+    n('converted') && `${plural(n('converted'), 'photo', 'photos')} converted to JPEG`,
+    n('upright') && `${plural(n('upright'), 'rotated photo', 'rotated photos')} turned upright`,
+    n('gray16') && `${plural(n('gray16'), '16-bit grey PNG', '16-bit grey PNGs')} made 8-bit`,
+    n('flattened') && `${plural(n('flattened'), 'transparent PNG', 'transparent PNGs')} put on white`,
+    n('renamed') && `${plural(n('renamed'), 'file', 'files')} renamed so names do not clash`,
+    n('server_convert') && `${plural(n('server_convert'), 'photo', 'photos')} converted on the server after upload`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+const goodList = [
+  'Just them, face clearly visible and in focus',
+  'Close-ups and some half- and full-length',
+  'Different days, outfits, places and light',
+  'Some with the head turned partly away and one or two side profiles',
+  'Different expressions',
+];
+const leaveOutList = [
+  'Group photos (or crop the others out)',
+  'Sunglasses, masks or hats that hide the face',
+  'Heavy filters and beauty smoothing',
+  'Screenshots, collages, photos with text or watermarks',
+  'Several shots from the same moment (keep the best)',
+  'Photos many years apart',
+  'Copies saved from chat apps (use the originals)',
+];
+
+function GoodPhotos() {
+  return (
+    <details className="photo-advice">
+      <summary>What makes a good photo</summary>
+      <div className="photo-advice-lists">
+        <div>
+          <p className="label">Good</p>
+          <ul>
+            {goodList.map(s => (
+              <li key={s}>{s}</li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <p className="label">Leave out</p>
+          <ul>
+            {leaveOutList.map(s => (
+              <li key={s}>{s}</li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </details>
+  );
+}
+
+/**
+ * Groups seen in any review, kept while their photos are here: leaving one
+ * out must not hide the pair. Of two groups of one kind where one holds the
+ * other's files (a burst of 3 that is 2 once one is left out), only the
+ * larger stays, so no tile shows twice.
+ */
+function mergeGroups(prev: PhotoGroup[], next: PhotoGroup[]): PhotoGroup[] {
+  const within = (a: PhotoGroup, b: PhotoGroup) => a.files.every(f => b.files.includes(f));
+  const out = new Map(prev.map(g => [groupKey(g), g]));
+  for (const g of next) {
+    if (g.kind === 'duplicate') continue;
+    const same = [...out.values()].filter(o => o.kind === g.kind);
+    if (same.some(o => within(g, o) && groupKey(o) !== groupKey(g))) continue;
+    for (const o of same) if (within(o, g)) out.delete(groupKey(o));
+    out.set(groupKey(g), g);
+  }
+  return [...out.values()];
+}
+
 function StepImages({ k, dataset, onDone, back }: { k: Knobs; dataset: string; onDone: (name: string) => void; back: () => void }) {
   const server = useServer()!;
-  const [files, setFiles] = useState<File[]>([]);
   const [name, setName] = useState(dataset || datasetSafe(k.trigger.toLowerCase()) || datasetSafe(k.name));
-  const [progress, setProgress] = useState<number | null>(null);
-  const [error, setError] = useState<unknown>(null);
-  const [skipped, setSkipped] = useState<string[]>([]);
-  const [converting, setConverting] = useState(false);
   const existing = useLoad(server, s => get<Items<Dataset>>(s, '/v1/datasets'), []);
-  const images = useMemo(() => files.filter(f => trainable.test(f.name)), [files]);
-  const captions = files.filter(f => /\.txt$/i.test(f.name));
-  const urls = useMemo(() => images.slice(0, 60).map(f => URL.createObjectURL(f)), [images]);
-  useEffect(() => () => urls.forEach(u => URL.revokeObjectURL(u)), [urls]);
   const already = existing.data?.items.find(d => d.name === name);
+  const resKey = k.resolution.join(',');
+  // the dataset's folder, for a dropped copy's stored twin in the compare dialog
+  const stored = useLoad(server, s => (already ? get<DatasetDetail>(s, `/v1/datasets/${encodeURIComponent(name)}?limit=1`) : Promise.resolve(null)), [name, !!already]);
 
-  const go = async () => {
+  // the formats the server converts after upload (heic through ffmpeg, bmp, gif, tiff)
+  const [convert, setConvert] = useState<string[]>([]);
+  useEffect(() => {
+    let live = true;
+    assess(server, { items: [] }).then(
+      r => live && setConvert(r.convert ?? []),
+      () => {}, // an older server: no photo checks, nothing converted there
+    );
+    return () => {
+      live = false;
+    };
+  }, [server]);
+
+  const [photos, setPhotos] = useState<LocalPhoto[]>([]);
+  const [captions, setCaptions] = useState<File[]>([]);
+  const [captionText, setCaptionText] = useState<Record<string, string>>({}); // by image file
+  const [serverConvert, setServerConvert] = useState<File[]>([]);
+  const [notes, setNotes] = useState<PrepNote[]>([]);
+  const [skipped, setSkipped] = useState<string[]>([]);
+  const [measuring, setMeasuring] = useState<{ done: number; total: number; files: File[] } | null>(null);
+  const [decisions, setDecisions] = useState<Record<string, PhotoDecision>>({});
+  const [review, setReview] = useState<PhotoReview | null>(null);
+  // the last judgement of every photo: a left-out photo is not sent again, but its card keeps its flags
+  const [seen, setSeen] = useState<Record<string, PhotoItem>>({});
+  const [groups, setGroups] = useState<PhotoGroup[]>([]);
+  const [pick, setPick] = useState<PhotoPick | null>(null);
+  const [filter, setFilter] = useState<PhotoFilter>(null);
+  const [undo, setUndo] = useState<Set<string> | null>(null); // left-out keys before the last bulk action
+  const [compare, setCompare] = useState<[string, string] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<number | null>(null);
+  const [uploaded, setUploaded] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  // one drop is measured, or one upload runs, at a time: a drop meanwhile is
+  // turned away (it would race the names, and the end of an upload clears
+  // the grid). The lock opens only once the render with the new photos is
+  // committed, so the next drop sees their names.
+  const busyRef = useRef(false);
+  const [settled, setSettled] = useState(0);
+  const [turnedAway, setTurnedAway] = useState(false);
+  useEffect(() => {
+    busyRef.current = false;
+  }, [settled]);
+  const dropBusy = measuring !== null || progress !== null;
+
+  const local = photos.length + captions.length + serverConvert.length > 0 || measuring !== null;
+  const kept = photos.filter(p => !p.leftOut && p.metrics);
+  const leftOut = photos.filter(p => p.leftOut).length;
+
+  const assessBody = (n?: number): PhotoAssess => {
+    const names = new Set(kept.map(p => p.file.name));
+    const only = <T,>(m: Record<string, T>) => Object.fromEntries(Object.entries(m).filter(([f]) => names.has(f)));
+    return {
+      items: kept.map(p => p.metrics!),
+      resolution: k.resolution,
+      dataset: already ? name : undefined,
+      decisions: only(decisions),
+      captions: only(captionText),
+      pick: n,
+    };
+  };
+  const take = (r: PhotoReview) => {
+    setReview(r);
+    setSeen(prev => ({ ...prev, ...Object.fromEntries(r.items.map(i => [i.file, i])) }));
+    setGroups(prev => mergeGroups(prev, r.groups));
+  };
+
+  // the server's judge on what would upload; again when the photos, the decisions or the run's resolution change
+  const assessKey = [kept.map(p => p.file.name).join('\u0000'), JSON.stringify(decisions), resKey, already ? name : '', Object.keys(captionText).length].join('\u0001');
+  useEffect(() => {
+    if (measuring) return;
+    if (!kept.length) {
+      setReview(null);
+      return;
+    }
+    let live = true;
+    const t = setTimeout(() => {
+      assess(server, assessBody()).then(
+        r => live && take(r),
+        e => live && setError(e),
+      );
+    }, 250);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [assessKey, measuring === null]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const storedNames = async (): Promise<string[]> => {
+    if (!already) return [];
+    try {
+      const d = await get<DatasetDetail>(server, `/v1/datasets/${encodeURIComponent(name)}?limit=1000`);
+      return d.items.map(i => i.file);
+    } catch {
+      return []; // the server renames on a clash anyway (on_conflict=rename)
+    }
+  };
+
+  const onFiles = async (fs: File[]) => {
+    if (!fs.length) return;
+    if (busyRef.current) {
+      setTurnedAway(true);
+      return;
+    }
+    busyRef.current = true;
+    setTurnedAway(false);
+    setError(null);
+    setPick(null);
+    const shown = fs.filter(f => trainable.test(f.name));
+    setMeasuring({ done: 0, total: shown.length, files: shown });
+    try {
+      const taken = new Set<string>([...photos.map(p => p.file.name), ...serverConvert.map(f => f.name), ...(await storedNames())]);
+      const r = await prepareImages(fs, {
+        taken,
+        serverConverts: convert,
+        onProgress: (done, total) => setMeasuring(m => m && { ...m, done, total }),
+      });
+      const byName = new Map(r.metrics.map(m => [m.file, m]));
+      const imgs = r.ok.filter(f => !isCaption(f));
+      const txt = r.ok.filter(isCaption);
+      setPhotos(prev => [...prev, ...imgs.map(f => ({ key: `p${++localSeq}`, file: f, metrics: byName.get(f.name), leftOut: false }))]);
+      setCaptions(prev => [...prev, ...txt]);
+      setServerConvert(prev => [...prev, ...r.serverConvert]);
+      setNotes(prev => [...prev, ...r.notes]);
+      setSkipped(prev => [...prev, ...r.skipped]);
+      // caption words are judged before upload too (sunglasses, other people, …)
+      const all = [...photos.map(p => p.file), ...imgs];
+      const texts: Record<string, string> = {};
+      for (const t of txt) {
+        const img = all.find(f => stemOf(f.name) === stemOf(t.name));
+        if (!img) continue;
+        try {
+          texts[img.name] = await t.text();
+        } catch {
+          /* unreadable caption: judged after upload */
+        }
+      }
+      if (Object.keys(texts).length) setCaptionText(prev => ({ ...prev, ...texts }));
+    } catch (e) {
+      setError(e);
+    } finally {
+      setMeasuring(null);
+      setSettled(n => n + 1);
+    }
+  };
+
+  const clear = () => {
+    setPhotos([]);
+    setCaptions([]);
+    setCaptionText({});
+    setServerConvert([]);
+    setNotes([]);
+    setSkipped([]);
+    setDecisions({});
+    setReview(null);
+    setSeen({});
+    setGroups([]);
+    setPick(null);
+    setFilter(null);
+    setUndo(null);
+  };
+
+  // leaving out and putting back: a single click drops the last bulk undo and any pick preview
+  const setOut = (files: string[], out: boolean, bulk = false) => {
+    const want = new Set(files);
+    setUndo(bulk ? new Set(photos.filter(p => p.leftOut).map(p => p.key)) : null);
+    setPick(null);
+    setPhotos(ps => ps.map(p => (want.has(p.file.name) ? { ...p, leftOut: out } : p)));
+  };
+  const toggle = (file: string) => {
+    const p = photos.find(x => x.file.name === file);
+    if (p) setOut([file], !p.leftOut);
+  };
+  const decide = (file: string, d: PhotoDecision | null) =>
+    setDecisions(prev => {
+      const next = { ...prev };
+      if (d) next[file] = d;
+      else delete next[file];
+      return next;
+    });
+
+  const reviewItems = new Map(review?.items.map(i => [i.file, i]) ?? []);
+  const rank = new Map(pick?.kept.map((f, i) => [f, i + 1]) ?? []);
+  const why = new Map(pick?.left_out.map(l => [l.file, l.reason]) ?? []);
+  const grid: GridPhoto[] = [
+    ...photos.map(p => ({
+      key: p.key,
+      file: p.file.name,
+      src: '',
+      blob: p.file,
+      item: (!p.leftOut && reviewItems.get(p.file.name)) || seen[p.file.name],
+      leftOut: p.leftOut,
+      rank: rank.get(p.file.name),
+      reason: why.get(p.file.name),
+      stored: false,
+    })),
+    ...(measuring?.files ?? []).map((f, i) => ({ key: `m${i}`, file: f.name, src: '', blob: f, leftOut: false, stored: false })),
+  ];
+  const byFile = (f: string) => grid.find(x => x.file === f);
+  // a photo of the grid, or the stored photo a dropped copy duplicates (assess with dataset sets same_as to it)
+  const storedPath = stored.data?.path ?? '';
+  const photoFor = (f: string): GridPhoto | undefined =>
+    byFile(f) ??
+    (storedPath && already
+      ? {
+          key: `s:${f}`,
+          file: f,
+          src: mediaUrl(server, joinServerPath(storedPath, f), true),
+          full: mediaUrl(server, joinServerPath(storedPath, f), false),
+          leftOut: false,
+          stored: true,
+        }
+      : undefined);
+
+  const onAction = (a: PhotoAction, file: string) => {
+    if (a === 'leave_out') setOut([file], true);
+    else if (a === 'restore') setOut([file], false);
+    else if (a === 'keep' || a === 'intended') decide(file, a);
+    else if (a === 'unkeep' || a === 'unintend') decide(file, null);
+    else if (a === 'compare') {
+      const other = partnerOf(byFile(file)?.item, groups);
+      if (other) setCompare([file, other]);
+    }
+  };
+  const onSuggested = () => {
+    const s = suggested(grid);
+    if (s.files.length) setOut(s.files, true, true);
+  };
+  const onPick = async (n: number) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await assess(server, assessBody(n));
+      take(r);
+      setPick(r.pick ?? null);
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const keepPick = () => {
+    if (!pick) return;
+    const keep = new Set(pick.kept);
+    setOut(
+      kept.filter(p => !keep.has(p.file.name)).map(p => p.file.name),
+      true,
+      true,
+    );
+  };
+  const onUndo = () => {
+    if (!undo) return;
+    setPhotos(ps => ps.map(p => ({ ...p, leftOut: undo.has(p.key) })));
+    setUndo(null);
+    setPick(null);
+  };
+
+  const send = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setTurnedAway(false);
     setError(null);
     try {
       if (!already) {
@@ -239,30 +610,79 @@ function StepImages({ k, dataset, onDone, back }: { k: Knobs; dataset: string; o
           if (!(e instanceof ApiError && e.status === 409)) throw e;
         }
       }
-      if (files.length) {
+      const keptFiles = photos.filter(p => !p.leftOut).map(p => p.file);
+      const keptStems = new Set([...keptFiles, ...serverConvert].map(f => stemOf(f.name)));
+      const outStems = new Set(photos.filter(p => p.leftOut).map(p => stemOf(p.file.name)));
+      // a left-out photo's caption stays behind; each caption goes right after
+      // its photo, so a batch rarely splits a pair (the server renames a
+      // caption with its photo only inside one request)
+      const caps = new Map<string, File[]>();
+      for (const c of captions) {
+        const s = stemOf(c.name);
+        if (outStems.has(s) && !keptStems.has(s)) continue;
+        caps.set(s, [...(caps.get(s) ?? []), c]);
+      }
+      const ordered: File[] = [];
+      for (const f of [...keptFiles, ...serverConvert]) {
+        ordered.push(f, ...(caps.get(stemOf(f.name)) ?? []));
+        caps.delete(stemOf(f.name));
+      }
+      for (const rest of caps.values()) ordered.push(...rest);
+
+      const renamed = new Map<string, string>();
+      if (ordered.length) {
         // in batches, so a proxy's request size limit never refuses the lot
         setProgress(0);
-        const total = files.reduce((n, f) => n + f.size, 0) || 1;
+        const total = ordered.reduce((n, f) => n + f.size, 0) || 1;
         let sent = 0;
-        for (const batch of batches(files)) {
+        for (const batch of batches(ordered)) {
           const size = batch.reduce((n, f) => n + f.size, 0);
-          await upload(server, `/v1/datasets/${encodeURIComponent(name)}/files`, batch, (d, t) => setProgress((sent + (d / (t || 1)) * size) / total));
+          const r = await upload<UploadResult>(server, `/v1/datasets/${encodeURIComponent(name)}/files?on_conflict=rename`, batch, (d, t) =>
+            setProgress((sent + (d / (t || 1)) * size) / total),
+          );
+          for (const x of r?.renamed ?? []) renamed.set(x.from, x.to);
           sent += size;
         }
       }
-      onDone(name);
+      const final = (f: string) => renamed.get(f) ?? f;
+      // what was decided here follows the photos, under their stored names
+      try {
+        const keptNames = new Set(keptFiles.map(f => f.name));
+        const dec = Object.fromEntries(Object.entries(decisions).filter(([f]) => keptNames.has(f)).map(([f, d]) => [final(f), d]));
+        if (Object.keys(dec).length) await photoSettings(server, name, { decisions: dec });
+        if (serverConvert.length) await fixPhotos(server, name, { ops: [{ op: 'convert', files: serverConvert.map(f => final(f.name)) }], apply: true });
+      } catch (e) {
+        setError(e);
+      }
+      clear();
+      setUploaded(true);
+      existing.reload();
     } catch (e) {
       setError(e);
+    } finally {
       setProgress(null);
+      setSettled(n => n + 1);
     }
   };
+
+  const uploads = photos.length - leftOut + serverConvert.length;
+  const bytesTotal = [...photos.filter(p => !p.leftOut).map(p => p.file), ...captions, ...serverConvert].reduce((n, f) => n + f.size, 0);
+  const prep = prepLine(notes);
+  const a = compare && photoFor(compare[0]);
+  const b = compare && photoFor(compare[1]);
 
   return (
     <WizardStep title="Images">
       <div className="form-grid">
         <label className="field">
           <span>Dataset name</span>
-          <input value={name} onChange={e => setName(datasetSafe(e.target.value))} />
+          <input
+            value={name}
+            onChange={e => {
+              setName(datasetSafe(e.target.value));
+              setUploaded(false);
+            }}
+          />
           <small>{already ? `Exists on the server (${already.images} images). New files are added to it.` : 'Created on the server.'}</small>
         </label>
         {existing.data && existing.data.items.length > 0 && (
@@ -279,49 +699,101 @@ function StepImages({ k, dataset, onDone, back }: { k: Knobs; dataset: string; o
           </label>
         )}
       </div>
-      <Dropzone
-        onFiles={async fs => {
-          setConverting(true);
-          const { ok, skipped: bad } = await prepareImages(fs);
-          setConverting(false);
-          setFiles(prev => [...prev, ...ok]);
-          setSkipped(prev => [...prev, ...bad]);
+      {/* while busy the file chooser stays shut; a drop is still caught (so the browser does not open the file) and turned away */}
+      <div
+        className={dropBusy ? 'dropzone-wrap is-busy' : 'dropzone-wrap'}
+        aria-disabled={dropBusy || undefined}
+        onClickCapture={e => {
+          if (!dropBusy) return;
+          e.preventDefault();
+          e.stopPropagation();
         }}
-      />
-      {converting && <p className="quiet-note">Converting photos to JPEG…</p>}
+        onKeyDownCapture={e => {
+          if (!dropBusy || (e.key !== 'Enter' && e.key !== ' ')) return;
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+      >
+        <Dropzone onFiles={onFiles} />
+      </div>
+      {turnedAway && dropBusy && (
+        <p className="quiet-note photo-note">{progress !== null ? 'Add more photos once the upload has finished.' : 'Add more photos once this check has finished.'}</p>
+      )}
+      {!local && !already && <p className="quiet-note photo-hint">10-30 photos of just them: close-ups and some full-length, from different days, outfits and places.</p>}
+      <GoodPhotos />
       {skipped.length > 0 && (
         <Callout kind="warn">
-          {skipped.length} file{skipped.length === 1 ? '' : 's'} left out: the trainer reads JPEG, PNG and WebP, and this browser could not convert{' '}
+          {skipped.length} file{skipped.length === 1 ? '' : 's'} left out: the trainer reads JPEG, PNG and WebP, and neither this browser nor the server could convert{' '}
           {skipped.slice(0, 3).join(', ')}
           {skipped.length > 3 ? ', …' : ''}. Export them as JPEG and add them again.
         </Callout>
       )}
-      {files.length > 0 && (
+      {local && (
         <>
           <div className="tally">
             <p>
-              <strong className="num">{images.length}</strong> images
-              {captions.length > 0 && <> · {captions.length} captions</>} · {bytes(files.reduce((n, f) => n + f.size, 0))}
-              {images.length > 0 && images.length < 15 && <span className="warn"> · fewer than ~15 images rarely holds a likeness</span>}
+              <strong className="num">{photos.length + serverConvert.length}</strong> photos
+              {captions.length > 0 && <> · {plural(captions.length, 'caption', 'captions')}</>} · {bytes(bytesTotal)}
+              {review && review.flagged > 0 && (
+                <>
+                  {' · '}
+                  <button type="button" className="link" onClick={() => setFilter(f => (f === 'flagged' ? null : 'flagged'))}>
+                    {review.flagged} to look at
+                  </button>
+                </>
+              )}
             </p>
-            <button
-              className="btn btn-ghost btn-sm"
-              onClick={() => {
-                setFiles([]);
-                setSkipped([]);
-              }}
-            >
+            <button type="button" className="btn btn-ghost btn-sm" onClick={clear} disabled={measuring !== null || progress !== null}>
               Clear
             </button>
           </div>
-          <div className="thumb-grid">
-            {urls.map(u => (
-              <span key={u} className="thumb">
-                <img src={u} alt="" />
+          {measuring && (
+            <div className="upload-progress">
+              <Progress value={measuring.done} max={measuring.total || null} indeterminate={!measuring.total} />
+              <span className="num">
+                Checking {measuring.done} of {measuring.total}…
               </span>
-            ))}
-          </div>
+            </div>
+          )}
+          <PhotoSummary
+            review={review}
+            photos={grid}
+            filter={filter}
+            setFilter={setFilter}
+            onSuggested={onSuggested}
+            onPick={onPick}
+            undo={undo ? onUndo : undefined}
+            busy={busy || measuring !== null}
+            pick={pick}
+            onKeepPick={keepPick}
+            onCancelPick={() => setPick(null)}
+          />
+          {prep && <p className="quiet-note photo-note">{prep}</p>}
+          <p className="quiet-note photo-note">Sunglasses, group photos, outfits and places are checked after captions or the face check.</p>
+          {review && <Readiness review={review} />}
+          <PhotoGrid
+            photos={grid}
+            filter={filter}
+            onToggle={toggle}
+            onAction={onAction}
+            busy={measuring !== null}
+            groups={groups}
+            picking={!!pick}
+            canCompare={f => !!photoFor(f)}
+          />
+          {review && <DecidePairs review={{ ...review, groups }} photos={grid} onToggle={toggle} onCompare={(x, y) => setCompare([x, y])} />}
         </>
+      )}
+      {!local && (already || uploaded) && <StoredPhotos key={name} name={name} k={k} />}
+      {a && b && (
+        <CompareDialog
+          a={a}
+          b={b}
+          onClose={() => setCompare(null)}
+          onLeaveOut={f => setOut([f], true)}
+          onKeep={f => setOut([f], false)}
+          lockStored
+        />
       )}
       {progress !== null && (
         <div className="upload-progress">
@@ -335,12 +807,249 @@ function StepImages({ k, dataset, onDone, back }: { k: Knobs; dataset: string; o
           <ArrowLeft />
           Back
         </button>
-        <button className="btn btn-primary" disabled={!name || (!files.length && !already) || progress !== null} onClick={go}>
-          {files.length ? `Upload ${files.length} files` : 'Use this dataset'}
-          <ArrowRight />
-        </button>
+        {local ? (
+          <span className="photo-send">
+            {leftOut > 0 && <span className="muted num">{leftOut} left out</span>}
+            <button className="btn btn-primary" disabled={!name || measuring !== null || progress !== null || (!uploads && !captions.length)} onClick={send}>
+              {uploads ? `Upload ${plural(uploads, 'photo', 'photos')}` : `Upload ${plural(captions.length, 'caption', 'captions')}`}
+              <ArrowRight />
+            </button>
+          </span>
+        ) : (
+          <button className="btn btn-primary" disabled={!name || !(already || uploaded)} onClick={() => onDone(name)}>
+            {uploaded ? 'Next: captions' : 'Use this dataset'}
+            <ArrowRight />
+          </button>
+        )}
       </div>
     </WizardStep>
+  );
+}
+
+/**
+ * The photos already on the server (after upload, or a reused dataset):
+ * the server's review, polled while photos are still being analysed. Every
+ * change here is real: leaving out moves a photo into .set_aside/ (restore
+ * puts it back), and decisions are stored with the dataset.
+ */
+function StoredPhotos({ name, k }: { name: string; k: Knobs }) {
+  const server = useServer()!;
+  const resKey = k.resolution.join(',');
+  const detail = useLoad(server, s => get<DatasetDetail>(s, `/v1/datasets/${encodeURIComponent(name)}?limit=1`), [name]);
+  const [review, setReview] = useState<PhotoReview | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  const [filter, setFilter] = useState<PhotoFilter>(null);
+  const [pick, setPick] = useState<PhotoPick | null>(null);
+  const [undo, setUndo] = useState<string[] | null>(null); // .set_aside/ paths the last bulk action made
+  const [compare, setCompare] = useState<[string, string] | null>(null);
+  const seq = useRef(0);
+
+  // only the newest answer lands (a poll must not undo a fix)
+  const load = useCallback(
+    async (wait?: number) => {
+      const n = ++seq.current;
+      try {
+        const r = await checkPhotos(server, name, { resolution: k.resolution, wait_ms: wait });
+        if (n === seq.current) {
+          setReview(r);
+          setError(null);
+        }
+      } catch (e) {
+        if (n === seq.current) setError(e);
+      }
+    },
+    [server, name, resKey], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  useEffect(() => {
+    setPick(null);
+    load(3000);
+  }, [load]);
+  // photos still being analysed: ask again every 2 s
+  useEffect(() => {
+    if (!review || review.pending === 0) return;
+    const t = setTimeout(() => load(0), 2000);
+    return () => clearTimeout(t);
+  }, [review, load]);
+
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const fix = async (ops: PhotoFixOp[]): Promise<PhotoFix> => {
+    const r = await fixPhotos(server, name, { ops, apply: true, resolution: k.resolution });
+    ++seq.current;
+    setReview(r.review);
+    setPick(null);
+    return r;
+  };
+  const asideOf = (r: PhotoFix) => r.changes.filter(c => c.op === 'set_aside' && c.to).map(c => c.to!);
+  const settings = async (patch: PhotoSettingsPatch) => {
+    await photoSettings(server, name, patch);
+    await load(0);
+  };
+
+  if (!review) {
+    return (
+      <>
+        {!error && <p className="quiet-note photo-note">Checking the photos on the server…</p>}
+        {error instanceof ApiError && error.status === 404 ? null : <ErrorNote error={error} />}
+      </>
+    );
+  }
+
+  const path = detail.data?.path ?? '';
+  const src = (rel: string, thumb: boolean) => (path ? mediaUrl(server, joinServerPath(path, rel), thumb) : '');
+  const rank = new Map(pick?.kept.map((f, i) => [f, i + 1]) ?? []);
+  const why = new Map(pick?.left_out.map(l => [l.file, l.reason]) ?? []);
+  const photos: GridPhoto[] = review.items.map(it => ({
+    key: it.file,
+    file: it.file,
+    src: src(it.file, true),
+    full: src(it.file, false),
+    item: it,
+    leftOut: false,
+    rank: rank.get(it.file),
+    reason: why.get(it.file),
+    stored: true,
+  }));
+  // a photo left out from the compare dialog is in .set_aside/ now
+  const photoFor = (file: string): GridPhoto | undefined => {
+    const p = photos.find(x => x.file === file);
+    if (p) return p;
+    const s = review.set_aside.find(x => x.from === file);
+    return s && { key: s.file, file, src: src(s.file, true), full: src(s.file, false), leftOut: true, stored: true };
+  };
+  const restore = (file: string) => {
+    const s = review.set_aside.find(x => x.from === file || x.file === file);
+    return run(async () => {
+      await fix([{ op: 'restore', files: [s?.file ?? file] }]);
+    });
+  };
+  const leaveOut = (files: string[]) =>
+    run(async () => {
+      await fix([{ op: 'set_aside', files }]);
+      setUndo(null);
+    });
+  const onAction = (a: PhotoAction, file: string) => {
+    if (a === 'leave_out') leaveOut([file]);
+    else if (a === 'restore') restore(file);
+    else if (a === 'keep' || a === 'intended') run(() => settings({ decisions: { [file]: a } }));
+    else if (a === 'unkeep' || a === 'unintend') run(() => settings({ decisions: { [file]: null } }));
+    else if (a === 'reference') run(() => settings({ reference: file }));
+    else if (a === 'compare') {
+      const other = partnerOf(review.items.find(i => i.file === file), review.groups);
+      if (other) setCompare([file, other]);
+    }
+  };
+  const bulk = (ops: PhotoFixOp[]) =>
+    run(async () => {
+      const r = await fix(ops);
+      const moved = asideOf(r);
+      setUndo(moved.length ? moved : null);
+    });
+  const onSuggested = () => {
+    const s = suggested(photos);
+    if (s.flags.length) bulk([{ op: 'set_aside_flagged', flags: s.flags }]);
+  };
+  const onPick = (n: number) =>
+    run(async () => {
+      const r = await checkPhotos(server, name, { resolution: k.resolution, pick: n, wait_ms: 0 });
+      ++seq.current;
+      setReview(r);
+      setPick(r.pick ?? null);
+    });
+  const keepPick = () => pick && bulk([{ op: 'keep_best', n: pick.n }]);
+  const onUndo = () =>
+    undo &&
+    run(async () => {
+      await fix([{ op: 'restore', files: undo }]);
+      setUndo(null);
+    });
+
+  const person = review.kind === 'person';
+  const a = compare && photoFor(compare[0]);
+  const b = compare && photoFor(compare[1]);
+  return (
+    <>
+      <div className="tally">
+        <p>
+          <strong className="num">{review.total}</strong> photos on the server
+          {review.pending > 0 && <span className="muted num"> · {review.pending} still being checked</span>}
+          {review.flagged > 0 && (
+            <>
+              {' · '}
+              <button type="button" className="link" onClick={() => setFilter(f => (f === 'flagged' ? null : 'flagged'))}>
+                {review.flagged} to look at
+              </button>
+            </>
+          )}
+        </p>
+      </div>
+      <FaceCheck server={server} dataset={name} review={review} onChange={() => load(0)} />
+      <PhotoSummary
+        review={review}
+        photos={photos}
+        filter={filter}
+        setFilter={setFilter}
+        onSuggested={onSuggested}
+        onPick={onPick}
+        undo={undo ? onUndo : undefined}
+        busy={busy}
+        pick={pick}
+        onKeepPick={keepPick}
+        onCancelPick={() => setPick(null)}
+      />
+      <p className="quiet-note photo-note">Sunglasses, group photos, outfits and places are checked after captions or the face check.</p>
+      <Readiness review={review} onOp={op => (op.op === 'keep_best' ? onPick(op.n ?? 25) : bulk([op]))} busy={busy} />
+      {person && (
+        <FaceCropOffer
+          review={review}
+          onPreview={() => fixPhotos(server, name, { ops: [{ op: 'face_crops' }], resolution: k.resolution })}
+          onApply={async () => {
+            await fix([{ op: 'face_crops' }]);
+          }}
+          onRemove={async () => {
+            await fix([{ op: 'remove_face_crops' }]);
+          }}
+        />
+      )}
+      <ErrorNote error={error} />
+      {photos.length > 0 && <PhotoGrid photos={photos} filter={filter} onToggle={f => leaveOut([f])} onAction={onAction} person={person} busy={busy} groups={review.groups} picking={!!pick} />}
+      <DecidePairs review={review} photos={photos} onToggle={f => leaveOut([f])} onCompare={(x, y) => setCompare([x, y])} busy={busy} />
+      {review.set_aside.length > 0 && (
+        <details className="photo-aside">
+          <summary>Left out ({review.set_aside.length})</summary>
+          <p className="quiet-note">In the dataset's .set_aside folder: the trainer and the captioner skip it, and nothing is deleted.</p>
+          <ul className="photo-aside-list">
+            {review.set_aside.map(s => (
+              <li key={s.file}>
+                <PhotoThumb photo={{ key: s.file, file: s.from, src: src(s.file, true), leftOut: true, stored: true }} />
+                <span className="mono photo-aside-name" title={s.file}>
+                  {s.from}
+                </span>
+                <button type="button" className="btn btn-sm" disabled={busy} onClick={() => restore(s.file)}>
+                  Restore
+                </button>
+              </li>
+            ))}
+          </ul>
+          {review.set_aside.length > 1 && (
+            <button type="button" className="btn btn-sm btn-ghost" disabled={busy} onClick={() => run(async () => void (await fix([{ op: 'restore', all: true }])))}>
+              Restore all
+            </button>
+          )}
+        </details>
+      )}
+      {a && b && <CompareDialog a={a} b={b} onClose={() => setCompare(null)} onLeaveOut={f => leaveOut([f])} onKeep={restore} />}
+    </>
   );
 }
 
@@ -363,8 +1072,21 @@ function StepCaptions({ preset, k, dataset, next, back }: { preset: Preset; k: K
   const check = useLoad(server, s => get<CaptionCheck>(s, `/v1/datasets/${encodeURIComponent(dataset)}/captions/check?trigger=${encodeURIComponent(k.trigger)}`), [dataset, k.trigger, captionsKey]);
   const flagsOf = useMemo(() => new Map((check.data?.items ?? []).map(i => [i.file, i.flags])), [check.data]);
   const [onlyFlagged, setOnlyFlagged] = useState(false);
+  // the photo check over the captions (sunglasses, other people, …) and the readiness line
+  const photo = useLoad(server, s => checkPhotos(s, dataset, { resolution: k.resolution }).catch(() => null), [dataset, k.resolution.join(','), captionsKey]);
+  const mentions = photo.data
+    ? (Object.entries(mentionWhat) as [PhotoFlag, string][])
+        .map(([flag, what]) => ({ flag, what, files: photo.data!.items.filter(i => i.flags.includes(flag)).map(i => i.file) }))
+        .filter(m => m.files.length > 0)
+    : [];
+  const [only, setOnly] = useState<{ flag: PhotoFlag; files: Set<string> } | null>(null);
+  const [askOut, setAskOut] = useState<{ what: string; files: string[] } | null>(null);
   // nothing left flagged: the filter lets everything through again
-  const shown = onlyFlagged && (check.data?.flagged ?? 0) > 0 ? items.filter(i => (flagsOf.get(i.file) ?? []).length > 0) : items;
+  const shown = only
+    ? items.filter(i => only.files.has(i.file))
+    : onlyFlagged && (check.data?.flagged ?? 0) > 0
+      ? items.filter(i => (flagsOf.get(i.file) ?? []).length > 0)
+      : items;
   const triggerIssues = (check.data?.counts.no_trigger ?? 0) + (check.data?.counts.trigger_case ?? 0);
 
   const fixTriggers = async () => {
@@ -398,6 +1120,22 @@ function StepCaptions({ preset, k, dataset, next, back }: { preset: Preset; k: K
     detail.setData(d => (d ? { ...d, items: d.items.map(i => (i.file === item.file ? { ...i, caption } : i)) } : d));
   };
 
+  // leaving out moves photos (and their captions) into .set_aside/; restore is in the Images step
+  const leaveOut = async (files: string[]) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await fixPhotos(server, dataset, { ops: [{ op: 'set_aside', files }], apply: true, resolution: k.resolution });
+      setOnly(null);
+      setAskOut(null);
+      detail.reload();
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const fillMissing = async () => {
     setBusy(true);
     setError(null);
@@ -411,7 +1149,7 @@ function StepCaptions({ preset, k, dataset, next, back }: { preset: Preset; k: K
   };
 
   return (
-    <WizardStep title="Captions">
+    <WizardStep title="Captions" description={photo.data ? <Readiness review={photo.data} compact /> : undefined}>
       <AutoCaption dataset={dataset} template={template} job={job} onChange={detail.reload} />
       {template && (
         <details className="template">
@@ -474,6 +1212,31 @@ function StepCaptions({ preset, k, dataset, next, back }: { preset: Preset; k: K
           ))}
         </p>
       )}
+      {mentions.map(m => (
+        <p key={m.flag} className="photo-mention">
+          <span>
+            Captions mention {m.what} in {m.files.length === 1 ? '1 photo' : `${m.files.length} photos`}
+          </span>
+          <button type="button" className="link" onClick={() => setOnly(o => (o?.flag === m.flag ? null : { flag: m.flag, files: new Set(m.files) }))}>
+            {only?.flag === m.flag ? 'Show all' : 'Show'}
+          </button>
+          <button type="button" className="link" disabled={busy || running} onClick={() => setAskOut({ what: m.what, files: m.files })}>
+            Leave them out
+          </button>
+        </p>
+      ))}
+      {askOut && (
+        <Confirm
+          title={`Leave out ${askOut.files.length === 1 ? '1 photo' : `${askOut.files.length} photos`}?`}
+          confirm="Leave them out"
+          busy={busy}
+          onConfirm={() => leaveOut(askOut.files)}
+          onClose={() => setAskOut(null)}
+        >
+          Their captions mention {askOut.what}. The photos and their captions move to the dataset's .set_aside folder, which the trainer skips. Nothing is deleted:
+          the Images step puts them back.
+        </Confirm>
+      )}
       <ErrorNote error={error || detail.error} />
       <div className="caption-grid">
         {shown.map(item => (
@@ -484,6 +1247,7 @@ function StepCaptions({ preset, k, dataset, next, back }: { preset: Preset; k: K
             onSave={saveCaption}
             locked={running}
             flags={flagsOf.get(item.file)}
+            onLeaveOut={photo.data ? () => leaveOut([item.file]) : undefined}
           />
         ))}
       </div>
@@ -502,6 +1266,15 @@ function StepCaptions({ preset, k, dataset, next, back }: { preset: Preset; k: K
 }
 
 const captionBusy = new Set(['queued', 'starting', 'running', 'stopping']);
+
+/** What the photo check found the captions mention (caption-word flags, PHOTO-PLAN 4.4). */
+const mentionWhat: Partial<Record<PhotoFlag, string>> = {
+  mentions_covered: 'sunglasses, masks or hats',
+  mentions_people: 'other people',
+  mentions_text: 'text or a logo',
+  mentions_tone: 'black and white',
+  mentions_screen: 'a screen',
+};
 
 const flagLabel: Record<CaptionFlag, string> = {
   missing: 'missing',
@@ -671,7 +1444,21 @@ function AutoCaption({ dataset, template, job, onChange }: { dataset: string; te
 }
 
 // locked: a caption job is writing captions; an edit now would race it
-function CaptionCard({ item, src, onSave, locked, flags }: { item: DatasetItem; src: string; onSave: (i: DatasetItem, c: string) => Promise<void>; locked?: boolean; flags?: CaptionFlag[] }) {
+function CaptionCard({
+  item,
+  src,
+  onSave,
+  locked,
+  flags,
+  onLeaveOut,
+}: {
+  item: DatasetItem;
+  src: string;
+  onSave: (i: DatasetItem, c: string) => Promise<void>;
+  locked?: boolean;
+  flags?: CaptionFlag[];
+  onLeaveOut?: () => void;
+}) {
   const [text, setText] = useState(item.caption ?? '');
   const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const saved = useRef(item.caption ?? '');
@@ -712,6 +1499,13 @@ function CaptionCard({ item, src, onSave, locked, flags }: { item: DatasetItem; 
                 {flags.map(f => flagLabel[f]).join(', ')}
               </span>
             )
+          )}
+          {onLeaveOut && (
+            <PhotoMenu label={`More for ${item.file}`} disabled={locked}>
+              <button role="menuitem" onClick={onLeaveOut}>
+                Leave out
+              </button>
+            </PhotoMenu>
           )}
         </div>
         <textarea value={text} rows={3} placeholder="No caption; the default caption is used" readOnly={locked} onChange={e => setText(e.target.value)} onBlur={commit} />
