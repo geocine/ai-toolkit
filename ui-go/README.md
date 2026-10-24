@@ -58,7 +58,7 @@ handlers/<group>        one package per upstream route group
 web/                    frontend (Vite + React placeholder), built to web/dist
 parity/                 drift tests against upstream's files
 docker/                 image layer over upstream's image; compose.local.yml for local tests
-scripts/                build_and_push.sh, parity.sh, failover_test.py
+scripts/                build_and_push.sh (offline tests in scripts/testdata/), parity.sh, failover_test.py
 ```
 
 ## Running locally
@@ -91,13 +91,18 @@ or QuickPod from the studio, or set one up by hand, see
 [docs/providers.md](docs/providers.md).
 
 ```bash
-ui-go/scripts/build_and_push.sh          # base: upstream's docker/Dockerfile at the merge-base; then the Go layer
-ui-go/scripts/build_and_push.sh --push   # push <sha>, <timestamp>, <version>, latest
-python ui-go/scripts/failover_test.py    # local failover test (docker/compose.local.yml, GPU)
+ui-go/scripts/build_and_push.sh            # base: upstream's docker/Dockerfile at the merge-base; then the Go layer
+ui-go/scripts/build_and_push.sh --push     # push <sha>, <timestamp>, <version>, cu130, latest; verify <sha>
+ui-go/scripts/build_and_push.sh --verify   # re-check the pushed <sha> (after making the package public)
+python ui-go/scripts/failover_test.py      # local failover test (docker/compose.local.yml, GPU)
 ```
 
-`IMAGE` (default `ghcr.io/geocine/aitoolkit-go`), `UPSTREAM_REF` (default
-`main`) and `REBUILD_BASE=1` adjust the build.
+The image is the public package `ghcr.io/geocine/aitoolkit-go` (linux/amd64,
+CUDA 13.0, driver 580 or newer, RTX 30-series or A100 and newer). Its tags,
+labels and host requirements, and how to publish it the first time, are in
+[docs/deploy.md](docs/deploy.md#the-image). `IMAGE` (default
+`ghcr.io/geocine/aitoolkit-go`), `UPSTREAM_REF` (default `main`),
+`REBUILD_BASE=1`, `BASE_INSTALLER=uv` and `ALLOW_RETAG=1` adjust the build.
 
 ## Headless API
 
