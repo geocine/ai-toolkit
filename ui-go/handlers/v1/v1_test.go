@@ -179,6 +179,16 @@ func TestJobLifecycle(t *testing.T) {
 		t.Fatalf("stored job_config: %s", stored.JobConfig)
 	}
 	want(t, e.call(t, "POST", "/v1/jobs", map[string]any{"name": "lora1", "config": config("lora1")}), 409, "conflict")
+	// only the face check route makes a photo_faces job (it runs this server's script)
+	rf := e.call(t, "POST", "/v1/jobs", map[string]any{"name": "faces", "type": "photo_faces", "config": config("faces")})
+	want(t, rf, 400, "invalid_request")
+	if !strings.Contains(string(rf.body), "face check") {
+		t.Fatalf("refusal: %s", rf.body)
+	}
+	want(t, e.call(t, "PATCH", "/v1/jobs/"+id, map[string]any{"type": "photo_faces"}), 400, "invalid_request")
+	if j, _ := store.GetJob(ctx, id); j.JobType == "photo_faces" {
+		t.Fatal("PATCH made a training job a face check")
+	}
 
 	r = e.call(t, "PATCH", "/v1/jobs/"+id, map[string]any{"gpu_ids": "0", "policy": map[string]any{"max_auto_resumes": 5}})
 	want(t, r, 200, "")

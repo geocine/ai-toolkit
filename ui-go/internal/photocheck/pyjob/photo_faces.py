@@ -238,10 +238,10 @@ class Models:
     def __init__(self, conf, job):
         conf = conf or {}
         self.dir = conf.get("dir") or default_models_dir()
+        # only the pinned files, whatever the config says: a url or sha256
+        # in config.models never picks what is downloaded (the worker writes
+        # the same pins there, and pyjob_test keeps the two in step)
         self.spec = {k: dict(v) for k, v in DEFAULT_MODELS.items()}
-        for k, v in conf.items():
-            if isinstance(v, dict) and v.get("url"):
-                self.spec[k] = v
         self.job = job
 
     def path(self, key):

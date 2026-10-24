@@ -13,6 +13,7 @@ import (
 	"github.com/geocine/aitoolkit/internal/jobstate"
 	"github.com/geocine/aitoolkit/internal/jsonx"
 	"github.com/geocine/aitoolkit/internal/paths"
+	"github.com/geocine/aitoolkit/internal/photocheck"
 	"github.com/geocine/aitoolkit/internal/remote"
 	"github.com/geocine/aitoolkit/internal/settings"
 	"github.com/geocine/aitoolkit/internal/state"
@@ -181,6 +182,10 @@ func plainName(s string) bool {
 func restore(ctx context.Context, c remote.Client, rem *remote.Remote, m *Manifest, req ImportRequest, dsRoot, trRoot string) (*store.Job, error) {
 	if !plainName(m.Name) {
 		return nil, v1api.Errorf(v1api.CodeInvalidRequest, fmt.Sprintf("the manifest names the job %q, which is not a plain folder name", m.Name))
+	}
+	// a face check runs this server's own script; only queueFaceJob makes one
+	if m.Type == photocheck.FaceJobType {
+		return nil, v1api.Errorf(v1api.CodeInvalidRequest, "the manifest is a face check, which cannot be imported; import a training job")
 	}
 	for _, name := range m.Datasets {
 		if !plainName(name) {

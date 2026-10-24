@@ -722,3 +722,34 @@ func TestImportFinishedRunLeavesNoLease(t *testing.T) {
 		t.Fatalf("second server: %v", err)
 	}
 }
+
+// TestImportRefusesFaceCheck: a manifest that says photo_faces is refused,
+// so a shared remote cannot get this server's face check script run with a
+// config it wrote.
+func TestImportRefusesFaceCheck(t *testing.T) {
+	ctx := context.Background()
+	shared := t.TempDir()
+	a := newNode(t, shared)
+	j := setupJob(t, a, "shared")
+	if _, err := store.UpdateJob(ctx, j.ID, store.Fields{"status": "completed", "info": "Training completed"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SyncJob(ctx, j.ID, ReasonFinal); err != nil {
+		t.Fatal(err)
+	}
+	m := manifestOn(t, shared)
+	m.Type = "photo_faces"
+	data, _ := json.Marshal(m)
+	if err := os.WriteFile(filepath.Join(shared, "jobs", jobName, "manifest.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b := newNode(t, shared)
+	b.use()
+	_, err := Import(ctx, ImportRequest{Remote: "shared", Name: jobName})
+	if err == nil || !strings.Contains(err.Error(), "face check") {
+		t.Fatalf("import of a face check manifest: %v", err)
+	}
+	if got, _ := store.FindFirstJob(ctx, store.JobQuery{Where: `"name" = ?`, Args: []any{jobName}}); got != nil {
+		t.Fatalf("a face check was imported: %+v", got)
+	}
+}

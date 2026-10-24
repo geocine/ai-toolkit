@@ -17,6 +17,7 @@ import (
 	"github.com/geocine/aitoolkit/internal/engines"
 	"github.com/geocine/aitoolkit/internal/jobview"
 	"github.com/geocine/aitoolkit/internal/jsonx"
+	"github.com/geocine/aitoolkit/internal/photocheck"
 	"github.com/geocine/aitoolkit/internal/proc"
 	"github.com/geocine/aitoolkit/internal/remote"
 	"github.com/geocine/aitoolkit/internal/state"
@@ -202,6 +203,10 @@ func policyPatch(ctx context.Context, raw json.RawMessage, p *state.Policy) erro
 	return nil
 }
 
+// faceTypeMsg refuses a job of type photo_faces: a face check runs this
+// server's own script, so only POST /v1/datasets/{name}/photos/faces makes one.
+const faceTypeMsg = "type photo_faces is a face check; start one with POST /v1/datasets/{name}/photos/faces"
+
 type jobBody struct {
 	Name   *string         `json:"name"`
 	GpuIDs *string         `json:"gpu_ids"`
@@ -250,6 +255,10 @@ func createJob(w http.ResponseWriter, r *http.Request) {
 	}
 	if b.Type != nil && strings.TrimSpace(*b.Type) == "" {
 		b.Type = nil
+	}
+	if b.Type != nil && *b.Type == photocheck.FaceJobType {
+		v1api.Fail(w, v1api.CodeInvalidRequest, faceTypeMsg)
+		return
 	}
 	max, err := store.MaxQueuePosition(ctx)
 	if err != nil {
@@ -327,6 +336,10 @@ func patchJob(w http.ResponseWriter, r *http.Request) {
 		f["job_config"] = cfg
 	}
 	if b.Type != nil {
+		if *b.Type == photocheck.FaceJobType {
+			v1api.Fail(w, v1api.CodeInvalidRequest, faceTypeMsg)
+			return
+		}
 		f["job_type"] = *b.Type
 	}
 	if b.Ref != nil {

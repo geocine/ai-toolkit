@@ -19,6 +19,7 @@ import (
 
 	"github.com/geocine/aitoolkit/internal/bundles"
 	"github.com/geocine/aitoolkit/internal/events"
+	"github.com/geocine/aitoolkit/internal/photocheck"
 	"github.com/geocine/aitoolkit/internal/portable"
 	"github.com/geocine/aitoolkit/internal/remote"
 	"github.com/geocine/aitoolkit/internal/settings"
@@ -454,6 +455,10 @@ func prepareZip(ctx context.Context, zipPath, uploadID string, o importOpts) (pr
 	plan, err := bundles.Read(&zr.Reader)
 	if err != nil {
 		return nil, err
+	}
+	// a face check runs this server's own script; only queueFaceJob makes one
+	if plan.Manifest.Type == photocheck.FaceJobType {
+		return nil, v1api.Errorf(v1api.CodeInvalidRequest, "this bundle is a face check, which cannot be imported; import a training job")
 	}
 	prep = &preparedImport{zr: zr, plan: plan, uploadID: uploadID}
 	if prep.dsRoot, err = settings.DatasetsRoot(ctx); err != nil {
