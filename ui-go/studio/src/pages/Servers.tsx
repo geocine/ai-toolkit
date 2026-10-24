@@ -11,9 +11,14 @@ import { autoLink, canAutoLink, clearLinked, mayBill, providerNames, relinked, u
 import { providers } from '../lib/provision';
 import type { ProviderKind } from '../lib/provisionTypes';
 import { href } from '../lib/route';
-import { uid } from '../lib/store';
+import { uid, useStored } from '../lib/store';
 
 type Check = { ok: true; health: Health; system: SystemInfo } | { ok: false; error: unknown };
+type Mode = NonNullable<Health['mode']>;
+
+// the last answer per server id while the studio is open: coming back to this
+// page shows it at once, then each row is checked again
+const lastChecks: Record<string, Check> = {};
 
 async function check(s: Server): Promise<Check> {
   try {
@@ -38,7 +43,10 @@ const scrollTo = (id: string) => setTimeout(() => document.getElementById(id)?.s
 export function Servers({ create, activeMode }: { create?: boolean; activeMode: Health['mode'] | null }) {
   const { servers, setServers, active, setActiveId } = useStudio();
   const [draft, setDraft] = useState<Server | null>(servers.length ? null : blank());
-  const [checks, setChecks] = useState<Record<string, Check | 'pending'>>({});
+  const [checks, setChecks] = useState<Record<string, Check | 'pending'>>(() => ({ ...lastChecks }));
+  // what each server's /v1/health last said it is (no secrets), so a studio API
+  // keeps its badge when it is not the active one or cannot be reached right now
+  const [modes, setModes] = useStored<Record<string, Mode>>('aitk.studio.serverModes', {});
   const [creating, setCreating] = useState(false);
   const [guide, setGuide] = useState<{ kind?: ProviderKind } | null>(null);
   const [finding, setFinding] = useState(false);
@@ -67,18 +75,37 @@ export function Servers({ create, activeMode }: { create?: boolean; activeMode: 
     window.location.replace(href({ page: 'servers' }));
   }, [create]);
 
-  const modeOf = (s: Server): Health['mode'] | null => {
+  const noteMode = (id: string, m: Mode) => setModes(x => (x[id] === m ? x : { ...x, [id]: m }));
+  useEffect(() => {
+    if (active && activeMode) noteMode(active.id, activeMode);
+  }, [active?.id, activeMode]); // eslint-disable-line react-hooks/exhaustive-deps
+  // a removed server's mode goes with it
+  useEffect(() => {
+    setModes(x => {
+      const keep = Object.fromEntries(Object.entries(x).filter(([id]) => servers.some(s => s.id === id)));
+      return Object.keys(keep).length === Object.keys(x).length ? x : keep;
+    });
+  }, [servers]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const modeOf = (s: Server): Mode | null => {
     const c = checks[s.id];
     if (c && c !== 'pending' && c.ok) return c.health.mode ?? 'server';
-    return s.id === active?.id ? activeMode : null;
+    return (s.id === active?.id && activeMode) || modes[s.id] || null;
   };
   const onlyStudioApi = servers.length === 1 && modeOf(servers[0]) === 'studio-api' && tracked.items.length === 0;
 
-  const test = async (s: Server) => {
-    setChecks(c => ({ ...c, [s.id]: 'pending' }));
+  // quiet keeps the last answer on screen while it is asked again
+  const test = async (s: Server, quiet = false) => {
+    if (!quiet || !lastChecks[s.id]) setChecks(c => ({ ...c, [s.id]: 'pending' }));
     const r = await check(s);
+    lastChecks[s.id] = r;
+    if (r.ok) noteMode(s.id, r.health.mode ?? 'server');
     setChecks(c => ({ ...c, [s.id]: r }));
   };
+  // every row, each time the page opens: not only the active server is known
+  useEffect(() => {
+    for (const s of servers) test(s, true);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveDraft = () => {
     if (!draft) return;
