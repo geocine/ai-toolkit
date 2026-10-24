@@ -130,7 +130,8 @@ with step 0 and no trainer progress yet).
 - `GET /v1/jobs/{id}/bundle?...` and `POST /v1/jobs/{id}/bundle/push`: see Run bundles
 
 ### Queues
-- `GET /v1/queues` → `{items: [{gpu_ids, running, current_job_id, queued: n}]}`
+- `GET /v1/queues` → `{items: [{gpu_ids, running, current_job_id, queued: n}]}`. The queue `cpu` uses no
+  GPU: face checks run there, so one starts at once beside a training run.
 - `POST /v1/queues/{gpu_ids}/start`, `/stop` → queue
 
 ### Datasets
@@ -201,6 +202,9 @@ full by `aitk_api` and in `studio/src/lib/photoTypes.ts`.
   purpose); null clears. They are stored by content, so they survive a rename.
 - `DELETE /v1/datasets/{name}/photos/analysis` → 204: forgets the dataset's scores, face results,
   face-to-face similarities, reference and decisions. The photos stay. Deleting the dataset forgets them too.
+- `POST /v1/datasets/{name}/photos/faces {text?}` → 201 Job (type `photo_faces`, ref the dataset folder,
+  `gpu_ids` `cpu`) plus `warnings`, already queued: the face check (below). 409 while one is queued,
+  running or stopping for the dataset; 400 when it has no photos or more than 2,000 (split the dataset).
 
 Leaving a photo out moves it, with its caption and thumbnail, to `<dataset>/.set_aside/<file>`; nothing
 is deleted. The trainer, the captioner, the dataset listing, bundles and portable sync skip dot folders,
@@ -253,11 +257,40 @@ adds photo lines (copies, low resolution, files read wrongly, the grade); they n
 
 Privacy: photos and everything derived from them stay on this server and in the browser that shows
 them. There is no third-party API. Logs carry file names and scores only, and photo-check data never
-goes through notifications. Scores and face-to-face similarity numbers are kept with the dataset in the
-server database. Face templates are not stored. The SFace weights (Apache-2.0) were trained by their
-authors on public face datasets (CASIA-WebFace, VGGFace2 and MS-Celeb-1M per the SFace paper;
-MS-Celeb-1M was withdrawn by Microsoft in 2019). The check runs only when you click Check faces, and
-only on your server.
+goes through notifications (face check jobs send no job messages at all). Check faces only on photos
+of yourself or of someone who agreed. Scores and face-to-face similarity numbers are kept with the
+dataset in the server database. Face templates are not stored: they exist only in the face check's
+memory, and the similarities between this dataset's faces cannot recognise the person in any other
+photo. They are cleared by Forget analysis, by deleting the dataset and by the next face check. The
+SFace weights (Apache-2.0) were trained by their authors on public face datasets (CASIA-WebFace,
+VGGFace2 and MS-Celeb-1M per the SFace paper; MS-Celeb-1M was withdrawn by Microsoft in 2019). The
+check runs only when you click Check faces, and only on your server.
+
+##### Face check
+Faces, other people in a photo and look-alikes need a model, so they are a job rather than part of
+every review. `photos/faces` queues a `photo_faces` job on the `cpu` queue. It runs the toolkit's
+Python (numpy, Pillow and OpenCV 4.10 or newer; no torch) with a script the server writes into the job
+folder, and takes about a minute for 30 photos on two CPU threads. It reads every photo the review
+lists (set-aside ones are left out), finds faces with YuNet and compares them with SFace; with
+`text: true` it also looks for text and watermarks with PP-OCR. Like Auto caption it never resumes on
+its own, syncs or uploads, and it never blocks photo fixes.
+
+- Follow it with `GET /v1/datasets/{name}` (`photo_job`, the newest face check) or the review's
+  `faces` (`state`: `none`, `queued`, `running`, `done`, `failed` or `stopped`; `checked`, `stale`
+  once the photos changed since it (added, removed, set aside or replaced), `added` (photos it has not
+  seen)). The next `photos/check` reads the result in and deletes
+  the job's `faces.json`; from then on the review carries the face flags, `two_people`,
+  `identity_outliers` and the face crops offer.
+- `warnings`: photos in a format the check cannot read (heic, heif, avif, jxl: convert them first),
+  and the one-time model download.
+- The models come from the OpenCV model zoo (github.com/opencv/opencv_zoo) the first time, pinned by
+  sha256, into `<models>/opencv_zoo` (`<models>` is the models path setting): YuNet 2023mar (MIT,
+  0.2 MB; the 2026may export on OpenCV 5 when that one does not load) and SFace 2021dec (Apache-2.0,
+  39 MB), plus PP-OCRv3 English text detection (Apache-2.0, 2.4 MB) with `text`. The request sends
+  no photo data.
+- Check an install with `python -I photo_faces.py --selftest [--models DIR]` using the toolkit's
+  Python (the script is `internal/photocheck/pyjob/photo_faces.py`, and every face check's job folder
+  has a copy). It prints the OpenCV version and the detector it loaded, and exits 0 when it works.
 
 ### Files
 Generic access inside the allowed roots: `datasets`, `training`, `data`, `models`.
@@ -1127,8 +1160,10 @@ through `machines.link`). Bodies that are not JSON:
 - `bundles.wait(id)` polls an import or push until it settles, like `jobs.wait`.
 
 Photo checks are `datasets.checkPhotos` (poll while `pending > 0`), `datasets.fixPhotos`,
-`datasets.photoSettings`, `datasets.forgetPhotos` and `photos.assess` (Datasets, Photo checks). An
-agent can send a finding's `op` to `fixPhotos` as it is, and look at a flagged photo with `aitk_view`.
+`datasets.photoSettings`, `datasets.forgetPhotos`, `datasets.checkFaces` and `photos.assess`
+(Datasets, Photo checks). An agent can send a finding's `op` to `fixPhotos` as it is, and look at a
+flagged photo with `aitk_view`. After `checkFaces`, poll `datasets.get` until `photo_job` settles, then
+call `checkPhotos` for the face flags; only check faces on photos of the user or of someone who agreed.
 
 GPU servers are the `providers` group (`list`, `setKey`, `removeKey`, `test`,
 `offers`, `recommend`, `templates`, `setup`; `hosts.recommend` searches every

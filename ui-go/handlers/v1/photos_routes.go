@@ -7,8 +7,8 @@ import (
 	"github.com/geocine/aitoolkit/internal/photocheck"
 )
 
-// Photo checks (photos.go, photos_fix.go) join the /v1 routes through the
-// extraRoutes seam. docs/headless.md, Datasets, "Photo checks" has the shapes.
+// Photo checks (photos.go, photos_fix.go, photos_faces.go) join the /v1
+// routes through the extraRoutes seam. docs/headless.md, Datasets, "Photo checks" has the shapes.
 func init() { addRoutes(registerPhotos) }
 
 func registerPhotos(mux *http.ServeMux) {
@@ -21,4 +21,5 @@ func registerPhotos(mux *http.ServeMux) {
 	httpx.Handle(mux, "POST /v1/datasets/{name}/photos/fix", fixPhotos)
 	httpx.Handle(mux, "PUT /v1/datasets/{name}/photos/settings", putPhotoSettings)
 	httpx.Handle(mux, "DELETE /v1/datasets/{name}/photos/analysis", forgetPhotos)
+	httpx.Handle(mux, "POST /v1/datasets/{name}/photos/faces", checkFaces)
 }

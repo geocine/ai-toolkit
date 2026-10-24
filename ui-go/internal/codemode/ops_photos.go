@@ -1,8 +1,9 @@
 package codemode
 
-// Photo checks (handlers/v1/photos*.go, docs/headless.md "Photo checks"). The
-// types are PhotoTypesTS (photo_types.go); UploadResult there is also the
-// result of datasets.uploadFiles.
+// Photo checks (handlers/v1/photos*.go, docs/headless.md "Photo checks"),
+// the face check (checkFaces) among them. The types are PhotoTypesTS
+// (photo_types.go); UploadResult there is also the result of
+// datasets.uploadFiles.
 
 func init() {
 	RegisterTypes(PhotoTypesTS)
@@ -35,4 +36,7 @@ var photoOps = []Op{
 	{Group: "datasets", Name: "forgetPhotos", Method: "DELETE", Path: "/v1/datasets/{name}/photos/analysis", Result: "null",
 		Doc:    "Forget this dataset's photo analysis: scores, face results, face-to-face similarities, reference and decisions. Photos are untouched.",
 		Params: []Param{p("name", "string", "path", "")}},
+	{Group: "datasets", Name: "checkFaces", Method: "POST", Path: "/v1/datasets/{name}/photos/faces", Result: "Job & { warnings: string[] }",
+		Doc:    "Find faces, other people and look-alikes: a photo_faces job on the server's CPU queue (runs beside training; about a minute for 30 photos; model download 39 MB once). Only for photos of yourself or of someone who agreed. Poll datasets.get photo_job, then checkPhotos. 409 while one runs.",
+		Params: []Param{p("name", "string", "path", ""), opt("text", "boolean", "body", "also look for text and watermarks (downloads 2 MB more once)")}},
 }
