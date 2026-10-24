@@ -329,7 +329,7 @@ address and token. Any key works; these keys make the mock fail on purpose:
 | Key | What happens |
 |---|---|
 | `sim_bad` | The key is rejected. |
-| `sim_broke` | Not enough credit. |
+| `sim_broke` | The account has no credit: the key check shows $0.00 and launches fail. |
 | `sim_full` | No capacity for the offer. |
 | `sim_429` | Every third call is rate limited. |
 | `sim_crash` | The machine crashes after it starts. |
