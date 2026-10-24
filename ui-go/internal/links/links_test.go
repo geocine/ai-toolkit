@@ -73,3 +73,26 @@ func must(s string, _ time.Time, err error) string {
 	}
 	return s
 }
+
+// Through a controller's relay, Origin points back through the relay; any
+// other prefix is ignored, and AITK_PUBLIC_URL still wins.
+func TestOriginRelayPrefix(t *testing.T) {
+	r := httptest.NewRequest("GET", "/v1/links", nil)
+	r.Host = "203.0.113.5:8675"
+	r.Header.Set("X-Forwarded-Proto", "https")
+	r.Header.Set("X-Forwarded-Host", "controller.example")
+	r.Header.Set("X-Forwarded-Prefix", "/v1/machines/mch_AbC123/relay")
+	if o := Origin(r, ""); o != "https://controller.example/v1/machines/mch_AbC123/relay" {
+		t.Fatal(o)
+	}
+	for _, bad := range []string{"/evil", "/v1/machines/mch_1/relay/x", "/v1/machines/a.b/relay", "//evil.example/v1/machines/m/relay", ""} {
+		r.Header.Set("X-Forwarded-Prefix", bad)
+		if o := Origin(r, ""); o != "https://controller.example" {
+			t.Errorf("prefix %q: %s", bad, o)
+		}
+	}
+	r.Header.Set("X-Forwarded-Prefix", "/v1/machines/mch_1/relay")
+	if o := Origin(r, "https://public.example"); o != "https://public.example" {
+		t.Fatal(o)
+	}
+}

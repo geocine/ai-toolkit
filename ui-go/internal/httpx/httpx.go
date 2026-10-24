@@ -4,11 +4,15 @@
 package httpx
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"path"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -80,16 +84,39 @@ var publicRoutes = []string{"/api/img/", "/api/files/", "/api/audio/art/", "/v1/
 // guarded are the path prefixes that need a token when auth is on.
 var guarded = []string{"/api/", "/v1/", "/mcp"}
 
+// relayRoute matches a GPU server relayed through this one
+// (/v1/machines/{id}/relay/{inner}); group 1 is the inner path.
+var relayRoute = regexp.MustCompile(`^/v1/machines/[^/]+/relay(/.*)$`)
+
+type authKey struct{}
+
+// Authenticated reports whether Auth let r through on this server's own
+// credentials (AI_TOOLKIT_AUTH or an API key), or the server is open and r
+// came from this machine. A public read or a signed link is not
+// authenticated: the relay forwards those with no credentials.
+func Authenticated(r *http.Request) bool {
+	ok, _ := r.Context().Value(authKey{}).(bool)
+	return ok
+}
+
+func withAuthenticated(r *http.Request) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), authKey{}, true))
+}
+
 // Auth mirrors ui/src/middleware.ts and extends it to /v1 and /mcp: when
 // AI_TOOLKIT_AUTH is set or any API key exists, those routes (except the
 // public ones) need `Authorization: Bearer <token>`, where the token is
 // AI_TOOLKIT_AUTH or an active API key. With neither, the server is open,
 // like upstream. A signed download link (internal/links) stands in for the
-// token on the GET it was signed for.
+// token on the GET it was signed for. Requests that matched a token (or, on
+// an open server, came from this machine) are marked for Authenticated.
 func Auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		want := os.Getenv("AI_TOOLKIT_AUTH")
-		if !needsToken(r.Method, r.URL.Path) || (want == "" && !state.HasKeys()) {
+		if want == "" && !state.HasKeys() {
+			if loopbackPeer(r) {
+				r = withAuthenticated(r)
+			}
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -97,37 +124,81 @@ func Auth(next http.Handler) http.Handler {
 		if parts := strings.Split(r.Header.Get("Authorization"), " "); len(parts) > 1 {
 			token = parts[1]
 		}
-		if token == "" && links.Valid(r) {
+		if token != "" && ((want != "" && subtle.ConstantTimeCompare([]byte(token), []byte(want)) == 1) ||
+			state.VerifyKey(r.Context(), token)) {
+			next.ServeHTTP(w, withAuthenticated(r))
+			return
+		}
+		if !needsToken(r) || (token == "" && links.Valid(r)) {
 			next.ServeHTTP(w, r)
 			return
 		}
-		ok := token != "" && ((want != "" && subtle.ConstantTimeCompare([]byte(token), []byte(want)) == 1) ||
-			state.VerifyKey(r.Context(), token))
-		if !ok {
-			if strings.HasPrefix(r.URL.Path, "/api/") {
-				JSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
-			} else {
-				JSON(w, http.StatusUnauthorized, map[string]any{"error": map[string]string{
-					"code": "unauthorized", "message": "missing or invalid bearer token"}})
-			}
-			return
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			JSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		} else {
+			JSON(w, http.StatusUnauthorized, map[string]any{"error": map[string]string{
+				"code": "unauthorized", "message": "missing or invalid bearer token"}})
 		}
-		next.ServeHTTP(w, r)
 	})
 }
 
-func needsToken(method, path string) bool {
-	if method == http.MethodGet || method == http.MethodHead {
-		for _, p := range publicRoutes {
-			if strings.HasPrefix(path, p) {
-				return false
-			}
+func needsToken(r *http.Request) bool {
+	p := r.URL.Path
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		if publicRoute(p) || publicRelay(r) {
+			return false
 		}
 	}
-	for _, p := range guarded {
-		if strings.HasPrefix(path, p) {
+	for _, g := range guarded {
+		if strings.HasPrefix(p, g) {
 			return true
 		}
 	}
 	return false
+}
+
+func publicRoute(p string) bool {
+	for _, pr := range publicRoutes {
+		if strings.HasPrefix(p, pr) {
+			return true
+		}
+	}
+	return false
+}
+
+// publicRelay: a GET/HEAD through the relay to one of the machine's own public
+// routes, or carrying a signature for a path a link may point at. The relay
+// forwards it with no credentials and the machine checks its route or its
+// own signature, so passing it here grants nothing. A path with dot segments
+// is never public (the router would redirect it elsewhere).
+func publicRelay(r *http.Request) bool {
+	p := r.URL.Path
+	m := relayRoute.FindStringSubmatch(p)
+	if m == nil || path.Clean(p) != p {
+		return false
+	}
+	if publicRoute(m[1]) {
+		return true
+	}
+	if r.URL.Query().Get("sig") == "" {
+		return false
+	}
+	em := relayRoute.FindStringSubmatch(r.URL.EscapedPath())
+	return em != nil && links.Allowed(em[1])
+}
+
+// loopbackPeer is true for a direct connection from this machine: a loopback
+// RemoteAddr and no proxy header saying the request came from elsewhere.
+func loopbackPeer(r *http.Request) bool {
+	for _, h := range []string{"X-Forwarded-For", "X-Real-Ip", "Forwarded"} {
+		if r.Header.Get(h) != "" {
+			return false
+		}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
