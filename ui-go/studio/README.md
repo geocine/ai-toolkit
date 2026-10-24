@@ -54,6 +54,9 @@ server's base URL (prefilled) and no CORS setup. The build carries a web app
 manifest and an app-shell service worker (`public/sw.js`, which never caches
 the API), so "Add to Home Screen" installs it.
 
+No server yet? Run a controller on your laptop (`aitk-server --controller`,
+no GPU needed) and open its `/studio/`: `ui-go/docs/controller.md`.
+
 In development, add a server with the base URL `/aitk`: the dev server
 proxies it to `AITK_API` (default `http://127.0.0.1:8675`), so no CORS setup is
 needed.

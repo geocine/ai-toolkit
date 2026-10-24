@@ -48,8 +48,19 @@ providers while anything runs. Keep it long-lived: if it is lost, its
 machines **keep billing**. Every machine is labelled `aitk-…` at the provider,
 so you can find and terminate it in the provider console.
 
-Any aitk server can be the controller. To run one on your laptop with Docker
-(a large CUDA image; no GPU needed):
+Any aitk server can be the controller. To run one on your laptop, with no
+GPU, Python or upstream checkout, start the Go server in controller mode
+([docs/controller.md](controller.md) has the build steps, the flags and a
+small image):
+
+```bash
+./aitk-server --controller     # then open http://127.0.0.1:8675/studio/
+```
+
+It listens on `127.0.0.1` and keeps its databases in your user config
+folder.
+
+Or, with Docker and no build (a large CUDA image; no GPU needed):
 
 ```bash
 docker run -d --name aitk-controller -p 127.0.0.1:8675:8675 \

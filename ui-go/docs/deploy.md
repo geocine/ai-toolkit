@@ -42,6 +42,8 @@ The container needs a GPU, port 8675 exposed over HTTP, and the env vars.
 Or create one from the studio: docs/providers.md (step-by-step template
 guides for all three are there too).
 
+No server yet? Run a controller on your laptop: docs/controller.md.
+
 Disks can be ephemeral: training state lives on the remote. Mount
 `/root/.cache/huggingface` only to keep base models across restarts on the
 same machine.
@@ -234,6 +236,13 @@ contacted.
 | `AITK_PROVISION_SIMULATE_DELAY` (`15s`) | How long a simulated machine takes to come up. |
 | `AITK_PROVISION_SIMULATE_REGISTRY` (unset) | `real` keeps simulate's mock providers but checks images against the real public registries and sizes models from Hugging Face (anonymous reads), instead of the in-process mocks. |
 | `AITK_IMAGECHECK_ALLOW_LOOPBACK_PROXY` (`0`) | `1` lets the image check go through an `HTTPS_PROXY` or `HTTP_PROXY` on this machine. It otherwise dials public addresses only. |
+
+**Controller** (no GPU or trainer; creates and tracks GPU servers; docs/controller.md)
+| Variable | Meaning |
+|---|---|
+| `AITK_CONTROLLER` (`0`) | `1`, `true` or `yes` runs this server as a controller (same as `--controller`): its own databases, no trainer, no console, and `127.0.0.1` unless `--host` is given. A reachable address needs `AI_TOOLKIT_AUTH`. |
+| `AITK_CONTROLLER_DIR` | Where a controller keeps its databases (same as `--data-dir`; default `<user config dir>/aitk-controller`). |
+| `AITK_ALLOWED_HOSTS` | Extra `Host` names an open controller (no token, no API key) answers besides `127.0.0.1`, `[::1]`, `localhost` and the host of `AITK_PUBLIC_URL`: comma list of `host` or `host:port`. |
 
 **Server** (rarely needed)
 `PORT` (8675), `AI_TOOLKIT_UI_DIR` (frontend dir), `MODELS_PATH`,
