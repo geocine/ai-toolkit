@@ -28,6 +28,7 @@ import (
 	"github.com/geocine/aitoolkit/internal/mcpserver"
 	"github.com/geocine/aitoolkit/internal/notify"
 	"github.com/geocine/aitoolkit/internal/paths"
+	"github.com/geocine/aitoolkit/internal/provision/sim"
 	"github.com/geocine/aitoolkit/internal/server"
 	"github.com/geocine/aitoolkit/internal/state"
 	"github.com/geocine/aitoolkit/internal/store"
@@ -81,6 +82,24 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	// media.Intercept serves the media GETs before the mux, which would
+	// otherwise redirect a proxy-decoded `/api/img//abs/path` (see media).
+	// inner is the chain below Auth: simulated GPU servers serve it behind
+	// their own token.
+	inner := media.Intercept(mux)
+	handler := httpx.CORS(httpx.Auth(inner))
+	// simulate before the watcher's first tick, so simulated machines are
+	// refreshed and real ones are left alone
+	if sim.Enabled() {
+		stopSim, err := sim.Start(ctx, inner)
+		if err != nil {
+			log.Fatalf("simulate: %v", err)
+		}
+		defer stopSim()
+		sim.WarnIfReachable(*host)
+	}
+
 	// when done (AITK_WHEN_DONE) on a machine without a provider API: exit cleanly
 	lifecycle.SetExit(cancel)
 	// the supervisor runs even with --no-worker: recovery and events matter
@@ -93,9 +112,6 @@ func main() {
 	}
 	go bootstrap.ImportOnBoot(ctx)
 
-	// media.Intercept serves the media GETs before the mux, which would
-	// otherwise redirect a proxy-decoded `/api/img//abs/path` (see media).
-	handler := httpx.CORS(httpx.Auth(media.Intercept(mux)))
 	mcpserver.SetAPI(handler)
 	srv := &http.Server{
 		Addr:              net.JoinHostPort(*host, strconv.Itoa(*port)),
