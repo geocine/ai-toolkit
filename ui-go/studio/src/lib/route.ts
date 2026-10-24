@@ -7,10 +7,11 @@ export type Route =
   | { page: 'new' }
   | { page: 'presets'; tab?: 'data' }
   | { page: 'lifecycle' }
-  | { page: 'servers' };
+  | { page: 'servers'; create?: boolean };
 
 export function parse(hash: string): Route {
-  const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
+  const [path, query = ''] = hash.replace(/^#\/?/, '').split('?', 2);
+  const parts = path.split('/').filter(Boolean).map(decodeURIComponent);
   switch (parts[0]) {
     case 'runs':
       return parts[1] ? { page: 'run', id: parts[1] } : { page: 'runs' };
@@ -21,7 +22,8 @@ export function parse(hash: string): Route {
     case 'lifecycle':
       return { page: 'lifecycle' };
     case 'servers':
-      return { page: 'servers' };
+      // ?create=1 opens the create dialog once (Servers drops it from the hash)
+      return new URLSearchParams(query).get('create') === '1' ? { page: 'servers', create: true } : { page: 'servers' };
   }
   return { page: 'runs' };
 }
@@ -29,6 +31,7 @@ export function parse(hash: string): Route {
 export function href(r: Route): string {
   if (r.page === 'run') return `#/runs/${encodeURIComponent(r.id)}`;
   if (r.page === 'presets' && r.tab) return `#/presets/${r.tab}`;
+  if (r.page === 'servers' && r.create) return '#/servers?create=1';
   return `#/${r.page}`;
 }
 

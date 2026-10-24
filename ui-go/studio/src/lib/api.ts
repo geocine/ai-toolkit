@@ -280,7 +280,8 @@ export interface Remote { id: string; name: string; kind: 's3' | 'hf' | 'fs'; co
 export interface Upload { id: string; remote_id: string; job_id: string | null; path: string; url: string | null; state: 'queued' | 'running' | 'done' | 'failed'; bytes: number; bytes_done: number; error: string | null }
 export interface SyncStatus { remote: string | null; last_sync_at: string | null; last_error: string | null; step?: number | null; lease: { node_label: string; expires_at: string } | null }
 export interface Settings { training_folder: string; datasets_folder: string }
-export interface Health { ok: boolean; version: string; upstream_version: string }
+/** mode is 'controller' on a server that creates GPU servers but never trains; older servers omit it. */
+export interface Health { ok: boolean; version: string; upstream_version: string; started_at: string; mode?: 'server' | 'controller' }
 export interface SystemInfo { gpus: { index: number; name: string; memory?: { total: number; used: number } }[]; toolkit_root: string }
 export interface LossSeries { keys: string[]; key: string; points: { step: number; value: number }[] }
 export interface Items<T> { items: T[] }

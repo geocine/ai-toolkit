@@ -1,8 +1,9 @@
 import { Layers, List, Menu, Monitor, Moon, Plus, Server as ServerIcon, Sun, Timer, X } from 'lucide-react';
-import { useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { ControllerNote } from './components/ControllerNote';
 import { LifeBanner } from './components/LifeBanner';
-import { useLoad } from './components/ui';
-import { get, type Health, type Server } from './lib/api';
+import { PageHeader, useLoad } from './components/ui';
+import { get, type Health } from './lib/api';
 import { StudioProvider, useStudio } from './lib/context';
 import { LifecycleProvider } from './lib/lifecycle';
 import { href, useRoute, type Route } from './lib/route';
@@ -32,9 +33,27 @@ function Mark() {
   );
 }
 
+/**
+ * What the active server's last health check said it is. mode is null when it
+ * has not answered (unreachable, or no server); pending holds until the first
+ * check for the active server comes back either way.
+ */
+type Mode = NonNullable<Health['mode']>;
+const ActiveMode = createContext<{ mode: Mode | null; pending: boolean }>({ mode: null, pending: false });
+
+/**
+ * A page that needs the trainer: a controller shows the note instead, under the
+ * same nav. Until the first check answers only the header shows, so the page
+ * neither flashes nor starts its own loads against a controller.
+ */
+function Trainer({ title, children }: { title: string; children: ReactNode }) {
+  const { mode, pending } = useContext(ActiveMode);
+  if (pending) return <PageHeader title={title} />;
+  return mode === 'controller' ? <ControllerNote title={title} /> : <>{children}</>;
+}
+
 /** Reachability of the active server, for the sidebar footer. */
-function ServerStatus({ server }: { server: Server }) {
-  const health = useLoad(server, s => get<Health>(s, '/v1/health'), [], 30000);
+function ServerStatus({ health }: { health: { data: Health | null; error: unknown } }) {
   const state = health.error ? 'down' : health.data ? 'up' : 'checking';
   const label = state === 'up' ? 'Connected' : state === 'down' ? 'Unreachable' : 'Checking';
   return (
@@ -79,7 +98,30 @@ function Shell() {
   const { servers, active, setActiveId } = useStudio();
   const [menu, setMenu] = useState(false);
   useEffect(() => setMenu(false), [route]);
+  // each answer carries its server id: right after a switch the previous
+  // server's answer is still held for a render and must not count for this one.
+  // A failed poll keeps that server's last health, as useLoad would.
+  const lastOk = useRef<{ id: string; data: Health } | null>(null);
+  const probe = useLoad(
+    active,
+    async s => {
+      try {
+        const data = await get<Health>(s, '/v1/health');
+        lastOk.current = { id: s.id, data };
+        return { id: s.id, data: data as Health | null, error: null as unknown };
+      } catch (error) {
+        return { id: s.id, data: lastOk.current?.id === s.id ? lastOk.current.data : null, error };
+      }
+    },
+    [],
+    30000,
+  );
+  const health = probe.data && probe.data.id === active?.id ? probe.data : null;
+  // older servers send no mode: they are ordinary servers
+  const activeMode: Mode | null = health?.data ? (health.data.mode ?? 'server') : null;
+  const pending = !!active && !health;
   return (
+    <ActiveMode.Provider value={{ mode: activeMode, pending }}>
     <LifecycleProvider server={active}>
     <div className="app">
       <aside className={menu ? 'sidebar is-open' : 'sidebar'}>
@@ -122,7 +164,7 @@ function Shell() {
                       </option>
                     ))}
                   </select>
-                  {active && <ServerStatus key={active.id} server={active} />}
+                  {active && <ServerStatus health={health ?? { data: null, error: null }} />}
                 </>
               ) : (
                 <a className="conn conn-none" href={href({ page: 'servers' })}>
@@ -142,16 +184,40 @@ function Shell() {
       <main className="main">
         <div className="page" key={route.page + (route.page === 'run' ? route.id : '')}>
           {route.page !== 'lifecycle' && <LifeBanner />}
-          {route.page === 'runs' && <Runs />}
-          {route.page === 'run' && <RunView id={route.id} />}
-          {route.page === 'new' && <NewRun />}
-          {route.page === 'presets' && <Presets tab={route.tab ?? 'settings'} />}
-          {route.page === 'lifecycle' && <Lifecycle />}
-          {route.page === 'servers' && <Servers />}
+          {route.page === 'runs' && (
+            <Trainer title="Runs">
+              <Runs />
+            </Trainer>
+          )}
+          {route.page === 'run' && (
+            <Trainer title="Run">
+              <RunView id={route.id} />
+            </Trainer>
+          )}
+          {route.page === 'new' && (
+            <Trainer title="New run">
+              <NewRun />
+            </Trainer>
+          )}
+          {route.page === 'presets' &&
+            (route.tab === 'data' ? (
+              <Trainer title="Presets">
+                <Presets tab="data" />
+              </Trainer>
+            ) : (
+              <Presets tab="settings" />
+            ))}
+          {route.page === 'lifecycle' && (
+            <Trainer title="When done">
+              <Lifecycle />
+            </Trainer>
+          )}
+          {route.page === 'servers' && <Servers create={route.create} activeMode={activeMode} />}
         </div>
       </main>
     </div>
     </LifecycleProvider>
+    </ActiveMode.Provider>
   );
 }
 
