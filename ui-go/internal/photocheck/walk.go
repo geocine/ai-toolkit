@@ -133,9 +133,11 @@ func readAside(dir string, aside []*entry) (from map[string]string, of map[strin
 	if json.Unmarshal(data, &recs) != nil {
 		return from, of
 	}
+	// A drive letter is refused on every OS: "C:/x" is local on Linux but
+	// leaves the dataset once the folder is opened on Windows.
 	clean := func(p string) bool {
 		_, rel, ok := photoPath(dir, p)
-		return ok && rel == p && !strings.HasPrefix(rel, SetAsideDir+"/") && filepath.IsLocal(filepath.FromSlash(rel))
+		return ok && rel == p && !strings.HasPrefix(rel, SetAsideDir+"/") && filepath.IsLocal(filepath.FromSlash(rel)) && !hasDrive(rel)
 	}
 	for _, e := range aside {
 		r, ok := recs[e.rel]
@@ -150,6 +152,11 @@ func readAside(dir string, aside []*entry) (from map[string]string, of map[strin
 		}
 	}
 	return from, of
+}
+
+// hasDrive reports whether p starts with a Windows drive letter ("C:").
+func hasDrive(p string) bool {
+	return len(p) >= 2 && p[1] == ':' && ('a' <= p[0]|0x20 && p[0]|0x20 <= 'z')
 }
 
 // writeAside stores the records for the set-aside photos, removing the
