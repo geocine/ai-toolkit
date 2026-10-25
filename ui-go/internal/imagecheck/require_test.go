@@ -197,3 +197,17 @@ func TestDeniedCopy(t *testing.T) {
 		t.Fatalf("other repo copy %q", msg)
 	}
 }
+
+// A base_unpacked label that is really the compressed size (Docker's
+// containerd image store) falls back to the estimate.
+func TestUnpackedLabel(t *testing.T) {
+	sizes := []int64{3e9, 3.5e9, 10e6, 20e6, 1e6, 1e6, 1e6} // 6.5 GB base, 5 Go layers
+	img := &Image{DownloadBytes: 6_533_000_000, Labels: map[string]string{LabelBaseUnpacked: "13689223168"}}
+	if n, src := unpacked(img, sizes); src != "label" || n != 13_689_223_168+int64(33e6*unpackRatio) {
+		t.Fatalf("honest label: %d %s", n, src)
+	}
+	img.Labels[LabelBaseUnpacked] = "6575197404"
+	if n, src := unpacked(img, sizes); src != "estimate" || n != int64(6_533_000_000*unpackRatio) {
+		t.Fatalf("compressed label: %d %s", n, src)
+	}
+}

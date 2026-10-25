@@ -201,9 +201,11 @@ case "$FLASH_ATTN" in
   *) die "flash-attn $FLASH_ATTN: add its SASS list to build_and_push.sh" ;;
 esac
 
-# Under the containerd image store .Size may mean something else; it is printed
-# below so it can be checked against the measured 13.7 GB.
-AITK_BASE_UNPACKED=$(docker image inspect -f '{{.Size}}' "$BASE_IMAGE")
+# Measured inside the base, not read from .Size: under Docker's containerd image
+# store .Size is the compressed content (6.6 GB for a 13.7 GB base).
+AITK_BASE_UNPACKED=$(docker run --rm --platform "$PLATFORM" --entrypoint du "$BASE_IMAGE" -sxb / | cut -f1) ||
+  die "measuring $BASE_IMAGE failed"
+[[ "$AITK_BASE_UNPACKED" =~ ^[0-9]+$ ]] || die "du in $BASE_IMAGE printed '$AITK_BASE_UNPACKED', not a byte count"
 # First FROM of upstream's Dockerfile, skipping flags such as --platform=.
 AITK_BASE_NAME=$(git show "$BASE_COMMIT:docker/Dockerfile" |
   awk '!done && toupper($1) == "FROM" { for (i = 2; i <= NF; i++) if ($i !~ /^--/) { print $i; done = 1; break } }')

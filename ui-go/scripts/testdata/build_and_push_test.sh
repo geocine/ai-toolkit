@@ -68,6 +68,7 @@ run_case "build" 0 SHIM_BASE_EXISTS=0
 log_has '^build \| --platform \| linux/amd64 \| -f \| docker/Dockerfile .* -$'
 log_has '^build \| --platform \| linux/amd64 \| -f \| ui-go/docker/Dockerfile'
 log_has '^run \| --rm \| --platform \| linux/amd64 \| --entrypoint \| python3 '
+log_has '^run \| --rm \| --platform \| linux/amd64 \| --entrypoint \| du \| aitoolkit-upstream:[0-9a-f]* \| -sxb \| /$'
 build_arg "AITK_SM=75,80,86,90,100,120"
 build_arg "AITK_PTX="
 build_arg "AITK_CUDA=13.0"
@@ -128,6 +129,10 @@ sm=75,80
 ptx=
 flash_attn=2.9.0"
 out_has "flash-attn 2.9.0: add its SASS list"
+[[ -z "$(final_build)" ]] || fail "built the Go layer anyway"
+
+run_case "du not a number" 1 SHIM_BASE_EXISTS=1 "SHIM_DU=du: cannot read"
+out_has "not a byte count"
 [[ -z "$(final_build)" ]] || fail "built the Go layer anyway"
 
 run_case "no cuda floor" 1 SHIM_BASE_EXISTS=1 "SHIM_ENV=PATH=/usr/bin"

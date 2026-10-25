@@ -440,14 +440,23 @@ func fillConfig(img *Image, cfg *imageConfig) {
 }
 
 // unpacked estimates the bytes on disk after extraction: the labelled base
-// size plus 2.1x the Go layers, else 2.1x the whole download.
+// size plus 2.1x the Go layers, else 2.1x the whole download. A label under
+// 1.5x the base's compressed layers is not trusted: under Docker's
+// containerd image store the build script read the compressed size there
+// (6.6 GB for a 13.7 GB base).
 func unpacked(img *Image, sizes []int64) (int64, string) {
 	if base, err := strconv.ParseInt(strings.TrimSpace(img.Labels[LabelBaseUnpacked]), 10, 64); err == nil && base > 0 {
-		var top int64
-		for _, s := range sizes[max(len(sizes)-goLayers, 0):] {
+		var top, below int64
+		cut := max(len(sizes)-goLayers, 0)
+		for _, s := range sizes[cut:] {
 			top += s
 		}
-		return base + int64(float64(top)*unpackRatio), "label"
+		for _, s := range sizes[:cut] {
+			below += s
+		}
+		if base*2 >= below*3 {
+			return base + int64(float64(top)*unpackRatio), "label"
+		}
 	}
 	return int64(float64(img.DownloadBytes) * unpackRatio), "estimate"
 }
