@@ -14,6 +14,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -72,6 +73,7 @@ type snapshot struct {
 	job   *store.Job
 	faces map[string]*FaceData // by sha256
 	from  map[string]string    // set-aside rel to the dataset path it came from, when the two differ
+	of    map[string]original  // set-aside rel of an original a convert or a bake kept, to the photo made from it
 }
 
 // originOf is the dataset path a set-aside photo came from.
@@ -87,7 +89,7 @@ func (s *snapshot) originOf(e *entry) string {
 func (s *snapshot) clone() *snapshot {
 	c := *s
 	c.items, c.aside = cloneEntries(s.items), cloneEntries(s.aside)
-	c.from = maps.Clone(s.from)
+	c.from, c.of = maps.Clone(s.from), maps.Clone(s.of)
 	return &c
 }
 
@@ -156,7 +158,7 @@ func loadWith(ctx context.Context, dir string, wait time.Duration, analyse, lock
 	if err := resolve(ctx, s.aside, 0, analyse, false); err != nil {
 		return nil, err
 	}
-	s.from = readAsideFrom(dir, s.aside)
+	s.from, s.of = readAside(dir, s.aside)
 	shas := s.shas(true)
 	if err := state.TouchPhotos(ctx, shas, time.Now()); err != nil {
 		return nil, err
@@ -190,7 +192,7 @@ func resolve(ctx context.Context, es []*entry, wait time.Duration, analyse, urge
 			known = append(known, sha)
 		}
 	}
-	rows, err := state.GetPhotoMetrics(ctx, known, MetricsVersion)
+	rows, err := state.GetPhotoMetrics(ctx, known, MetricsCacheVersion)
 	if err != nil {
 		return err
 	}
@@ -326,8 +328,15 @@ func (s *snapshot) inputs(opts Options) []Input {
 
 // setState is the judge's view of the dataset's photo state.
 func (s *snapshot) setState(opts Options) SetState {
+	st := s.baseState(s.shas(false))
+	st.SetAside, st.Originals = s.asideItems(opts), s.originals()
+	return st
+}
+
+// baseState is the dataset-level state without the .set_aside/ lists, for
+// a set holding the photos with these sha256 (for the face check's state).
+func (s *snapshot) baseState(shas []string) SetState {
 	id := storedIdentity(s.set)
-	shas := s.shas(false)
 	faced := map[string]bool{}
 	for sha := range s.faces {
 		faced[sha] = true
@@ -337,17 +346,41 @@ func (s *snapshot) setState(opts Options) SetState {
 		Reference: s.set.Reference,
 		Identity:  id,
 		Faces:     facesState(s.job, id, shas, faced),
-		SetAside:  s.asideItems(opts),
 		Convert:   ConvertFormats(),
 	}
 }
 
-// asideItems lists the set-aside photos with their flags, judged against
-// the dataset's photos (which join only the duplicate pass), so a copy of a
+// isOriginal reports a set-aside photo kept as the original of a convert
+// or a bake: a backup, not a photo left out.
+func (s *snapshot) isOriginal(e *entry) bool {
+	_, ok := s.of[e.rel]
+	return ok
+}
+
+// originals lists the originals a convert or a bake kept in .set_aside/.
+func (s *snapshot) originals() []OriginalItem {
+	out := []OriginalItem{}
+	for _, e := range s.aside {
+		if o, ok := s.of[e.rel]; ok {
+			out = append(out, OriginalItem{File: asideFile(e.rel), From: s.originOf(e), Of: o.of})
+		}
+	}
+	return out
+}
+
+// asideItems lists the photos left out into .set_aside/ (not the
+// originals a convert or a bake kept) with their flags, judged against the
+// dataset's photos (which join only the duplicate pass), so a copy of a
 // photo still in the set says so.
 func (s *snapshot) asideItems(opts Options) []SetAsideItem {
 	out := []SetAsideItem{}
-	if len(s.aside) == 0 {
+	var aside []*entry
+	for _, e := range s.aside {
+		if !s.isOriginal(e) {
+			aside = append(aside, e)
+		}
+	}
+	if len(aside) == 0 {
 		return out
 	}
 	var in []Input
@@ -358,7 +391,7 @@ func (s *snapshot) asideItems(opts Options) []SetAsideItem {
 			in = append(in, Input{Metrics: m, Existing: true})
 		}
 	}
-	for _, e := range s.aside {
+	for _, e := range aside {
 		if e.m == nil {
 			in = append(in, Input{Metrics: Metrics{Version: MetricsVersion, File: asideFile(e.rel)}, Pending: true})
 			continue
@@ -373,7 +406,7 @@ func (s *snapshot) asideItems(opts Options) []SetAsideItem {
 	for _, it := range r.Items {
 		flags[it.File] = it.Flags
 	}
-	for _, e := range s.aside {
+	for _, e := range aside {
 		f := flags[asideFile(e.rel)]
 		if f == nil {
 			f = []Flag{}
@@ -426,9 +459,10 @@ func Warm(dir string, rels []string) {
 
 // Assess judges metrics measured elsewhere (POST /v1/photos/assess) with
 // the same rules as ReviewDataset. With datasetDir, the dataset's cached photos
-// join the duplicate pass as existing items; nothing is measured on the
-// request (misses are only queued for warm-up). No items returns an empty
-// review that still lists the formats the server converts.
+// join the duplicate pass as existing items, and the readiness is the
+// dataset's once the posted photos are added (withDataset); nothing is
+// measured on the request (misses are only queued for warm-up). No items
+// returns an empty review that still lists the formats the server converts.
 func Assess(ctx context.Context, req AssessRequest, datasetDir string) (*Review, error) {
 	if len(req.Items) > MaxAssessItems {
 		return nil, badRequest("at most %d photos per assess, got %d", MaxAssessItems, len(req.Items))
@@ -482,14 +516,57 @@ func Assess(ctx context.Context, req AssessRequest, datasetDir string) (*Review,
 		}
 		in = append(in, x)
 	}
+	own := in
 	if stored != nil {
+		in = slices.Clone(own)
 		for _, e := range stored.items {
 			if e.m != nil && !seen[e.rel] {
 				in = append(in, Input{Metrics: *e.m, Existing: true})
 			}
 		}
 	}
-	return Judge(in, set, opts), nil
+	if stored == nil {
+		return Judge(in, set, opts), nil
+	}
+	// the pick comes after the readiness is the dataset's, so its note
+	// agrees with the grade and hints shown beside it
+	jopts := opts
+	jopts.Pick = 0
+	r := Judge(in, set, jopts)
+	withDataset(r, stored, own, seen, opts)
+	if opts.Pick > 0 {
+		pk := pickBest(in, r, opts.Pick, opts, true)
+		r.Pick = &pk
+	}
+	return r, nil
+}
+
+// withDataset makes an assess review's readiness the dataset's once the
+// posted photos (own) are added: usable, the grade and its line,
+// provisional, the basis, coverage, findings and hints come from judging
+// them together with the stored photos measured so far, with their
+// captions, decisions, faces and the dataset's face check. Items, totals,
+// counts and groups stay the posted photos' own, and the pick picks among
+// them (its note follows this readiness). A stored photo
+// with a posted photo's name is left to the posted one, as in the
+// duplicate pass.
+func withDataset(r *Review, s *snapshot, own []Input, seen map[string]bool, opts Options) {
+	all := slices.Clone(own)
+	shas := s.shas(false)
+	for _, x := range own {
+		if sha := x.Metrics.SHA256; sha != "" && !slices.Contains(shas, sha) {
+			shas = append(shas, sha)
+		}
+	}
+	for _, x := range s.inputs(opts) {
+		if !x.Pending && !seen[x.Metrics.File] {
+			all = append(all, x)
+		}
+	}
+	opts.Pick = 0
+	u := Judge(all, s.baseState(shas), opts)
+	r.Usable, r.Grade, r.GradeLine, r.Provisional = u.Usable, u.Grade, u.GradeLine, u.Provisional
+	r.Basis, r.Coverage, r.Findings, r.Hints = u.Basis, u.Coverage, u.Findings, u.Hints
 }
 
 func checkKind(k Kind) error {

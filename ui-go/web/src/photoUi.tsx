@@ -679,20 +679,34 @@ export function CompareDialog({
   );
 }
 
-/** The photos in .set_aside/, folded away, each with Restore. */
+/**
+ * The photos left out into .set_aside/, folded away, each with Restore, and
+ * apart from them the originals a convert or a turn upright kept there: a
+ * backup, which Restore all leaves; Put back swaps one in for the photo made
+ * from it.
+ */
 export function LeftOut({ folder, review, actions }: { folder: string; review: PhotoReview; actions: PhotoActions }) {
   const [open, setOpen] = useState(false);
+  const [openOriginals, setOpenOriginals] = useState(false);
   const n = review.set_aside.length;
-  if (n === 0) return null;
+  const originals = review.originals ?? []; // an older server lists them under set_aside
+  if (n === 0 && originals.length === 0) return null;
   return (
     <div className="photo-left-out">
       <div className="row" style={{ gap: 8 }}>
-        <button className="btn btn-sm btn-ghost" onClick={() => setOpen(o => !o)} aria-expanded={open}>
-          {open ? 'Hide left out' : `Left out (${n})`}
-        </button>
+        {n > 0 && (
+          <button className="btn btn-sm btn-ghost" onClick={() => setOpen(o => !o)} aria-expanded={open}>
+            {open ? 'Hide left out' : `Left out (${n})`}
+          </button>
+        )}
         {open && n > 1 && (
           <button className="btn btn-sm" onClick={() => actions.restore('all')}>
             <RotateCcw size={14} /> Restore all
+          </button>
+        )}
+        {originals.length > 0 && (
+          <button className="btn btn-sm btn-ghost" onClick={() => setOpenOriginals(o => !o)} aria-expanded={openOriginals}>
+            {openOriginals ? 'Hide originals' : `Originals kept (${originals.length})`}
           </button>
         )}
       </div>
@@ -711,6 +725,30 @@ export function LeftOut({ folder, review, actions }: { folder: string; review: P
             </div>
           ))}
         </div>
+      )}
+      {openOriginals && originals.length > 0 && (
+        <>
+          <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+            The files a convert or a turn upright replaced, kept in .set_aside as a backup. They are not left out, so Restore all leaves them. Put back swaps one in for the
+            photo made from it.
+          </p>
+          <div className="grid photo-left-grid">
+            {originals.map(o => (
+              <div className="card item photo-left-item" key={o.file}>
+                <img className="item-media" src={imgUrl(joinServerPath(folder, o.file), true)} alt={o.from} loading="lazy" />
+                <div className="mono ellipsis" style={{ fontSize: 12 }} title={o.from}>
+                  {o.from.split('/').pop()}
+                </div>
+                <div className="item-meta ellipsis" title={o.of}>
+                  original of {o.of.split('/').pop()}
+                </div>
+                <button className="btn btn-sm" onClick={() => actions.restore([o.file])}>
+                  <RotateCcw size={14} /> Put back
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

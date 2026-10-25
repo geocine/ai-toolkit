@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -439,7 +440,7 @@ func TestIngest(t *testing.T) {
 	// GC keeps what reviews still see (set-aside photos too) and drops the rest
 	c := s.sha(t, ".set_aside/c.jpg")
 	gone := strings.Repeat("0", 64)
-	if err := state.PutPhotoMetrics(s.ctx, gone, MetricsVersion, []byte(`{}`)); err != nil {
+	if err := state.PutPhotoMetrics(s.ctx, gone, MetricsCacheVersion, []byte(`{}`)); err != nil {
 		t.Fatal(err)
 	}
 	old := time.Now().Add(-100 * 24 * time.Hour).UnixMilli()
@@ -450,7 +451,7 @@ func TestIngest(t *testing.T) {
 	if err := GC(s.ctx, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	kept, _ := state.GetPhotoMetrics(s.ctx, []string{a, c, gone}, MetricsVersion)
+	kept, _ := state.GetPhotoMetrics(s.ctx, []string{a, c, gone}, MetricsCacheVersion)
 	if kept[a] == nil || kept[c] == nil || kept[gone] != nil {
 		t.Fatalf("after GC: a %v, set-aside %v, unseen %v", kept[a] != nil, kept[c] != nil, kept[gone] != nil)
 	}
@@ -478,7 +479,7 @@ func TestForget(t *testing.T) {
 	if err := Forget(s.ctx, s.dir); err != nil {
 		t.Fatal(err)
 	}
-	if rows, _ := state.GetPhotoMetrics(s.ctx, []string{a, b}, MetricsVersion); len(rows) != 0 {
+	if rows, _ := state.GetPhotoMetrics(s.ctx, []string{a, b}, MetricsCacheVersion); len(rows) != 0 {
 		t.Fatalf("metrics left: %d", len(rows))
 	}
 	if set, _ := state.GetPhotoSet(s.ctx, s.dir); set != nil {
@@ -486,5 +487,74 @@ func TestForget(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(s.dir, "a.jpg")); err != nil {
 		t.Fatal("forget touched the photos")
+	}
+}
+
+// Adding photos to a dataset: the readiness counts the photos already
+// stored, while the items and counts stay the posted ones.
+func TestAssessReadinessCountsStored(t *testing.T) {
+	s := setupService(t)
+	tree := map[string][]byte{}
+	for i := range 15 {
+		tree[fmt.Sprintf("st%02d.jpg", i)] = scene(400 + i)
+	}
+	s.write(t, tree)
+	if r := s.settled(t, Options{}); r.Usable != 15 {
+		t.Fatalf("stored usable %d", r.Usable)
+	}
+	posted := []Metrics{measureBytes(t, "again.jpg", scene(400)), measureBytes(t, "fresh.jpg", scene(420))}
+	alone, err := Assess(s.ctx, AssessRequest{Items: posted}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if alone.Usable != 2 || alone.Grade != "F" || !slices.ContainsFunc(alone.Hints, func(h string) bool { return strings.HasPrefix(h, "Add ") }) {
+		t.Fatalf("without the dataset: usable %d grade %s hints %v", alone.Usable, alone.Grade, alone.Hints)
+	}
+	r, err := Assess(s.ctx, AssessRequest{Items: posted}, s.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// again.jpg duplicates st00.jpg, so 15 stored + fresh.jpg
+	if r.Total != 2 || len(r.Items) != 2 || r.Counts[FlagDuplicate] != 1 || r.Usable != 16 {
+		t.Fatalf("with the dataset: total %d items %d counts %v usable %d", r.Total, len(r.Items), r.Counts, r.Usable)
+	}
+	if r.Grade == "F" || r.Grade == "D" || slices.ContainsFunc(r.Hints, func(h string) bool { return strings.HasPrefix(h, "Add ") && strings.Contains(h, "more") }) {
+		t.Fatalf("with the dataset: grade %s (%s) hints %v", r.Grade, r.GradeLine, r.Hints)
+	}
+	if f := findingOf(r, "count_low"); f != nil {
+		t.Errorf("count finding %+v", f)
+	}
+
+	// a pick too short for n: alone its note asks for more, with the
+	// dataset it agrees with the readiness, which asks for none
+	alone, err = Assess(s.ctx, AssessRequest{Items: posted, Pick: 10}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if alone.Pick == nil || !strings.Contains(alone.Pick.Note, alone.Hints[0]) {
+		t.Fatalf("pick alone: %+v, hints %v", alone.Pick, alone.Hints)
+	}
+	r, err = Assess(s.ctx, AssessRequest{Items: posted, Pick: 10}, s.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Pick == nil || !slices.Equal(r.Pick.Kept, []string{"fresh.jpg"}) || r.Usable != 16 {
+		t.Fatalf("pick with the dataset: %+v, usable %d", r.Pick, r.Usable)
+	}
+	if want := "Only 1 photo passes, so all are kept."; r.Pick.Note != want {
+		t.Errorf("pick note %q, want %q (hints %v)", r.Pick.Note, want, r.Hints)
+	}
+
+	// a dataset still short: the note gives the combined readiness's count
+	small := setupService(t)
+	small.write(t, map[string][]byte{"st00.jpg": scene(430), "st01.jpg": scene(431), "st02.jpg": scene(432)})
+	small.settled(t, Options{})
+	r, err = Assess(small.ctx, AssessRequest{Items: posted, Pick: 10}, small.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Usable != 5 || len(r.Hints) == 0 || r.Hints[0] != "Add 10 more photos of just them." || r.Pick == nil ||
+		r.Pick.Note != "Only 2 photos pass, so all are kept. Add 10 more photos of just them." {
+		t.Fatalf("short dataset: usable %d hints %v pick %+v", r.Usable, r.Hints, r.Pick)
 	}
 }

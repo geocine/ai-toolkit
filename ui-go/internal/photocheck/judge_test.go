@@ -104,6 +104,11 @@ func TestJudgeFlags(t *testing.T) {
 		{"screen-size frame", "frame.jpg", testutil.JPEG(testutil.Scene(3, 1920, 1080), 90), 1024,
 			[]Flag{FlagFromScreen}, []Flag{FlagScreenshot}},
 		{"letterbox", "bars.jpg", testutil.JPEG(testutil.Letterbox(sc, 0.1, color.Black), 90), 1024, []Flag{FlagBars}, nil},
+		// too dark to judge: the exposure flag speaks for it, not bars, blur or enlarging
+		{"evenly dark", "under.jpg", testutil.JPEG(testutil.Underexpose(sc), 90), 1024, []Flag{FlagDark},
+			[]Flag{FlagBars, FlagBlurry, FlagUpscaled}},
+		{"dark letterbox", "dark_bars.jpg", testutil.JPEG(testutil.Letterbox(testutil.Darken(sc), 0.1, color.Black), 90), 1024,
+			[]Flag{FlagBars, FlagDark}, []Flag{FlagBlurry}},
 		{"tiny", "tiny.jpg", testutil.JPEG(testutil.Scene(2, 300, 400), 90), 1024, []Flag{FlagTiny}, []Flag{FlagSmall}},
 		// PHO section 16 names 700x900, but its edge (794) is above 0.75 x
 		// 1024 under the section 4.3 rule; 640x900 (edge 759) is the same
@@ -808,5 +813,35 @@ func TestJudgeFindings(t *testing.T) {
 	stale := Judge(goodSet(20), SetState{Faces: FacesState{Available: true, Checked: 20, Stale: true, Added: 3}}, Options{})
 	if f := findingOf(stale, "faces_stale"); f == nil || f.Message != "3 photos were added after the face check." {
 		t.Errorf("faces_stale %+v", f)
+	}
+}
+
+// An evenly underexposed photo is judged on its exposure alone: too dark,
+// not black bars, maybe enlarged or blurry, and the pick says so.
+func TestJudgeTooDarkToJudge(t *testing.T) {
+	var in []Input
+	for i := 0; i < 10; i++ {
+		in = append(in, Input{Metrics: measureBytes(t, fmt.Sprintf("s%d.jpg", i),
+			testutil.JPEG(testutil.Scene(101+i, 1200, 900), 90))})
+	}
+	in = append(in, Input{Metrics: measureBytes(t, "under.jpg", testutil.JPEG(testutil.Underexpose(testutil.Scene(1, 1200, 900)), 90))})
+	r := Judge(in, SetState{}, Options{Pick: 10})
+	it := itemOf(t, r, "under.jpg")
+	if !slices.Contains(it.Flags, FlagDark) || slices.ContainsFunc(it.Flags, func(f Flag) bool {
+		return f == FlagBars || f == FlagBlurry || f == FlagUpscaled
+	}) {
+		t.Errorf("flags %v, want dark and no bars, blurry or upscaled", it.Flags)
+	}
+	if r.Pick == nil {
+		t.Fatal("no pick")
+	}
+	var reason string
+	for _, lo := range r.Pick.LeftOut {
+		if lo.File == "under.jpg" {
+			reason = lo.Reason
+		}
+	}
+	if reason != Catalog[FlagDark].Label {
+		t.Errorf("pick left out %v, want under.jpg as %q", r.Pick.LeftOut, Catalog[FlagDark].Label)
 	}
 }

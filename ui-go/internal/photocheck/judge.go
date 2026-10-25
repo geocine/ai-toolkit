@@ -220,11 +220,11 @@ func (j *judge) sameStems() {
 }
 
 // medianSharp is the set's typical frame sharpness, 0 below SetMin
-// measured photos.
+// measured photos. Photos too dark to judge do not count.
 func (j *judge) medianSharp() float64 {
 	var v []float64
 	for _, p := range j.own {
-		if p.measured() {
+		if p.measured() && !j.tooDark(p) {
 			v = append(v, p.Metrics.Sharp)
 		}
 	}
@@ -233,6 +233,13 @@ func (j *judge) medianSharp() float64 {
 	}
 	return median(v)
 }
+
+// tooDark reports a photo so dark overall (luma_mean under DarkMean) that
+// its sharpness and detail readings say more about the exposure than the
+// focus: shadows compress every edge. Its blurry and upscaled judgements
+// defer to the exposure (it is flagged dark, or the subject's face is lit
+// and judged on its own).
+func (j *judge) tooDark(p *photo) bool { return p.Metrics.LumaMean < j.th.DarkMean }
 
 // pixelFlags are the section 4.3 flags.
 func (j *judge) pixelFlags() {
@@ -260,11 +267,12 @@ func (j *judge) pixelFlags() {
 		if !m.Decoded {
 			continue
 		}
-		if m.Detail != nil && *m.Detail > th.UpscaledDB {
+		dim := j.tooDark(p)
+		if m.Detail != nil && *m.Detail > th.UpscaledDB && !dim {
 			p.set(FlagUpscaled, LevelInfo, "")
 		}
 		subj := p.fv.subjectFace()
-		if subj == nil {
+		if subj == nil && !dim {
 			soft := m.Sharp < th.BlurFloor
 			if med > 0 {
 				soft = soft && m.Sharp < th.BlurRel*med
@@ -405,6 +413,7 @@ func (j *judge) review() *Review {
 		Findings:       []Finding{},
 		Hints:          []string{},
 		SetAside:       j.set.SetAside,
+		Originals:      j.set.Originals,
 		Faces:          j.set.Faces,
 		Thresholds:     th.Map(),
 		Convert:        j.set.Convert,
@@ -414,6 +423,9 @@ func (j *judge) review() *Review {
 	}
 	if r.SetAside == nil {
 		r.SetAside = []SetAsideItem{}
+	}
+	if r.Originals == nil {
+		r.Originals = []OriginalItem{}
 	}
 	if r.Convert == nil {
 		r.Convert = []string{}

@@ -532,13 +532,14 @@ function flatShare(wk: Float32Array): number {
 }
 
 // Bar detection (section 3 "bars").
-const bar = { std: 3, dark: 24, light: 232, maxFrac: 0.25, pairMin: 0.02, pairTol: 0.25, oneMin: 0.04, step: 40 };
+// pairStep, pairStd: a pair counts only where what lies inside a band differs from it (photocheck.barPairStep)
+const bar = { std: 3, dark: 24, light: 232, maxFrac: 0.25, pairMin: 0.02, pairTol: 0.25, oneMin: 0.04, step: 40, pairStep: 8, pairStd: 6 };
 
-type BarScan = { frac: number; n: number; light: boolean; mean: number; inner: number };
+type BarScan = { frac: number; n: number; light: boolean; mean: number; inner: number; innerStd: number; capped: boolean };
 
 /** How far uniform dark or light lines reach in from one edge; line(i) is the i-th line's mean and std. */
 function scanBar(total: number, line: (i: number) => [number, number]): BarScan {
-  const s: BarScan = { frac: 0, n: 0, light: false, mean: 0, inner: NaN };
+  const s: BarScan = { frac: 0, n: 0, light: false, mean: 0, inner: NaN, innerStd: 0, capped: false };
   const limit = Math.floor(bar.maxFrac * total);
   let sum = 0;
   for (let i = 0; i < limit; i++) {
@@ -551,11 +552,24 @@ function scanBar(total: number, line: (i: number) => [number, number]): BarScan 
     s.n++;
   }
   s.frac = s.n / total;
+  s.capped = s.n > 0 && s.n >= limit;
   if (s.n > 0) {
     s.mean = sum / s.n;
-    if (s.n + 2 <= total) s.inner = (line(s.n)[0] + line(s.n + 1)[0]) / 2;
+    if (s.n + 2 <= total) {
+      const [a, sa] = line(s.n);
+      const [b, sb] = line(s.n + 1);
+      s.inner = (a + b) / 2;
+      s.innerStd = (sa + sb) / 2;
+    }
   }
   return s;
+}
+
+/** Content of mean m and std sd stands apart from the band: brighter than dark bars, darker than light ones, or textured. */
+function differs(s: BarScan, m: number, sd: number): boolean {
+  if (Number.isNaN(m)) return false;
+  const step = s.light ? s.mean - m : m - s.mean;
+  return step >= bar.pairStep || sd >= bar.pairStd;
 }
 
 /** Area share of W under counted edge bars: a matching pair, or one edge with a sharp step inward. */
@@ -563,13 +577,36 @@ function bars(wk: Float32Array, w: number, h: number): number {
   if (w < 4 || h < 4) return 0;
   const row = (y: number) => lineStats(wk, y * w, 1, w);
   const col = (x: number) => lineStats(wk, x, w, h);
-  const [t, b] = countBars(scanBar(h, row), scanBar(h, i => row(h - 1 - i)));
-  const [l, r] = countBars(scanBar(w, col), scanBar(w, i => col(w - 1 - i)));
+  const [cm, cs] = centreStats(wk, w, h);
+  const [t, b] = countBars(scanBar(h, row), scanBar(h, i => row(h - 1 - i)), cm, cs);
+  const [l, r] = countBars(scanBar(w, col), scanBar(w, i => col(w - 1 - i)), cm, cs);
   return 1 - (1 - t - b) * (1 - l - r);
 }
 
-function countBars(a: BarScan, b: BarScan): [number, number] {
-  if (a.frac >= bar.pairMin && b.frac >= bar.pairMin && a.light === b.light && Math.abs(a.frac - b.frac) <= bar.pairTol * Math.max(a.frac, b.frac)) {
+/** Mean and std of the middle half of W on both axes (photocheck.centreStats). */
+function centreStats(wk: Float32Array, w: number, h: number): [number, number] {
+  const x0 = Math.floor(w / 4), x1 = w - Math.floor(w / 4), y0 = Math.floor(h / 4), y1 = h - Math.floor(h / 4);
+  let sum = 0, sq = 0;
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const f = wk[y * w + x];
+      sum += f;
+      sq += f * f;
+    }
+  }
+  const n = (x1 - x0) * (y1 - y0);
+  if (n <= 0) return [NaN, 0];
+  const m = sum / n;
+  return [m, Math.sqrt(Math.max(0, sq / n - m * m))];
+}
+
+/** cm, cs: the centre's mean and std. Each band of a pair gives way to content that differs from it: the lines just inside, or the centre when the band ran to maxFrac. */
+function countBars(a: BarScan, b: BarScan, cm: number, cs: number): [number, number] {
+  const apart = (s: BarScan) => (s.capped ? differs(s, cm, cs) : differs(s, s.inner, s.innerStd));
+  if (
+    a.frac >= bar.pairMin && b.frac >= bar.pairMin && a.light === b.light &&
+    Math.abs(a.frac - b.frac) <= bar.pairTol * Math.max(a.frac, b.frac) && apart(a) && apart(b)
+  ) {
     return [a.frac, b.frac];
   }
   const single = (s: BarScan) => (s.frac >= bar.oneMin && !Number.isNaN(s.inner) && Math.abs(s.inner - s.mean) >= bar.step ? s.frac : 0);

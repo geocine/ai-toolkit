@@ -177,11 +177,16 @@ full by `aitk_api` and in `studio/src/lib/photoTypes.ts`.
 - `POST /v1/photos/assess {items, kind?, resolution?, dataset?, pick?, decisions?, captions?}` → PhotoReview:
   judges `PhotoMetrics` measured elsewhere (the studio measures before upload). At most 2,000 items
   and a 4 MiB body (413 over it). With `dataset`, that dataset's stored photos join the duplicate pass
-  (they show only in `groups` and `same_as`). `items: []` is valid and returns `convert`, the formats
-  this server converts.
+  (they show only in `groups` and `same_as`), and the readiness is the dataset's once these photos are
+  added: `usable`, `grade`, `grade_line`, `provisional`, `basis`, `coverage`, `findings` and `hints`
+  judge them together with the stored photos measured so far (their captions, decisions and face results
+  included), while `items`, `total`, `flagged`, `counts` and `groups` stay the posted photos'. `pick`
+  picks among the posted photos; when too few pass, its `note` gives that combined readiness's hint.
+  `items: []` is valid and returns `convert`, the formats this server converts.
 - `GET /v1/datasets/{name}/photos/check?kind=&resolution=&pick=&wait_ms=` → PhotoReview: walks the
-  dataset like the trainer (dot folders and `_controls/` skipped), lists `.set_aside/` separately as
-  `set_aside`, and lists formats the trainer skips (heic, heif, avif, jxl, bmp, gif, tiff) as
+  dataset like the trainer (dot folders and `_controls/` skipped), lists the photos left out into
+  `.set_aside/` separately as `set_aside` and the originals a convert or a bake kept there as
+  `originals` (`{file, from, of}`, `of` the photo made from it), and lists formats the trainer skips (heic, heif, avif, jxl, bmp, gif, tiff) as
   `unsupported`. Photos not measured yet are analysed in the background; the call waits up to `wait_ms`
   (default 3000, max 20000), then answers with `pending > 0`, so poll until `pending == 0`. `resolution`
   is the run's, `1024` or `512,768,1024`. `kind` (`person`, `style`, `object`) defaults to the stored
@@ -192,7 +197,10 @@ full by `aitk_api` and in `studio/src/lib/photoTypes.ts`.
   `duplicate`, `tiny`, `unreadable`), `keep_best {n?}` (the best n for quality and variety; the rest are
   set aside), `bake_orientation`, `convert` (bmp, gif, tiff, heic where `convert` lists it, gray16,
   transparent, cmyk and huge to JPEG or PNG with the same stem; a JPEG is re-encoded at quality 95;
-  for both, the original goes into `.set_aside/`, so `restore` can bring it back),
+  for both, the original is kept in `.set_aside/` and listed in `originals`, not `set_aside`: it is a
+  backup, so `restore {all}` leaves it, and `restore {files: [it]}` puts it back in place of the photo made
+  from it, which is removed while it is as the convert or bake left it; one changed since stays, and the
+  original comes back beside it),
   `rename_same_stem`, `face_crops {max?}`, `remove_face_crops`. An unknown op is 400 listing the valid
   ops. With `apply`, 409 while a training run (queued, running or stopping) reads the dataset or a
   caption job writes it; a face check never blocks. Every change drops the photo's thumbnails and its

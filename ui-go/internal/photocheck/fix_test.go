@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -15,6 +16,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/image/bmp"
 
 	"github.com/geocine/aitoolkit/internal/imgmeta"
 	"github.com/geocine/aitoolkit/internal/state"
@@ -164,6 +167,10 @@ func TestFix(t *testing.T) {
 	if !s.exists(".set_aside/g16.png") || !bytes.Equal(s.read(t, ".set_aside/g16.png"), files["g16.png"]) {
 		t.Error("g16.png: the 16-bit original should be in .set_aside/")
 	}
+	// the originals are backups of the converted photos, not left out
+	if got := originalsOf(fx.Review); len(fx.Review.SetAside) != 0 || got != ".set_aside/g16.png>g16.png, .set_aside/t.png>t.jpg" {
+		t.Errorf("after convert: set aside %+v, originals %s", fx.Review.SetAside, got)
+	}
 	for _, f := range []string{"g16.png", "t.jpg"} {
 		if it := itemByFile(fx.Review, f); it == nil || slices.Contains(it.Flags, FlagGray16) || slices.Contains(it.Flags, FlagTransparent) {
 			t.Errorf("%s after convert: %+v", f, it)
@@ -253,8 +260,8 @@ func TestFixBake(t *testing.T) {
 	if !bytes.Equal(s.read(t, ".set_aside/r.jpg"), rot) || string(s.read(t, "r.txt")) != "cap" {
 		t.Fatal("bake: the original should be in .set_aside/ and the caption in place")
 	}
-	if len(fx.Review.SetAside) != 1 || fx.Review.SetAside[0].File != ".set_aside/r.jpg" {
-		t.Fatalf("set_aside after bake %+v", fx.Review.SetAside)
+	if len(fx.Review.SetAside) != 0 || originalsOf(fx.Review) != ".set_aside/r.jpg>r.jpg" {
+		t.Fatalf("after bake: set aside %+v, originals %s", fx.Review.SetAside, originalsOf(fx.Review))
 	}
 	entries, _ := os.ReadDir(s.dir)
 	for _, e := range entries {
@@ -262,10 +269,89 @@ func TestFixBake(t *testing.T) {
 			t.Errorf("left a temp file %s", e.Name())
 		}
 	}
-	// restore brings it back next to the baked one
+	// restore all leaves the original: it is not a left-out photo
 	fx = s.fix(t, true, FixOp{Op: "restore", All: true})
-	if got := changesOf(fx); got != "restore .set_aside/r.jpg>r_2.jpg" || !bytes.Equal(s.read(t, "r_2.jpg"), rot) {
-		t.Fatalf("restore: %s", got)
+	if got := changesOf(fx); got != "" || s.exists("r_2.jpg") || originalsOf(fx.Review) != ".set_aside/r.jpg>r.jpg" {
+		t.Fatalf("restore all: %q, originals %s", got, originalsOf(fx.Review))
+	}
+	// restoring it by name puts it back in place of the baked photo
+	fx = s.fix(t, true, FixOp{Op: "restore", Files: []string{".set_aside/r.jpg"}})
+	if got := changesOf(fx); got != "restore .set_aside/r.jpg>r.jpg" || fx.Changes[0].Reason != "in place of r.jpg" {
+		t.Fatalf("restore the original: %s (%q)", got, fx.Changes[0].Reason)
+	}
+	if !bytes.Equal(s.read(t, "r.jpg"), rot) || s.exists("r_2.jpg") || s.exists(".set_aside/r.jpg") || string(s.read(t, "r.txt")) != "cap" {
+		t.Fatal("the original should be back as r.jpg with its caption, and the baked copy gone")
+	}
+	if len(fx.Review.Items) != 1 || len(fx.Review.Originals) != 0 || s.exists(".set_aside/"+asideFromFile) {
+		t.Fatalf("after restoring the original: items %d, originals %+v", len(fx.Review.Items), fx.Review.Originals)
+	}
+}
+
+func originalsOf(r *Review) string {
+	var out []string
+	for _, o := range r.Originals {
+		out = append(out, o.File+">"+o.Of)
+	}
+	return strings.Join(out, ", ")
+}
+
+// The click-through: convert and bake, pick the best, restore all. The
+// originals stay backups (no phone_2.bmp, no sideways rot_2.jpg); by name
+// one comes back in place of its converted photo, and one whose baked photo
+// was changed since comes back beside it. The records outlive the request.
+func TestFixRestoreAllLeavesOriginals(t *testing.T) {
+	s := setupService(t)
+	var b bytes.Buffer
+	if err := bmp.Encode(&b, testutil.Scene(301, 1200, 900)); err != nil {
+		t.Fatal(err)
+	}
+	rot := testutil.WithExif(testutil.JPEG(testutil.Scene(302, 1200, 900), 92), 6, "", "", "")
+	tree := map[string][]byte{"phone.bmp": b.Bytes(), "phone.txt": []byte("phone cap"), "rot.jpg": rot}
+	for i := range 4 {
+		tree[fmt.Sprintf("p%d.jpg", i)] = scene(310 + i)
+	}
+	s.write(t, tree)
+	s.settled(t, Options{})
+	fx := s.fix(t, true, FixOp{Op: "convert"}, FixOp{Op: "bake_orientation"})
+	if got := changesOf(fx); got != "convert phone.bmp>phone.png, bake_orientation rot.jpg>" {
+		t.Fatalf("convert and bake: %s", got)
+	}
+	want := ".set_aside/phone.bmp>phone.png, .set_aside/rot.jpg>rot.jpg"
+	if got := originalsOf(s.settled(t, Options{})); got != want {
+		t.Fatalf("stored originals %s, want %s", got, want)
+	}
+	fx = s.fix(t, true, FixOp{Op: "keep_best", N: 2})
+	left := len(fx.Review.SetAside)
+	if left != 4 || originalsOf(fx.Review) != want {
+		t.Fatalf("keep_best 2 of 6: left out %d, originals %s", left, originalsOf(fx.Review))
+	}
+	fx = s.fix(t, true, FixOp{Op: "restore", All: true})
+	if len(fx.Changes) != left || len(fx.Review.Items) != 6 || len(fx.Review.SetAside) != 0 || originalsOf(fx.Review) != want {
+		t.Fatalf("restore all: %s; %d items, originals %s", changesOf(fx), len(fx.Review.Items), originalsOf(fx.Review))
+	}
+	for _, f := range []string{"phone.bmp", "phone_2.bmp", "rot_2.jpg", "phone_2.png"} {
+		if s.exists(f) {
+			t.Errorf("%s is back in the dataset", f)
+		}
+	}
+
+	// by name: the converted photo is unchanged, so the original replaces it
+	fx = s.fix(t, true, FixOp{Op: "restore", Files: []string{".set_aside/phone.bmp"}})
+	if got := changesOf(fx); got != "restore .set_aside/phone.bmp>phone.bmp" || fx.Changes[0].Reason != "in place of phone.png" {
+		t.Fatalf("restore phone.bmp: %s (%q)", got, fx.Changes[0].Reason)
+	}
+	if s.exists("phone.png") || !s.exists("phone.bmp") || string(s.read(t, "phone.txt")) != "phone cap" {
+		t.Fatal("phone.bmp should be back with its caption, phone.png gone")
+	}
+	// a baked photo changed since stays; the original comes back beside it
+	s.write(t, map[string][]byte{"rot.jpg": scene(320)})
+	s.settled(t, Options{})
+	fx = s.fix(t, true, FixOp{Op: "restore", Files: []string{".set_aside/rot.jpg"}})
+	if got := changesOf(fx); got != "restore .set_aside/rot.jpg>rot_2.jpg" || !strings.HasPrefix(fx.Changes[0].Reason, "beside rot.jpg") {
+		t.Fatalf("restore rot.jpg: %s (%q)", got, fx.Changes[0].Reason)
+	}
+	if !bytes.Equal(s.read(t, "rot_2.jpg"), rot) || !s.exists("rot.jpg") || len(fx.Review.Originals) != 0 {
+		t.Fatal("rot.jpg should stay and the original come back as rot_2.jpg")
 	}
 }
 
@@ -283,8 +369,8 @@ func TestFixBakePreview(t *testing.T) {
 	if s.exists(".set_aside") || !bytes.Equal(s.read(t, "r.jpg"), rot) {
 		t.Fatal("the preview wrote")
 	}
-	if len(fx.Review.SetAside) != 1 || itemByFile(fx.Review, "r.jpg") == nil {
-		t.Fatalf("preview review: set aside %+v", fx.Review.SetAside)
+	if len(fx.Review.SetAside) != 0 || originalsOf(fx.Review) != ".set_aside/r.jpg>r.jpg" || itemByFile(fx.Review, "r.jpg") == nil {
+		t.Fatalf("preview review: set aside %+v, originals %s", fx.Review.SetAside, originalsOf(fx.Review))
 	}
 }
 
@@ -537,5 +623,28 @@ func TestFixConvertDecoderPanic(t *testing.T) {
 		}
 	case <-time.After(20 * time.Second):
 		t.Fatal("the dataset stayed locked")
+	}
+}
+
+// A convert that had to take a new stem copied the caption there; putting
+// the original back takes that stem and caption, not a third one.
+func TestFixRestoreOriginalNewStem(t *testing.T) {
+	s := setupService(t)
+	var b bytes.Buffer
+	if err := bmp.Encode(&b, testutil.Scene(331, 1200, 900)); err != nil {
+		t.Fatal(err)
+	}
+	s.write(t, map[string][]byte{"x.bmp": b.Bytes(), "x.png": testutil.PNG(testutil.Scene(332, 1200, 900)), "x.txt": []byte("x cap")})
+	s.settled(t, Options{})
+	fx := s.fix(t, true, FixOp{Op: "convert", Files: []string{"x.bmp"}})
+	if got := changesOf(fx); got != "convert x.bmp>x_2.png" || string(s.read(t, "x_2.txt")) != "x cap" {
+		t.Fatalf("convert: %s", got)
+	}
+	fx = s.fix(t, true, FixOp{Op: "restore", Files: []string{".set_aside/x.bmp"}})
+	if got := changesOf(fx); got != "restore .set_aside/x.bmp>x_2.bmp" {
+		t.Fatalf("restore: %s", got)
+	}
+	if s.exists("x_2.png") || !bytes.Equal(s.read(t, "x_2.bmp"), b.Bytes()) || string(s.read(t, "x_2.txt")) != "x cap" || !s.exists("x.png") {
+		t.Fatal("x_2.bmp should replace x_2.png and keep its caption")
 	}
 }

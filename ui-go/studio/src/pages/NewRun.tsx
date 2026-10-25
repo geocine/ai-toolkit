@@ -874,7 +874,9 @@ function StepImages({ k, dataset, onDone, back }: { k: Knobs; dataset: string; o
  * The photos already on the server (after upload, or a reused dataset):
  * the server's review, polled while photos are still being analysed. Every
  * change here is real: leaving out moves a photo into .set_aside/ (restore
- * puts it back), and decisions are stored with the dataset.
+ * puts it back), and decisions are stored with the dataset. The originals a
+ * convert or a turn upright kept are listed apart: they are backups, which
+ * Restore all leaves, and putting one back replaces the photo made from it.
  */
 function StoredPhotos({ name, k }: { name: string; k: Knobs }) {
   const server = useServer()!;
@@ -1019,6 +1021,7 @@ function StoredPhotos({ name, k }: { name: string; k: Knobs }) {
     });
 
   const person = review.kind === 'person';
+  const originals = review.originals ?? []; // an older server lists them under set_aside
   const a = compare && photoFor(compare[0]);
   const b = compare && photoFor(compare[1]);
   return (
@@ -1090,6 +1093,29 @@ function StoredPhotos({ name, k }: { name: string; k: Knobs }) {
               Restore all
             </button>
           )}
+        </details>
+      )}
+      {originals.length > 0 && (
+        <details className="photo-aside">
+          <summary>Originals kept ({originals.length})</summary>
+          <p className="quiet-note">
+            The files a convert or a turn upright replaced, kept in the .set_aside folder as a backup. They are not left out, so Restore all leaves them. Put back swaps one in for
+            the photo made from it.
+          </p>
+          <ul className="photo-aside-list">
+            {originals.map(o => (
+              <li key={o.file}>
+                <PhotoThumb photo={{ key: o.file, file: o.from, src: src(o.file, true), leftOut: true, stored: true }} />
+                <span className="photo-aside-name" title={o.file}>
+                  <span className="mono">{o.from}</span>
+                  <span className="muted"> · original of {o.of}</span>
+                </span>
+                <button type="button" className="btn btn-sm" disabled={busy} onClick={() => restore(o.file)}>
+                  Put back
+                </button>
+              </li>
+            ))}
+          </ul>
         </details>
       )}
       {a && b && <CompareDialog a={a} b={b} onClose={() => setCompare(null)} onLeaveOut={f => leaveOut([f])} onKeep={restore} />}

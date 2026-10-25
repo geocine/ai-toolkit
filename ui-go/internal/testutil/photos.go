@@ -253,6 +253,24 @@ func Darken(img image.Image) *image.RGBA {
 	return mapPix(img, func(r, g, b float64) (float64, float64, float64) { return r * 0.18, g * 0.18, b * 0.18 })
 }
 
+// Underexpose is a photo taken with almost no light, about 4.5 stops
+// under: evenly dark everywhere, so every edge line is a near-black band
+// with no letterbox anywhere.
+func Underexpose(img image.Image) *image.RGBA {
+	return mapPix(img, func(r, g, b float64) (float64, float64, float64) { return r * 0.04, g * 0.04, b * 0.04 })
+}
+
+// Pillarbox puts img between side bars of colour c so the result is w
+// wide (img keeps its height), as a vertical video shown in a wide frame.
+func Pillarbox(img image.Image, w int, c color.Color) *image.RGBA {
+	b := img.Bounds()
+	out := image.NewRGBA(image.Rect(0, 0, w, b.Dy()))
+	draw.Draw(out, out.Bounds(), image.NewUniform(c), image.Point{}, draw.Src)
+	x0 := (w - b.Dx()) / 2
+	draw.Draw(out, image.Rect(x0, 0, x0+b.Dx(), b.Dy()), img, b.Min, draw.Src)
+	return out
+}
+
 // Brighten is a photo blown out by about 2 stops: highlights clip to white.
 func Brighten(img image.Image) *image.RGBA {
 	return mapPix(img, func(r, g, b float64) (float64, float64, float64) { return r*2.5 + 30, g*2.5 + 30, b*2.5 + 30 })
