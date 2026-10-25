@@ -5,7 +5,7 @@
 #   SHIM_IMAGE_EXISTS=0       the image to verify is not local (--verify pulls it)
 #   SHIM_PULL_EXIT            exit code of docker pull
 #   SHIM_ENV                  Config.Env lines of the base
-#   SHIM_SIZE                 .Size of the base
+#   SHIM_DU                   bytes du measures in the base
 #   SHIM_PROBE                output of the torch probe (key=value lines)
 #   SHIM_BUILDX=0             docker buildx is not installed
 #   SHIM_REMOTE_DIGEST        digest of an already pushed :<sha> (unset: none)
@@ -36,7 +36,6 @@ case "${1:-}" in
       *Config.Env*) printf '%s\n' "${SHIM_ENV-PATH=/usr/local/bin:/usr/bin
 NVIDIA_REQUIRE_CUDA=cuda>=13.0 brand=unknown,driver>=535,driver<536 brand=tesla,driver>=570,driver<571
 NVIDIA_VISIBLE_DEVICES=all}" ;;
-      *.Size*) echo "${SHIM_SIZE:-13689223168}" ;;
       *RepoDigests*) [[ -n "${SHIM_LOCAL_DIGESTS:-}" ]] && printf '%s\n' "$SHIM_LOCAL_DIGESTS" ;;
       *) exit 1 ;;
     esac
@@ -53,6 +52,8 @@ cuda=13.0
 sm=75,80,86,90,100,120
 ptx=
 flash_attn=2.8.3+cu130torch2.13}"
+    elif has du "$@"; then
+      printf '%s\t/\n' "${SHIM_DU:-13689223168}"
     elif has image-check "$@"; then
       [[ "${SHIM_HAS_IMAGECHECK:-1}" == 1 ]] || exit "${SHIM_TIMEOUT_EXIT:-124}"
       exit "${SHIM_IMAGECHECK_EXIT:-0}"
