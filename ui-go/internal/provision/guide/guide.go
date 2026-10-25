@@ -237,18 +237,19 @@ func vastGuide(o Options, token string) provision.SetupGuide {
 	}
 }
 
-// ---- QuickPod (spec: quickpod.md §5.3, §6.3, §9) ----
+// ---- QuickPod (spec: quickpod.md §5.3, §6.3, §9; checked against QuickPod's source) ----
 
 func quickpodGuide(o Options, token string) provision.SetupGuide {
 	port := strconv.Itoa(provision.Port)
 	env := []provision.GuideEnv{
-		{Name: "AI_TOOLKIT_AUTH", Value: token, Secret: true, Note: "In the template's docker options, so the server never starts without a token."},
+		{Name: "AI_TOOLKIT_AUTH", Value: token, Secret: true, Note: "In the template's docker options, so the server never starts without a token. A pod the studio creates gets its own token, which wins over this one."},
 		{Name: "AITK_CORS_ORIGINS", Value: o.CORSOrigin, Note: "Lets your studio call the server from the browser."},
 	}
 	return provision.SetupGuide{
 		Env: env,
-		// Both are required: the port, plus a fallback token so the server
-		// never boots open if QuickPod ignores per-pod options (PLAN §6.3).
+		// Both are required: the port, plus a token so a pod made by hand
+		// never boots open. Per-pod options from the studio are appended
+		// after these, so its own token wins.
 		DockerOptions: "-p " + port + ":" + port + " " + envFlags(env),
 		Fields: []provision.GuideField{
 			{Label: "Template Type", Value: "GPU"},
@@ -259,17 +260,17 @@ func quickpodGuide(o Options, token string) provision.SetupGuide {
 			{Label: "Launch Mode", Value: "Docker Entrypoint", Note: "Uses the image's entrypoint, which starts the server."},
 		},
 		Steps: []string{
-			"Sign in at console.quickpod.io and add credit under Settings. QuickPod support is in beta. For the studio to create pods for you later, a key under Settings → Secure API keys needs Pods read, Pods write, Templates read, Account read and Profile read.",
+			"Sign in at console.quickpod.io and add credit under Settings. For the studio to create pods for you later, a key under Settings → Secure API keys needs Pods read, Pods write, Templates read and Profile read.",
 			"Open Templates and click Create New Template.",
 			"Fill in the fields above. Leave Private Docker Repository unticked, and leave Docker Entrypoint Run Options and On Start Script empty.",
-			"Paste the docker options into Docker Options. Keep both parts: -p " + port + ":" + port + " publishes the port, and AI_TOOLKIT_AUTH keeps the server from starting without a token.",
+			"Paste the docker options into Docker Options. Keep both parts: -p " + port + ":" + port + " publishes the port, and AI_TOOLKIT_AUTH keeps the server from starting without a token. If you change the token, use only letters, digits, - and _: QuickPod silently drops other characters from docker options.",
 			"Click Create Template. On GPU Search, pick an offer with a max CUDA of " + HostCUDAMin + " or newer on " + hostGPUs + ": the image needs " + hostDriver + ". " + hostOlder + " Choose " + TemplateName + " under My Templates and click Create.",
 			"On Pods, wait for running and click Connect. Under Exposed Ports, the " + port + " row has an HTTPS link (https://<pod id>-" + port + ".proxy.quickpod.io/) and an HTTP link (http://<ip>:<port>).",
 		},
 		URLPattern: "https://<pod id>-" + port + ".proxy.quickpod.io/",
 		ConsoleURL: "https://console.quickpod.io/templates",
 		KeysURL:    "https://console.quickpod.io/settings",
-		KeyScopes:  []string{"pods:read", "pods:write", "templates:read", "account:read", "profile:read"},
+		KeyScopes:  []string{"pods:read", "pods:write", "templates:read", "profile:read"},
 	}
 }
 

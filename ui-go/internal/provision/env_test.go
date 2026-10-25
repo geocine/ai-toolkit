@@ -204,7 +204,7 @@ func TestEnvLimits(t *testing.T) {
 		t.Fatalf("51 vars: %v", err)
 	}
 	// QuickPod: one docker_options string, so a strict charset
-	for _, v := range []string{"a b", "x;rm", "$(id)", "a|b", "q\"", "back`tick"} {
+	for _, v := range []string{"a b", "x;rm", "$(id)", "a|b", "q\"", "back`tick", "*", "a?b", "~x", "[ab]", "x!y"} {
 		_, _, err := e.build(QuickPod, LaunchRequest{Env: map[string]string{"AITK_Q": v}})
 		if codeOf(err) != v1api.CodeInvalidConfig || !strings.Contains(err.Error(), "AITK_Q") || strings.Contains(err.Error(), v) {
 			t.Errorf("quickpod %q: %v", v, err)

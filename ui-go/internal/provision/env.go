@@ -25,11 +25,13 @@ var (
 // which puts the model cache on a volume (IMAGE-PLAN §3.4).
 var passthroughKey = regexp.MustCompile(`^(AITK_[A-Z0-9_]{1,60}|HF_[A-Z0-9_]{1,60}|HUGGING_FACE_HUB_TOKEN|TZ)$`)
 
-// QuickPod carries env inside one docker_options string ("-e K=V ..."), so
-// keys and values are held to a strict charset (no quoting is attempted).
+// QuickPod carries env inside one docker_options string ("-e K=V ...") that
+// its host agent runs through sh -c unquoted, so keys and values are held to
+// a strict charset (no quoting is attempted). QuickPodValue is the charset
+// QuickPod itself keeps in a template's docker options, minus space and '"'.
 var (
-	quickpodKey      = regexp.MustCompile(`^[A-Z_][A-Z0-9_]{0,63}$`)
-	quickpodBadChars = " \t\r\n\v\f\"'`$\\;|&<>"
+	quickpodKey   = regexp.MustCompile(`^[A-Z_][A-Z0-9_]{0,63}$`)
+	QuickPodValue = regexp.MustCompile(`^[A-Za-z0-9._/:@%+=,-]*$`)
 )
 
 // reservedEnv: set by the launch itself, or the provider's own; a request
@@ -256,8 +258,8 @@ func checkEnvLimits(kind Kind, caps Caps, env map[string]string) error {
 			if !quickpodKey.MatchString(k) {
 				return envInvalid("env %s: %s takes only names of capital letters, digits and _", k, p)
 			}
-			if strings.ContainsAny(v, quickpodBadChars) {
-				return envInvalid("env %s has a space or one of \" ' ` $ \\ ; | & < >, which %s can't carry", k, p)
+			if !QuickPodValue.MatchString(v) {
+				return envInvalid("env %s may hold only letters, digits and . _ / : @ %% + = , - on %s", k, p)
 			}
 		}
 	}

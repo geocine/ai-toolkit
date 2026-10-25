@@ -3,6 +3,7 @@ package quickpodmock
 import (
 	"encoding/json"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"testing"
@@ -149,7 +150,6 @@ func TestCreateValidation(t *testing.T) {
 		`{"offers_id":6302336,"template_uuid":"` + AitkTemplateUUID + `","disk_size":100}`,
 		`{"offers_id":6302336,"template_uuid":"` + AitkTemplateUUID + `"}`,
 		`{"offers_id":6302336,"template_uuid":"nope","disk_size":"100"}`,
-		`{"offers_id":6302336,"template_uuid":"` + AitkTemplateUUID + `","disk_size":"9999"}`,
 		`not json`,
 	} {
 		var e map[string]string
@@ -157,9 +157,15 @@ func TestCreateValidation(t *testing.T) {
 			t.Errorf("%s: %d %v", b, s, e)
 		}
 	}
-	var e map[string]string
-	if s := c.authed("POST", "/update/api/createpod", `{"offers_id":1,"template_uuid":"`+AitkTemplateUUID+`","disk_size":"100"}`, &e); s != 406 || e["message"] != "offer is busy" {
-		t.Fatalf("unknown offer: %d %v", s, e)
+	// Every failure of createpod's database step is 406 "Database query failed".
+	for b, msg := range map[string]string{
+		`{"offers_id":1,"template_uuid":"` + AitkTemplateUUID + `","disk_size":"100"}`:        "offer or machine not found",
+		`{"offers_id":6302336,"template_uuid":"` + AitkTemplateUUID + `","disk_size":"9999"}`: "requested disk size 9999GB exceeds the maximum disk size 712GB",
+	} {
+		var e map[string]string
+		if s := c.authed("POST", "/update/api/createpod", b, &e); s != 406 || e["error"] != "Database query failed" || e["message"] != msg {
+			t.Errorf("%s: %d %v", b, s, e)
+		}
 	}
 }
 
@@ -175,8 +181,8 @@ func TestPodLifecycleShape(t *testing.T) {
 	if s := c.authed("POST", "/update/api/createpod", body, &created); s != 200 || created["status"] != "success" {
 		t.Fatalf("create %d %v", s, created)
 	}
-	if _, has := created["pod_uuid"]; has {
-		t.Fatal("create returns no id")
+	if id, _ := created["pod_uuid"].(string); id == "" {
+		t.Fatalf("create answers with the pod_uuid: %v", created)
 	}
 	if c.rentableIDs()[6302336] {
 		t.Fatal("a rented offer leaves /rentable")
@@ -189,7 +195,8 @@ func TestPodLifecycleShape(t *testing.T) {
 	c.authed("GET", "/update/api/gpu_pods", "", &pods)
 	p := pods[0]
 	if p["State"] != "running" || p["intended_state"] != "running" || p["altname"] != "aitk-a" || p["offers_id"] != 6302336.0 ||
-		p["port_mappings"] != "8675 -> 127.0.0.1:45001 | 22 -> 127.0.0.1:45000" || p["storage_cost"] != 0.03 || starts != 1 {
+		p["port_mappings"] != `8675 -> <a target="_new" href="http://127.0.0.1:45001">127.0.0.1:45001</a> |` ||
+		math.Abs(p["storage_cost"].(float64)-0.15*200/1024) > 1e-9 || starts != 1 {
 		t.Fatalf("pod %v (node starts %d)", p, starts)
 	}
 	uuid := p["Names"].(string)
@@ -206,13 +213,16 @@ func TestPodLifecycleShape(t *testing.T) {
 	}
 	c.authed("GET", "/update/api/startpod?pod_uuid="+uuid, "", nil)
 	c.authed("GET", "/update/api/gpu_pods", "", &pods)
-	if pods[0]["port_mappings"] != "8675 -> 127.0.0.1:45002 | 22 -> 127.0.0.1:45001" || starts != 2 {
+	if pods[0]["port_mappings"] != `8675 -> <a target="_new" href="http://127.0.0.1:45002">127.0.0.1:45002</a> |` || starts != 2 {
 		t.Fatalf("restarted on a new node %v", pods[0])
 	}
 	c.authed("GET", "/update/api/destroypod?pod_uuid="+uuid, "", nil)
 	c.authed("GET", "/update/api/gpu_pods", "", &pods)
-	if pods[0]["destroyed"] != true || stops != 2 || !c.rentableIDs()[6302336] {
-		t.Fatalf("destroyed %v; the offer is free again", pods[0])
+	if len(pods) != 0 || stops != 2 || !c.rentableIDs()[6302336] {
+		t.Fatalf("destroyed pods are not listed %v; the offer is free again", pods)
+	}
+	if s := c.authed("GET", "/update/api/destroypod?pod_uuid="+uuid, "", nil); s != 403 {
+		t.Fatalf("destroy again: %d", s)
 	}
 	if got := m.Instances(); len(got) != 1 || !got[0].Destroyed || got[0].Env["AI_TOOLKIT_AUTH"] != "tok" {
 		t.Fatalf("instances %+v", got)
@@ -225,7 +235,7 @@ func TestNoPortWithoutNode(t *testing.T) {
 	c.authed("POST", "/update/api/createpod", body, nil)
 	var pods []map[string]any
 	c.authed("GET", "/update/api/gpu_pods", "", &pods)
-	if pods[0]["port_mappings"] != "22 -> 203.0.113.12:40600" {
+	if pods[0]["port_mappings"] != "" {
 		t.Fatalf("port_mappings %q", pods[0]["port_mappings"])
 	}
 }

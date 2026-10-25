@@ -173,26 +173,36 @@ Docker options:
 URL: `http://<ip>:<port>`
 <!-- /guide:vast -->
 
-## QuickPod (beta)
+## QuickPod
 
 - **Key.** Settings → Secure API keys at <https://console.quickpod.io/settings>
-  with `pods:read`, `pods:write`, `templates:read`, `account:read` and
-  `profile:read`. The `qpk_…` value is shown once. Or set
-  `AITK_PROVISION_QUICKPOD_KEY`.
+  with `pods:read`, `pods:write`, `templates:read` and `profile:read`. The
+  `qpk_…` value is shown once. Or set `AITK_PROVISION_QUICKPOD_KEY`.
 - **Template first.** QuickPod templates cannot be made with an API key, so
   create one by hand (below) and pick it in the studio when you create a
-  server. Each listed template shows whether it runs the aitk image, publishes 8675
-  and sets a token.
-- **Price.** The hourly price plus the host's storage price for your disk
-  size. A stopped pod bills the storage.
+  server. Only your own templates are listed (QuickPod also returns everyone's
+  public ones). Each shows whether it runs the aitk image, publishes 8675 and
+  sets a token. QuickPod runs the template's Docker Image Path as typed and
+  never reads its version tag, so a tag or digest goes in the path.
+- **Price.** The hourly price plus storage: the host's price per TB-hour × your
+  disk / 1024. QuickPod creates and bills at least 30 GB. A stopped pod bills
+  the storage. A create or start needs credit for 30 minutes of all your
+  running pods plus the new one.
 - **Stop vs destroy.** Stop pauses compute and keeps the storage, which is
-  still billed. Destroy removes the pod and its disk.
-- **URL.** `https://<pod id>-8675.proxy.quickpod.io/` (not verified for every
-  image), else `http://<ip>:<port>`.
-- **Limits.** Beta: switch it off with `AITK_PROVISION_PROVIDERS=runpod,vast`.
-  Whether per-pod docker options add to the template's or replace them is not
-  verified, which is why the template carries `-p 8675:8675` and a token of
-  its own.
+  still billed. It also frees the GPU, so someone else can rent it and a later
+  start fails with "in use". Destroy removes the pod and its disk. QuickPod
+  stops your pods when your credit goes below zero, and destroys them at
+  −$2.
+- **URL.** `https://<pod id>-8675.proxy.quickpod.io/`, else `http://<ip>:<port>`.
+  The proxy serves any published port of a running pod and passes the
+  `Authorization` header through. Its leg to the host is plain http.
+- **Docker options.** The studio's per-pod options (the server's token, its
+  CORS origin) are added after the template's, so they win. QuickPod keeps
+  only `-p`, `-e`, `-h` and `--shm-size` from them and runs them unquoted, so
+  env values may hold only letters, digits and `. _ / : @ % + = , -`.
+  The template still carries `-p 8675:8675` and a token of its own, so a pod
+  made by hand never starts open.
+- **Switch off.** `AITK_PROVISION_PROVIDERS=runpod,vast`.
 
 Manual template:
 
@@ -212,10 +222,10 @@ Docker options:
 -p 8675:8675 -e AI_TOOLKIT_AUTH=<a long random token> -e AITK_CORS_ORIGINS=<your studio origin>
 ```
 
-1. Sign in at console.quickpod.io and add credit under Settings. QuickPod support is in beta. For the studio to create pods for you later, a key under Settings → Secure API keys needs Pods read, Pods write, Templates read, Account read and Profile read.
+1. Sign in at console.quickpod.io and add credit under Settings. For the studio to create pods for you later, a key under Settings → Secure API keys needs Pods read, Pods write, Templates read and Profile read.
 2. Open Templates and click Create New Template.
 3. Fill in the fields above. Leave Private Docker Repository unticked, and leave Docker Entrypoint Run Options and On Start Script empty.
-4. Paste the docker options into Docker Options. Keep both parts: -p 8675:8675 publishes the port, and AI_TOOLKIT_AUTH keeps the server from starting without a token.
+4. Paste the docker options into Docker Options. Keep both parts: -p 8675:8675 publishes the port, and AI_TOOLKIT_AUTH keeps the server from starting without a token. If you change the token, use only letters, digits, - and _: QuickPod silently drops other characters from docker options.
 5. Click Create Template. On GPU Search, pick an offer with a max CUDA of 13.0 or newer on an RTX 30-series, A100 or newer GPU: the image needs a driver for CUDA 13.0 or newer (580+). On an older host the image fails, and the rental still bills. Choose aitk headless under My Templates and click Create.
 6. On Pods, wait for running and click Connect. Under Exposed Ports, the 8675 row has an HTTPS link (https://\<pod id>-8675.proxy.quickpod.io/) and an HTTP link (http://\<ip>:\<port>).
 7. When it shows running, copy its URL and add it on the Servers page with the same token.
@@ -355,8 +365,4 @@ up. Never enable simulate on a shared or public server.
 - Vast.ai: Whether actual_status reports scheduling or stopped.
 - Vast.ai: Exact permission names for scoped keys.
 - Vast.ai: Whether an account environment variable or the instance's own env wins for AI_TOOLKIT_AUTH.
-- QuickPod: Whether per-pod docker options add to the template's or replace them.
-- QuickPod: Whether the https proxy passes the Authorization header.
-- QuickPod: The State values besides running and exited.
-- QuickPod: The HTTP status for insufficient credit.
 <!-- /unconfirmed -->

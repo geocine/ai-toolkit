@@ -10,11 +10,13 @@ import (
 // (the console shows "setting up"); after that it is starting.
 const creatingFor = 60 * time.Second
 
-// statusOf maps a pod's Docker State and intended_state onto a status
-// (spec: quickpod.md §6.2, the console's derived badge). Only "running" and
-// "exited" are confirmed State values; "dead" is Docker's state for a
-// container that failed and is read as failed (UNCONFIRMED that QuickPod
-// reports it), anything else is unknown with the raw value kept.
+// statusOf maps a pod's Docker State and intended_state onto a status (the
+// console's derived badge). State is Docker's own value as the host agent
+// lists it (created, restarting, running, paused, removing, exited, dead, or
+// "" before its first beat); intended_state is running, exited or
+// terminated. QuickPod restarts a pod that should run but exited, so those
+// read as starting; "dead" is failed, anything else unknown with the raw
+// value kept.
 func statusOf(p rawPod, now time.Time) (provision.Status, string) {
 	switch {
 	case p.Destroyed:
