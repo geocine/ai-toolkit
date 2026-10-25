@@ -139,8 +139,3 @@ func (r Ref) WithTag(tag string) Ref {
 
 // Pinned is the reference by digest: "ghcr.io/geocine/aitoolkit-go@sha256:...".
 func (r Ref) Pinned(digest string) string { return r.Name() + "@" + digest }
-
-// Split gives the QuickPod template fields image_path and version_tag. A
-// reference pinned only by digest has no tag (""); one with both keeps the tag
-// as typed.
-func (r Ref) Split() (imagePath, tag string) { return r.Name(), r.Tag }

@@ -71,14 +71,14 @@ func TestRegisteredAndInfo(t *testing.T) {
 		t.Fatal("quickpod is not registered")
 	}
 	in := a.Info()
-	if in.Stage != "beta" || in.Label != "QuickPod" || !in.Caps.TemplateRequired || !in.Caps.EnvFlagString ||
-		in.Caps.HTTPS != "unconfirmed" || in.Caps.SelfDestroy != "key" || !in.Caps.StopKeepsDisk {
+	if in.Stage != "stable" || in.Label != "QuickPod" || !in.Caps.TemplateRequired || !in.Caps.EnvFlagString ||
+		in.Caps.HTTPS != "yes" || in.Caps.SelfDestroy != "key" || !in.Caps.StopKeepsDisk {
 		t.Fatalf("info %+v", in)
 	}
-	if in.Caps.ImageDigestRef != "unconfirmed" || !in.Caps.ReportsInet || !in.Caps.ReportsDiskBW {
+	if in.Caps.ImageDigestRef != "yes" || !in.Caps.ReportsInet || !in.Caps.ReportsDiskBW {
 		t.Fatalf("image/bandwidth caps %+v", in.Caps)
 	}
-	if len(in.Unconfirmed) != 4 || !slices.Contains(in.KeyScopes, "templates:read") || in.KeysURL != "https://console.quickpod.io/settings" {
+	if len(in.Unconfirmed) != 0 || slices.Contains(in.KeyScopes, "account:read") || !slices.Contains(in.KeyScopes, "templates:read") || in.KeysURL != "https://console.quickpod.io/settings" {
 		t.Fatalf("unconfirmed/scopes %+v", in)
 	}
 }
@@ -101,15 +101,15 @@ func TestOffersMapping(t *testing.T) {
 	if o.Provider != provision.QuickPod || o.GPU != "RTX 5060 Ti" || o.GPUCount != 1 || o.VRAMGB != 16 {
 		t.Fatalf("offer %+v", o)
 	}
-	// 0.14 compute + 0.1 $/TB-h x 100 GB / 1000
-	if o.PricePerHour != 0.15 || o.StoppedPricePerHour == nil || *o.StoppedPricePerHour != 0.01 {
+	// 0.14 compute + 0.1 $/TB-h x 100 GB / 1024
+	if o.PricePerHour != 0.149766 || o.StoppedPricePerHour == nil || *o.StoppedPricePerHour != 0.009766 {
 		t.Fatalf("price %v stopped %v", o.PricePerHour, o.StoppedPricePerHour)
 	}
 	if o.Reliability == nil || *o.Reliability != 0.982958 || o.Location != "US, Indiana, Carmel" ||
 		o.MaxDiskGB == nil || *o.MaxDiskGB != 444 || !o.HTTPS || o.Availability != "available" || o.Host == nil || o.Fit != nil {
 		t.Fatalf("offer fields %+v", o)
 	}
-	if got[1].VRAMGB != 24 || got[1].PricePerHour != 0.195 || got[2].GPU != "RTX A6000" || got[2].VRAMGB != 48 {
+	if got[1].VRAMGB != 24 || got[1].PricePerHour != 0.194648 || got[2].GPU != "RTX A6000" || got[2].VRAMGB != 48 {
 		t.Fatalf("others %+v %+v", got[1], got[2])
 	}
 	// /rentable is public: no credentials go with it.
@@ -152,8 +152,13 @@ func TestOffersFilters(t *testing.T) {
 	}
 	// The disk is priced: 500 GB on the 3090 host at 0.15 $/TB-h.
 	got, _ := a.Offers(context.Background(), key, provision.OfferQuery{GPU: "3090", DiskGB: 500})
-	if got[0].PricePerHour != 0.255 || *got[0].StoppedPricePerHour != 0.075 {
+	if got[0].PricePerHour != 0.253242 || *got[0].StoppedPricePerHour != 0.073242 {
 		t.Fatalf("disk price %+v", got[0])
+	}
+	// Below 30 GB QuickPod creates and bills 30 GB.
+	got, _ = a.Offers(context.Background(), key, provision.OfferQuery{GPU: "3090", DiskGB: 10})
+	if *got[0].StoppedPricePerHour != 0.004395 {
+		t.Fatalf("minimum disk price %+v", *got[0].StoppedPricePerHour)
 	}
 }
 
@@ -234,7 +239,7 @@ func TestQuote(t *testing.T) {
 	m, _ := setup(t, mockkit.Options{})
 	ctx := context.Background()
 	o, err := a.Quote(ctx, key, "6302336", provision.OfferQuery{DiskGB: 200})
-	if err != nil || o.PricePerHour != 0.21 || o.ID != "6302336" {
+	if err != nil || o.PricePerHour != 0.209297 || o.ID != "6302336" {
 		t.Fatalf("quote %+v %v", o, err)
 	}
 	if r := lastReq(m, "/update/offer_is_busy"); r.RawQuery != "offer_id=6302336" {
@@ -263,16 +268,23 @@ func TestQuoteBusy(t *testing.T) {
 
 func TestTemplates(t *testing.T) {
 	m, _ := setup(t, mockkit.Options{})
-	m.AddTemplate(quickpodmock.Template{UUID: "pinned", Name: "aitk pinned", ImagePath: "ghcr.io/geocine/aitoolkit-go", VersionTag: "f53a407",
+	// version_tag is never read by createpod: only image_path counts.
+	m.AddTemplate(quickpodmock.Template{UUID: "pinned", Name: "aitk pinned", ImagePath: "ghcr.io/geocine/aitoolkit-go:f53a407", VersionTag: "ignored",
 		DockerOptions: "--shm-size=16g -p   8675:8675"})
+	// Another user's public template is listed by /templates but left out.
+	m.AddTemplate(quickpodmock.Template{UUID: "theirs", Name: "aitk copy", ImagePath: "ghcr.io/someone/aitoolkit-go:latest",
+		DockerOptions: "-p 8675:8675", Public: true, UserID: quickpodmock.OtherUserID})
+	// The account's own public template stays.
+	m.AddTemplate(quickpodmock.Template{UUID: "mine-public", Name: "aitk shared", ImagePath: "ghcr.io/geocine/aitoolkit-go:latest",
+		DockerOptions: "-p 8675:8675", Public: true})
 	got, err := a.Templates(context.Background(), key)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []provision.Template{
 		{ID: quickpodmock.AitkTemplateUUID, Name: "aitk headless", Image: "ghcr.io/geocine/aitoolkit-go:latest", Ours: true, PublishesPort: true, HasToken: true},
-		{ID: quickpodmock.OtherTemplateUUID, Name: "FluxGym", Image: "quickpod/fluxgym:latest"},
 		{ID: "pinned", Name: "aitk pinned", Image: "ghcr.io/geocine/aitoolkit-go:f53a407", Ours: true, PublishesPort: true},
+		{ID: "mine-public", Name: "aitk shared", Image: "ghcr.io/geocine/aitoolkit-go:latest", Ours: true, PublishesPort: true},
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("templates\n%+v\nwant\n%+v", got, want)
@@ -296,8 +308,8 @@ func TestLaunchBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ref != (provision.Ref{OfferID: "6302336", Label: "aitk-abc"}) {
-		t.Fatalf("ref %+v (QuickPod returns no id)", ref)
+	if ref.ID == "" || ref.OfferID != "6302336" || ref.Label != "aitk-abc" {
+		t.Fatalf("ref %+v (createpod answers with the pod_uuid)", ref)
 	}
 	r := lastReq(m, "/update/api/createpod")
 	if r.Header.Get("X-API-Key") != key || r.Header.Get("Authorization") != "ApiKey "+key {
@@ -399,7 +411,7 @@ func TestLifecycle(t *testing.T) {
 		t.Fatalf("endpoints %+v", in.Endpoints)
 	}
 	if in.GPU != "RTX 5060 Ti" || in.GPUCount != 1 || in.VRAMGB != 16 || in.Location != "US, Indiana, Carmel" ||
-		*in.PricePerHour != 0.15 || *in.StoppedPricePerHour != 0.01 || !in.CreatedAt.Equal(t0) ||
+		*in.PricePerHour != 0.149766 || *in.StoppedPricePerHour != 0.009766 || !in.CreatedAt.Equal(t0) ||
 		!slices.Equal(in.Actions, []string{"stop", "terminate"}) {
 		t.Fatalf("running %+v", in)
 	}
@@ -438,10 +450,9 @@ func TestLifecycle(t *testing.T) {
 	if err := a.Terminate(ctx, key, ref.ID); err != nil {
 		t.Fatal(err)
 	}
-	in = expect(provision.StatusTerminated)
-	if len(in.Endpoints) != 0 || in.Actions != nil || in.ProviderStatus != "destroyed" {
-		t.Fatalf("terminated %+v", in)
-	}
+	// gpu_pods drops a destroyed pod: Get reads it as gone.
+	_, err = a.Get(ctx, key, ref)
+	class(t, err, provision.ClassNotFound)
 	if err := a.Terminate(ctx, key, ref.ID); err != nil {
 		t.Fatalf("terminate again: %v", err)
 	}
@@ -502,6 +513,10 @@ func TestParse8675(t *testing.T) {
 		ok   bool
 	}{
 		{"8675 -> 1.2.3.4:40601", "1.2.3.4", 40601, true},
+		// what the host agent writes: one linked entry per -p option
+		{`8675 -> <a target="_new" href="http://203.0.113.11:21829">203.0.113.11:21829</a> |`, "203.0.113.11", 21829, true},
+		{`7860 -> <a target="_new" href="http://1.2.3.4:40601">1.2.3.4:40601</a> |8675 -> <a target="_new" href="http://1.2.3.4:40602">1.2.3.4:40602</a> |`, "1.2.3.4", 40602, true},
+		{`7860 -> <a target="_new" href="http://1.2.3.4:40601">1.2.3.4:40601</a> |`, "", 0, false},
 		{"22 -> 1.2.3.4:40600 | 8675 -> 1.2.3.4:40601", "1.2.3.4", 40601, true},
 		{"8675 -> 96.12.34.56:40601|22 -> 96.12.34.56:40600", "96.12.34.56", 40601, true},
 		{"22 -> 1.2.3.4:40600, 8675/tcp -> 1.2.3.4:40602", "1.2.3.4", 40602, true},
@@ -532,15 +547,35 @@ func TestProxyURL(t *testing.T) {
 	}
 }
 
+// createpod answers every failure of its database step as 406 "Database
+// query failed" with the reason in message.
+func TestCreate406(t *testing.T) {
+	for msg, want := range map[string]provision.Class{
+		"offer is busy":                                                 provision.ClassCapacity,
+		"offer is occupied or offline":                                  provision.ClassCapacity,
+		"offer or machine not found":                                    provision.ClassCapacity,
+		"offer has no usable port range":                                provision.ClassCapacity,
+		"not enough free GPU slots":                                     provision.ClassCapacity,
+		"requested disk size 900GB exceeds the maximum disk size 444GB": provision.ClassInvalid,
+		"pq: connection reset":                                          provision.ClassUnavailable,
+	} {
+		body, _ := json.Marshal(map[string]string{"error": "Database query failed", "message": msg})
+		e := apiError("create", provision.Response{Status: http.StatusNotAcceptable, Body: body}, key)
+		if e.Class != want || e.Message != msg {
+			t.Errorf("%q: %s %q, want %s", msg, e.Class, e.Message, want)
+		}
+	}
+}
+
 func TestCreditErrors(t *testing.T) {
 	for _, status := range []int{http.StatusPaymentRequired, http.StatusBadRequest} {
 		m, _ := setup(t, mockkit.Options{})
 		m.CreditStatus = status
-		m.SetCredit(0.1)
+		m.SetCredit(0.05) // 30 minutes of the 3090 at $0.19/h need $0.10
 		_, err := a.Launch(context.Background(), key, provision.LaunchSpec{Label: "aitk-x", OfferID: "6302336", TemplateID: quickpodmock.AitkTemplateUUID})
 		class(t, err, provision.ClassCredit)
 		var e *provision.Error
-		if !errors.As(err, &e) || e.Status != status || !strings.Contains(e.Message, "$0.10 left") {
+		if !errors.As(err, &e) || e.Status != status || !strings.Contains(e.Message, "$0.05 left") {
 			t.Fatalf("credit error at %d: %+v", status, e)
 		}
 	}
@@ -568,9 +603,14 @@ func TestCapacityAuthConflict(t *testing.T) {
 	}
 	pods := m.Instances()
 	id := pods[0].UUID
-	// Another account's key: 403 -> auth.
+	// Another account's pod reads as a missing one: QuickPod's 403
+	// "You do not have permission" -> not_found.
 	err = a.Stop(ctx, "qpk_other.key", id)
-	class(t, err, provision.ClassAuth)
+	class(t, err, provision.ClassNotFound)
+	// A 403 for a key without the scope stays auth.
+	if e := apiError("stop", provision.Response{Status: http.StatusForbidden, Body: []byte(`{"error":"API key does not have the required scope"}`)}, key); e.Class != provision.ClassAuth {
+		t.Fatalf("scope 403 class %s", e.Class)
+	}
 	// Stopped, then someone else rents the GPU: start is 409 -> conflict.
 	if err := a.Stop(ctx, key, id); err != nil {
 		t.Fatal(err)
@@ -578,7 +618,7 @@ func TestCapacityAuthConflict(t *testing.T) {
 	m.Occupy(6302336)
 	err = a.Start(ctx, key, id)
 	class(t, err, provision.ClassConflict)
-	if e := err.(*provision.Error); e.Message != "This machine is in use at the moment" {
+	if e := err.(*provision.Error); e.Message != "This machine is in use at the moment (Offer is busy)" {
 		t.Fatalf("conflict message %q", e.Message)
 	}
 	// Other provider text is kept in brackets.

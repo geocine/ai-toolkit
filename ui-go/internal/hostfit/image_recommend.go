@@ -20,7 +20,7 @@ type ImageRecommendInput struct {
 	ServerRevision string    // the build this server runs (handlers/v1 version()); a short or full sha
 	ServerVersion  string    // the upstream version this server carries ("0.13.34"), for the skew line
 	Custom         string    // a user-typed ref: the only candidate
-	TemplateImage  string    // QuickPod: the chosen template's image_path:version_tag, the only image it can run
+	TemplateImage  string    // QuickPod: the chosen template's image_path, the only image it can run
 	DiskGB         int       // the disk the launch will ask for; 0 = the host's maximum
 	DigestRef      bool      // the provider accepts repo@sha256 references (Caps.ImageDigestRef "yes")
 }
@@ -358,7 +358,7 @@ func (r *resolver) whyChannel(c *ImageChoice, cands []ImageChoice, chosen bool) 
 	case "template":
 		line = "The image of the QuickPod template"
 		if c.Image != r.in.TemplateImage {
-			line = "Edit the template's version tag to " + c.Revision
+			line = "Change the tag in the template's image path to " + c.Revision
 		}
 	}
 	c.Why = append([]string{line}, c.Why...)
@@ -381,7 +381,7 @@ func (r *resolver) skew(c ImageChoice, cands []ImageChoice) (imagecheck.Check, b
 
 // templateTag: a QuickPod template whose tag is not the newest build gets
 // an alternative and an info with the edit_template action (QuickPod runs
-// only the template's image, so the fix is to edit its version tag). The
+// only the template's image_path, so the fix is to edit the tag in it). The
 // alternative is never the choice: the studio cannot launch it directly.
 func (r *resolver) templateTag(ctx context.Context, tmpl ImageChoice) (ImageChoice, imagecheck.Check, bool) {
 	ref, err := imagecheck.ParseRef(tmpl.Image)
@@ -393,15 +393,15 @@ func (r *resolver) templateTag(ctx context.Context, tmpl ImageChoice) (ImageChoi
 	if rev == "" || ref.Tag == rev || ref.Digest != "" || latest.Level == imagecheck.LevelBlock && tmpl.Level != imagecheck.LevelBlock {
 		return ImageChoice{}, imagecheck.Check{}, false
 	}
-	latest.Label = "Edit the template's version tag to " + rev
+	latest.Label = "Change the tag in the template's image path to " + rev
 	latest.Image = ref.WithTag(rev).String()
 	if latest.LaunchRef != nil { // nil when the newer tag blocks too
 		launch := latest.Image
 		latest.LaunchRef = &launch
 	}
 	note := imagecheck.Check{Level: imagecheck.LevelInfo, Code: "image_template_tag",
-		Message: fmt.Sprintf("Edit the template's version tag to %s.", rev),
-		Fix:     "QuickPod runs the template's image; its tag decides the build.",
+		Message: fmt.Sprintf("Change the tag in the template's image path to %s.", rev),
+		Fix:     "QuickPod runs the template's Docker Image Path as typed; its tag decides the build.",
 		Action:  &imagecheck.CheckAction{Kind: "edit_template", Value: rev}}
 	return latest, note, true
 }

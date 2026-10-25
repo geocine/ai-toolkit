@@ -1,10 +1,12 @@
-// Package quickpod is the QuickPod adapter (beta). It is written only from
-// QuickPod's published Swagger, its official CLIs and console bundle, as
-// summarized in quickpod.md, and is tested against quickpodmock.
+// Package quickpod is the QuickPod adapter. It was written from QuickPod's
+// published Swagger, CLIs and console bundle (quickpod.md), checked against
+// QuickPod's own source (the update API, host agent and proxy), and is
+// tested against quickpodmock.
 //
 // Pods always come from a template (the image, ports and env live there),
-// create returns no pod id (the pod is found again by offers_id + altname),
-// and every lifecycle call is a GET with ?pod_uuid=<Names>.
+// create answers with the pod_uuid (a pod is also found again by offers_id +
+// altname when that answer was lost), and every lifecycle call is a GET with
+// ?pod_uuid=<Names>.
 package quickpod
 
 import (
@@ -20,7 +22,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/geocine/aitoolkit/internal/hostfit"
 	"github.com/geocine/aitoolkit/internal/provision"
@@ -29,24 +30,23 @@ import (
 // Package vars: tests and the in-process simulate wiring change them.
 var (
 	API = "https://api.quickpod.org"
-	// ProxyURL is QuickPod's https proxy for port 8675 of a pod (spec:
-	// quickpod.md §6.3): the first segment of Names before "-".
+	// ProxyURL is QuickPod's https proxy for port 8675 of a pod: the first
+	// segment of Names before "-". The proxy serves any published port of a
+	// running pod and forwards Authorization unchanged.
 	ProxyURL = func(names string) string {
 		seg, _, _ := strings.Cut(names, "-")
 		return "https://" + seg + "-8675.proxy.quickpod.io"
 	}
-	// UseProxy offers the proxy endpoint before the direct one. UNCONFIRMED
-	// that the proxy serves user images and passes Authorization; the probe
+	// UseProxy offers the proxy endpoint before the direct one; the probe
 	// falls back to the direct http endpoint when it does not answer.
 	UseProxy = true
 	// PodEnv sends the machine env as per-pod "-e K=V" docker_options.
-	// UNCONFIRMED whether QuickPod appends them to the template's options,
-	// replaces them or ignores them (quickpod.md §5.3); the probe detects the
-	// last two as no_port / token_mismatch.
+	// QuickPod appends them after the template's options, so a per-pod value
+	// wins over the template's (docker keeps the last -e).
 	PodEnv = true
-	// PodPortFlag also sends "-p 8675:8675" per pod. Off: it would duplicate
-	// the template's mapping under append semantics; flip it only if live use
-	// shows replace semantics.
+	// PodPortFlag also sends "-p 8675:8675" per pod. Off: the template
+	// publishes 8675 already, and a second -p would give it a second host
+	// port.
 	PodPortFlag = false
 )
 
@@ -60,6 +60,8 @@ const (
 	maxLimit   = 200
 	defLimit   = 50
 	errClipLen = 300
+	// minDiskGB: createpod raises a smaller disk_size to 30 GB, and bills it.
+	minDiskGB = 30
 )
 
 type adapter struct{}
@@ -72,28 +74,22 @@ func (adapter) Info() provision.KindInfo {
 	return provision.KindInfo{
 		Kind:  provision.QuickPod,
 		Label: provision.Label(provision.QuickPod),
-		Stage: "beta",
+		Stage: "stable",
 		Caps: provision.Caps{
 			TemplateRequired: true,
 			StopStart:        true,
 			StopKeepsDisk:    true,
-			HTTPS:            "unconfirmed",
+			HTTPS:            "yes",
 			SelfDestroy:      "key",
 			Credit:           true,
 			EnvFlagString:    true,
-			ImageDigestRef:   "unconfirmed",
+			ImageDigestRef:   "yes",
 			ReportsInet:      true,
 			ReportsDiskBW:    true,
 		},
-		Unconfirmed: []string{
-			"Whether per-pod docker options add to the template's or replace them",
-			"Whether the https proxy passes the Authorization header",
-			"The State values besides running and exited",
-			"The HTTP status for insufficient credit",
-		},
 		ConsoleURL: "https://console.quickpod.io",
 		KeysURL:    "https://console.quickpod.io/settings",
-		KeyScopes:  []string{"pods:read", "pods:write", "templates:read", "account:read", "profile:read"},
+		KeyScopes:  []string{"pods:read", "pods:write", "templates:read", "profile:read"},
 	}
 }
 
@@ -114,8 +110,8 @@ type rawOffer struct {
 		Reliability       *float64 `json:"reliability"`         // 0..100
 		ListedStorageCost float64  `json:"listed_storage_cost"` // USD per TB per hour
 		GeoInfo           string   `json:"geoinfo"`             // "US|Kentucky|Lexington"
-		InetDown          float64  `json:"inet_down"`           // Mbps-like; unit UNCONFIRMED, 0 = not reported
-		DiskBW            float64  `json:"disk_bw"`             // unit UNCONFIRMED, 0 = not reported
+		InetDown          float64  `json:"inet_down"`           // Mbps (speedtest); 0 = not reported
+		DiskBW            float64  `json:"disk_bw"`             // MB/s write test; 0 = not reported
 		AvailDiskSpace    float64  `json:"avail_disk_space"`    // GB free on the machine; 0 = not reported
 	} `json:"_machines"`
 
@@ -137,6 +133,8 @@ func (r rawOffer) maxDisk() int {
 func (r rawOffer) host() hostfit.Host { return hostfit.FromQuickPod(r.raw) }
 
 type rawTemplate struct {
+	UserID        int64  `json:"user_id"`
+	IsPublic      bool   `json:"is_public"`
 	UUID          string `json:"template_uuid"`
 	Name          string `json:"template_name"`
 	ImagePath     string `json:"image_path"`
@@ -144,8 +142,9 @@ type rawTemplate struct {
 	DockerOptions string `json:"docker_options"` // read for the flags only, never returned
 }
 
-// rawPod is one models.UserPod. Names is the pod UUID; pod_uuid may also be
-// present (UNCONFIRMED: the Go CLI reads it).
+// rawPod is one models.UserPod. Names is the pod UUID (pod_uuid is read too,
+// as the Go CLI does). Destroyed pods are not listed. Logs is the tail the
+// host agent uploads after a podlogs call, lines joined with "<br>".
 type rawPod struct {
 	ID           int64   `json:"id"`
 	Names        string  `json:"Names"`
@@ -155,6 +154,7 @@ type rawPod struct {
 	Intended     string  `json:"intended_state"`
 	Destroyed    bool    `json:"destroyed"`
 	PortMappings string  `json:"port_mappings"`
+	Logs         string  `json:"logs"`
 	HourlyCost   float64 `json:"hourly_cost"`
 	StorageCost  float64 `json:"storage_cost"`
 	GPUCount     int     `json:"gpu_count"`
@@ -232,9 +232,15 @@ func errorBody(b []byte) map[string]string {
 }
 
 // message is the first non-empty of error, details and message (the
-// official CLI's rule).
+// official CLI's rule). createpod answers every failure of its database step
+// as 406 {"error":"Database query failed","message":<the reason>}, so there
+// the message comes first.
 func message(m map[string]string) string {
-	for _, k := range []string{"error", "details", "message"} {
+	keys := []string{"error", "details", "message"}
+	if m["error"] == dbFailed {
+		keys = []string{"message", "details", "error"}
+	}
+	for _, k := range keys {
 		if v := strings.TrimSpace(m[k]); v != "" {
 			return v
 		}
@@ -242,8 +248,14 @@ func message(m map[string]string) string {
 	return ""
 }
 
-// apiError classifies a failed call (spec: quickpod.md §3, §6.4). op is
-// "create", "start" or anything else; secrets are redacted from the message.
+const dbFailed = "Database query failed"
+
+// capacityText is what a createpod 406 says when the offer can't be had now
+// (busy, occupied, offline, gone, no free port range or GPU slots).
+var capacityText = regexp.MustCompile(`(?i)offer is busy|occupied|offline|not found|port range|gpu`)
+
+// apiError classifies a failed call. op is "create", "start" or anything
+// else; secrets are redacted from the message.
 func apiError(op string, res provision.Response, secrets ...string) *provision.Error {
 	m := errorBody(res.Body)
 	msg := message(m)
@@ -263,9 +275,16 @@ func apiError(op string, res provision.Response, secrets ...string) *provision.E
 		if !strings.Contains(strings.ToLower(msg), "in use") {
 			msg = "This machine is in use at the moment (" + msg + ")"
 		}
+	case res.Status == http.StatusNotAcceptable && strings.Contains(strings.ToLower(msg), "disk"):
+		e.Class = provision.ClassInvalid
+	case res.Status == http.StatusNotAcceptable && m["error"] == dbFailed && !capacityText.MatchString(msg):
+		e.Class = provision.ClassUnavailable
 	case res.Status == http.StatusNotAcceptable || res.Status == http.StatusConflict ||
 		strings.Contains(strings.ToLower(msg), "offer is busy"):
 		e.Class = provision.ClassCapacity
+	case res.Status == http.StatusForbidden && strings.HasPrefix(msg, "You do not have permission"):
+		// a lifecycle call on a pod that is gone (or not this account's)
+		e.Class = provision.ClassNotFound
 	case res.Status == http.StatusUnauthorized || res.Status == http.StatusForbidden:
 		e.Class = provision.ClassAuth
 	case res.Status == http.StatusPaymentRequired:
@@ -366,10 +385,19 @@ func diskOf(q provision.OfferQuery) int {
 	return provision.DefaultDiskGB
 }
 
-// offerOf maps one row for a disk size: compute + listed_storage_cost (USD
-// per TB-hour) x disk / 1000, the storage part billing on while stopped.
+// billedDisk is the disk QuickPod creates and bills: at least 30 GB.
+func billedDisk(disk int) int { return max(disk, minDiskGB) }
+
+// storageCost is QuickPod's own rule: listed_storage_cost (USD per TB-hour)
+// x disk / 1024, on the billed disk.
+func storageCost(listed float64, disk int) float64 {
+	return round6(listed * float64(billedDisk(disk)) / 1024)
+}
+
+// offerOf maps one row for a disk size: compute + storage, the storage part
+// billing on while stopped.
 func offerOf(r rawOffer, disk int) provision.Offer {
-	storage := round6(r.Machine.ListedStorageCost * float64(disk) / 1000)
+	storage := storageCost(r.Machine.ListedStorageCost, disk)
 	o := provision.Offer{
 		ID:                  strconv.FormatInt(r.ID, 10),
 		Provider:            provision.QuickPod,
@@ -500,18 +528,15 @@ var (
 	tokenFlag = regexp.MustCompile(`AI_TOOLKIT_AUTH=`)
 )
 
-// imageOf joins image_path and version_tag (the tag is often inside the path).
-func imageOf(t rawTemplate) string {
-	img := strings.TrimSpace(t.ImagePath)
-	tag := strings.TrimSpace(t.VersionTag)
-	if tag == "" || strings.Contains(img[strings.LastIndex(img, "/")+1:], ":") {
-		return img
-	}
-	return img + ":" + tag
-}
+// imageOf is the image a template runs: image_path as typed. createpod pulls
+// and runs image_path alone and never reads version_tag, so a tag or digest
+// counts only inside the path.
+func imageOf(t rawTemplate) string { return strings.TrimSpace(t.ImagePath) }
 
-// Templates lists the account's GPU templates. docker_options is read only
-// to set the flags: it may carry a token and is never returned.
+// Templates lists the account's own GPU templates. /templates also returns
+// every public template; those are left out, because the studio launches only
+// a template the account controls. docker_options is read only to set the
+// flags: it may carry a token and is never returned.
 func (adapter) Templates(ctx context.Context, key string) ([]provision.Template, error) {
 	b, err := call(ctx, "templates", http.MethodGet, "/templates", key, nil)
 	if err != nil {
@@ -521,8 +546,25 @@ func (adapter) Templates(ctx context.Context, key string) ([]provision.Template,
 	if err := decode(b, &rows, key); err != nil {
 		return nil, err
 	}
+	me := int64(-1)
+	if slices.ContainsFunc(rows, func(t rawTemplate) bool { return t.IsPublic }) {
+		mb, err := call(ctx, "templates", http.MethodGet, "/update/api/me", key, nil)
+		if err != nil {
+			return nil, err
+		}
+		var u struct {
+			ID int64 `json:"id"`
+		}
+		if err := decode(mb, &u, key); err != nil {
+			return nil, err
+		}
+		me = u.ID
+	}
 	out := make([]provision.Template, 0, len(rows))
 	for _, t := range rows {
+		if t.IsPublic && t.UserID != me {
+			continue
+		}
 		img := imageOf(t)
 		out = append(out, provision.Template{
 			ID:            t.UUID,
@@ -538,18 +580,12 @@ func (adapter) Templates(ctx context.Context, key string) ([]provision.Template,
 
 // ---- launch ----
 
-var (
-	envKey     = regexp.MustCompile(`^[A-Z_][A-Z0-9_]{0,63}$`)
-	envBadChar = "\"'`$\\;|&<>"
-)
+var envKey = regexp.MustCompile(`^[A-Z_][A-Z0-9_]{0,63}$`)
 
-// envValueOK is false for a value with any Unicode space or control
-// character (\v, U+0085 and U+00A0 split a docker_options string as well as
-// a space does) or a shell character.
-func envValueOK(v string) bool {
-	return !strings.ContainsFunc(v, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) &&
-		!strings.ContainsAny(v, envBadChar)
-}
+// envValueOK keeps a value to QuickPod's docker-options charset: the host
+// agent runs the options through sh -c unquoted, so a space, quote, glob or
+// shell character could split the string or change the command.
+func envValueOK(v string) bool { return provision.QuickPodValue.MatchString(v) }
 
 // dockerOptions is the per-pod docker_options for an env: "-e K=V" pairs in
 // key order (plus "-p 8675:8675" first with PodPortFlag). The service has
@@ -574,7 +610,7 @@ func dockerOptions(env map[string]string) (string, error) {
 			return "", provision.Errorf(provision.QuickPod, provision.ClassInvalid, 0, "env name %q is not allowed on QuickPod", k)
 		}
 		if !envValueOK(v) {
-			return "", provision.Errorf(provision.QuickPod, provision.ClassInvalid, 0, "the value of %s has a space, a control character or a shell character, which QuickPod's docker options cannot carry", k)
+			return "", provision.Errorf(provision.QuickPod, provision.ClassInvalid, 0, "the value of %s may hold only letters, digits and . _ / : @ %% + = , - on QuickPod", k)
 		}
 		parts = append(parts, "-e "+k+"="+v)
 	}
@@ -590,9 +626,9 @@ type createBody struct {
 }
 
 // Launch creates a pod from the template. The image is the template's
-// (createpod has no image field), so s.Image is not sent. QuickPod returns
-// no pod id: Ref.ID stays empty unless the answer carries pod_uuid, and Get
-// resolves the pod by offers_id + altname.
+// (createpod has no image field), so s.Image is not sent. The answer carries
+// the pod_uuid; when it does not, Get resolves the pod by offers_id +
+// altname.
 func (adapter) Launch(ctx context.Context, key string, s provision.LaunchSpec) (provision.Ref, error) {
 	offer, err := strconv.ParseInt(s.OfferID, 10, 64)
 	if err != nil {
@@ -689,7 +725,8 @@ func instanceOf(p rawPod, t time.Time) provision.Instance {
 		in.CreatedAt = time.UnixMilli(p.CreatedAt)
 	}
 	if p.HourlyCost > 0 || p.StorageCost > 0 {
-		run, stopped := round6(p.HourlyCost+p.StorageCost), round6(p.StorageCost)
+		// hourly_cost already includes storage_cost (createpod adds it).
+		run, stopped := round6(p.HourlyCost), round6(p.StorageCost)
 		in.PricePerHour, in.StoppedPricePerHour = &run, &stopped
 	}
 	if st == provision.StatusTerminated {
@@ -767,13 +804,17 @@ func (adapter) Start(ctx context.Context, key, id string) error {
 }
 
 // Terminate destroys the pod and its disk. A pod that is already destroyed
-// or no longer listed counts as done.
+// or no longer listed counts as done (gpu_pods drops destroyed pods, and a
+// lifecycle call on one answers 403 "You do not have permission").
 func (adapter) Terminate(ctx context.Context, key, id string) error {
 	_, err := podAction(ctx, key, "destroypod", id)
 	if err == nil || id == "" {
 		return err
 	}
-	if c := provision.ClassOf(err); c == provision.ClassAuth || c == provision.ClassRateLimited {
+	switch provision.ClassOf(err) {
+	case provision.ClassNotFound:
+		return nil
+	case provision.ClassAuth, provision.ClassRateLimited:
 		return err
 	}
 	rows, lerr := pods(ctx, key)
@@ -786,18 +827,25 @@ func (adapter) Terminate(ctx context.Context, key, id string) error {
 	return err
 }
 
+// brTag is how the host agent joins the log lines it uploads.
+var brTag = regexp.MustCompile(`(?i)<br\s*/?>`)
+
+// Logs asks the host agent for a fresh tail (podlogs only queues "docker
+// logs"; the agent uploads the last 25 lines on its next beat) and returns
+// the tail gpu_pods holds now, which is the previous upload until then.
 func (adapter) Logs(ctx context.Context, key, id string, tail int) (string, error) {
-	b, err := podAction(ctx, key, "podlogs", id)
+	if _, err := podAction(ctx, key, "podlogs", id); err != nil {
+		return "", err
+	}
+	rows, err := pods(ctx, key)
 	if err != nil {
 		return "", err
 	}
-	var r struct {
-		Logs string `json:"logs"`
+	p, ok := find(rows, provision.Ref{ID: id})
+	if !ok {
+		return "", provision.Errorf(provision.QuickPod, provision.ClassNotFound, 0, "pod not found")
 	}
-	if err := decode(b, &r, key); err != nil {
-		return "", err
-	}
-	text := provision.Redact(r.Logs, key)
+	text := provision.Redact(brTag.ReplaceAllString(p.Logs, "\n"), key)
 	if tail > 0 {
 		lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
 		if len(lines) > tail {

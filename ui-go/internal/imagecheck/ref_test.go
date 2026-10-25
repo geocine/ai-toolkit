@@ -114,27 +114,27 @@ func TestRefHelpers(t *testing.T) {
 		t.Errorf("Name: %q", r.Name())
 	}
 
-	// QuickPod templates take image_path and version_tag.
+	// Name drops the registry for Docker Hub and keeps it elsewhere.
 	r, _ = ParseRef("ghcr.io/geocine/aitoolkit-go:f53a407")
-	if p, tag := r.Split(); p != "ghcr.io/geocine/aitoolkit-go" || tag != "f53a407" {
-		t.Errorf("Split: %q %q", p, tag)
+	if p, tag := r.Name(), r.Tag; p != "ghcr.io/geocine/aitoolkit-go" || tag != "f53a407" {
+		t.Errorf("Name: %q %q", p, tag)
 	}
 	r, _ = ParseRef("alpine")
-	if p, tag := r.Split(); p != "alpine" || tag != "latest" {
-		t.Errorf("Split docker hub: %q %q", p, tag)
+	if p, tag := r.Name(), r.Tag; p != "alpine" || tag != "latest" {
+		t.Errorf("Name docker hub: %q %q", p, tag)
 	}
-	if p, tag := (Ref{Domain: "docker.io", API: "registry-1.docker.io", Repo: "library/alpine", Digest: testDigest}).Split(); p != "alpine" || tag != "" {
-		t.Errorf("Split digest-only: %q %q", p, tag)
+	if p := (Ref{Domain: "docker.io", API: "registry-1.docker.io", Repo: "library/alpine", Digest: testDigest}).Name(); p != "alpine" {
+		t.Errorf("Name digest-only: %q", p)
 	}
 	r, _ = ParseRef("ghcr.io/geocine/aitoolkit-go:f53a407@" + testDigest)
-	if p, tag := r.Split(); p != "ghcr.io/geocine/aitoolkit-go" || tag != "f53a407" {
-		t.Errorf("Split tag and digest: %q %q", p, tag)
+	if p, tag := r.Name(), r.Tag; p != "ghcr.io/geocine/aitoolkit-go" || tag != "f53a407" {
+		t.Errorf("Name tag and digest: %q %q", p, tag)
 	}
 	if got := r.Pinned(r.Digest); got != "ghcr.io/geocine/aitoolkit-go@"+testDigest {
 		t.Errorf("Pinned with a tag: %q", got)
 	}
-	if p, tag := (Ref{Domain: "docker.io", API: "registry-1.docker.io", Repo: "library/a/b", Tag: "1"}).Split(); p != "library/a/b" || tag != "1" {
-		t.Errorf("Split library sub-path: %q %q", p, tag)
+	if p := (Ref{Domain: "docker.io", API: "registry-1.docker.io", Repo: "library/a/b", Tag: "1"}).Name(); p != "library/a/b" {
+		t.Errorf("Name library sub-path: %q", p)
 	}
 }
 

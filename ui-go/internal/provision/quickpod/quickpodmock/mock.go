@@ -1,5 +1,7 @@
-// Package quickpodmock is an httptest QuickPod built only from quickpod.md
-// (spec: quickpod.md §8, the mock checklist). Tests and simulate mode run the
+// Package quickpodmock is an httptest QuickPod built from quickpod.md (§8,
+// the mock checklist) and checked against QuickPod's own source: the update
+// API's answers and error shapes, the host agent's port_mappings and log
+// upload, and the billing rules. Tests and simulate mode run the
 // quickpod adapter against it. State is computed lazily from timestamps on
 // each request, so a mockkit.FakeClock makes every transition deterministic.
 package quickpodmock
@@ -57,30 +59,39 @@ func (m *Mock) AddOffers(rows ...map[string]any) {
 
 // Seeded templates (spec: PLAN §6.3 mock). The aitk template publishes 8675
 // and carries a fallback token, as the setup guide tells users to do.
+// /templates also lists other users' public templates, as QuickPod does.
 const (
+	// MeID is the account's user id (/update/api/me) and its templates' user_id.
+	MeID = 1234
+	// OtherUserID owns the public templates that are not the account's.
+	OtherUserID       = 77
 	AitkTemplateUUID  = "5e1f9f29-aitk-4c1e-9d6a-000000008675"
 	OtherTemplateUUID = "17dc5ed1-69b8-4239-a678-31e8fa14d858"
 	TemplateToken     = "template-token-0000"
-	// AitkTemplateImage is the aitk template's image: path with the tag in
-	// it and an empty version_tag, so it follows :latest.
+	// AitkTemplateImage is the aitk template's image: the tag lives in
+	// image_path (createpod never reads version_tag), so it follows :latest.
 	AitkTemplateImage = "ghcr.io/geocine/aitoolkit-go:latest"
 	// PinnedTemplateUUID is PinnedTemplate's id.
 	PinnedTemplateUUID = "5e1f9f29-aitk-4c1e-9d6a-00000000f53a"
 )
 
-// PinnedTemplate is an aitk template pinned to build in version_tag, as the
-// studio's "edit the template's version tag" fix leaves it (simulate seeds
-// it with registrymock's revision).
+// PinnedTemplate is an aitk template pinned to build in its image path, as
+// the studio's "change the tag in the Docker Image Path" fix leaves it
+// (simulate seeds it with registrymock's revision).
 func PinnedTemplate(build string) Template {
-	return Template{UUID: PinnedTemplateUUID, Name: "aitk headless (pinned)", ImagePath: "ghcr.io/geocine/aitoolkit-go",
-		VersionTag: build, DockerOptions: "-p 8675:8675 -e AI_TOOLKIT_AUTH=" + TemplateToken}
+	return Template{UUID: PinnedTemplateUUID, Name: "aitk headless (pinned)", ImagePath: "ghcr.io/geocine/aitoolkit-go:" + build,
+		DockerOptions: "-p 8675:8675 -e AI_TOOLKIT_AUTH=" + TemplateToken}
 }
 
-// minRuntime is the credit a create or start needs: two hours of compute
-// (insufficient_credit's minimum_runtime_minutes, spec: quickpod.md §3).
-const minRuntime = 2.0
+// minRuntimeMinutes is the credit rule of a create or start: 30 minutes of
+// every running pod of the account plus the new one.
+const minRuntimeMinutes = 30
+
+// minDiskGB: createpod raises a smaller disk to 30 GB and bills it.
+const minDiskGB = 30
 
 type Template struct {
+	UserID        int64 // 0 = the account's (MeID)
 	UUID          string
 	Name          string
 	ImagePath     string
@@ -96,7 +107,7 @@ type Pod struct {
 	Altname       string
 	OfferID       int64
 	TemplateUUID  string
-	DiskSize      string // as the create body sent it
+	DiskSize      string // as the create body sent it (billed at least 30 GB)
 	DockerOptions string // the per-pod docker_options as received
 	Env           map[string]string
 	Ports         bool // container port 8675 is published
@@ -116,7 +127,8 @@ type pod struct {
 	from, to string
 	at       time.Time
 	delay    time.Duration
-	seen     bool // read as running once (CrashAfterRunning dies after it)
+	seen     bool   // read as running once (CrashAfterRunning dies after it)
+	logs     string // the tail the host agent uploaded after podlogs
 	created  time.Time
 	nodeStop func()
 }
@@ -124,9 +136,8 @@ type pod struct {
 type Mock struct {
 	Rec *mockkit.Recorder
 	URL string
-	// CreditStatus is the HTTP status of an insufficient_credit answer. The
-	// real one is UNCONFIRMED (spec: quickpod.md §3): 402 by default, tests
-	// also try 400.
+	// CreditStatus is the HTTP status of an insufficient_credit answer: 402,
+	// as QuickPod sends it; tests also try 400.
 	CreditStatus int
 
 	o         mockkit.Options
@@ -159,7 +170,7 @@ func New(o mockkit.Options) *Mock {
 			{UUID: AitkTemplateUUID, Name: "aitk headless", ImagePath: AitkTemplateImage,
 				DockerOptions: "-p 8675:8675 -e AI_TOOLKIT_AUTH=" + TemplateToken},
 			{UUID: OtherTemplateUUID, Name: "FluxGym", ImagePath: "quickpod/fluxgym", VersionTag: "latest",
-				DockerOptions: "-p 7860:7860", Public: true},
+				DockerOptions: "-p 7860:7860", Public: true, UserID: OtherUserID},
 		},
 	}
 }
@@ -293,12 +304,12 @@ func credential(r *http.Request) (key string, bearer bool) {
 func (m *Mock) authed(w http.ResponseWriter, r *http.Request, bearerOK bool) (owner string, f mockkit.Faults, ok bool) {
 	key, bearer := credential(r)
 	if key == "" || (bearer && !bearerOK) {
-		fail(w, http.StatusUnauthorized, "error", "unauthorized") // UNCONFIRMED text
+		fail(w, http.StatusUnauthorized, "error", "Unauthorized")
 		return "", f, false
 	}
 	f, ok = m.o.Authorize(key)
 	if !ok {
-		fail(w, http.StatusUnauthorized, "error", "unauthorized")
+		fail(w, http.StatusUnauthorized, "error", "Unauthorized")
 		return "", f, false
 	}
 	m.mu.Lock()
@@ -306,7 +317,8 @@ func (m *Mock) authed(w http.ResponseWriter, r *http.Request, bearerOK bool) (ow
 	n := m.calls
 	m.mu.Unlock()
 	if f.RateLimitEvery > 0 && n%f.RateLimitEvery == 0 {
-		// QuickPod documents no rate limit; the shape is ours (UNCONFIRMED).
+		// QuickPod's API has no limiter of its own (one may sit at the edge);
+		// the shape is ours.
 		w.Header().Set("Retry-After", "2")
 		fail(w, http.StatusTooManyRequests, "error", "too many requests")
 		return "", f, false
@@ -377,7 +389,12 @@ func (m *Mock) offerBusy(w http.ResponseWriter, r *http.Request) {
 // ---- templates ----
 
 func templateJSON(t Template, withSecrets bool) map[string]any {
+	uid := t.UserID
+	if uid == 0 {
+		uid = MeID
+	}
 	out := map[string]any{
+		"user_id":       uid,
 		"template_uuid": t.UUID, "template_name": t.Name, "template_type": "gpu", "launch_mode": "docker",
 		"image_path": t.ImagePath, "version_tag": t.VersionTag, "docker_options": t.DockerOptions,
 		"docker_run_options": "", "cli_command": "", "on_start_script": "", "launch_port": 0, "disk_space": 100,
@@ -419,7 +436,7 @@ func (m *Mock) myTemplates(w http.ResponseWriter, r *http.Request) {
 // gets 401, which is why the adapter never creates templates.
 func (m *Mock) saveTemplate(w http.ResponseWriter, r *http.Request) {
 	if _, bearer := credential(r); !bearer {
-		fail(w, http.StatusUnauthorized, "error", "unauthorized")
+		fail(w, http.StatusUnauthorized, "error", "Unauthorized")
 		return
 	}
 	if _, _, ok := m.authed(w, r, true); !ok {
@@ -463,7 +480,7 @@ func (m *Mock) saveTemplate(w http.ResponseWriter, r *http.Request) {
 // quickpod.md §5.2).
 func (m *Mock) deleteTemplate(w http.ResponseWriter, r *http.Request) {
 	if _, bearer := credential(r); !bearer {
-		fail(w, http.StatusUnauthorized, "error", "unauthorized")
+		fail(w, http.StatusUnauthorized, "error", "Unauthorized")
 		return
 	}
 	if _, _, ok := m.authed(w, r, true); !ok {
@@ -483,25 +500,22 @@ func (m *Mock) deleteTemplate(w http.ResponseWriter, r *http.Request) {
 
 // ---- docker options ----
 
-// dockerOpts reads "-e K=V" and "-p H:C" flags from a docker_options string.
+// dockerOpts reads "-e K=V" and "-p H:C" flags from a docker_options string
+// as the host agent does: only the short "-e" and "-p" forms survive
+// ("--env=", "--publish" and the rest are dropped).
 func dockerOpts(s string) (env map[string]string, port8675 bool) {
 	env = map[string]string{}
 	f := strings.Fields(s)
-	for i := 0; i < len(f); i++ {
-		flag, val := f[i], ""
-		if v, ok := strings.CutPrefix(flag, "--env="); ok {
-			flag, val = "-e", v
-		} else if (flag == "-e" || flag == "--env" || flag == "-p" || flag == "--publish") && i+1 < len(f) {
+	for i := 0; i+1 < len(f); i++ {
+		switch f[i] {
+		case "-e":
 			i++
-			val = f[i]
-		}
-		switch flag {
-		case "-e", "--env":
-			if k, v, ok := strings.Cut(val, "="); ok {
+			if k, v, ok := strings.Cut(f[i], "="); ok {
 				env[k] = v
 			}
-		case "-p", "--publish":
-			if strings.HasSuffix(strings.TrimSuffix(val, "/tcp"), ":8675") {
+		case "-p":
+			i++
+			if parts := strings.Split(f[i], ":"); len(parts) >= 2 && strings.TrimSuffix(parts[1], "/tcp") == "8675" {
 				port8675 = true
 			}
 		}
@@ -509,8 +523,10 @@ func dockerOpts(s string) (env map[string]string, port8675 bool) {
 	return env, port8675
 }
 
-// podEnv applies the per-pod docker_options to the template's under the
-// PodEnv fault (spec: quickpod.md §5.3, UNCONFIRMED semantics).
+// podEnv applies the per-pod docker_options to the template's. QuickPod
+// appends them after the template's (later -e wins); the PodEnv fault's
+// replace and ignore modes stay for the probe's no_port / token_mismatch
+// tests.
 func podEnv(mode mockkit.PodEnvMode, template, perPod string) (map[string]string, bool) {
 	tEnv, tPort := dockerOpts(template)
 	pEnv, pPort := dockerOpts(perPod)
@@ -544,19 +560,44 @@ func (m *Mock) template(uuid string) (Template, bool) {
 	return Template{}, false
 }
 
-// creditFail answers insufficient_credit (values as strings: errors are flat
-// string maps, spec: quickpod.md §8 item 7).
-func (m *Mock) creditFail(w http.ResponseWriter, f mockkit.Faults, hourly float64, action string) bool {
+// storageCost is QuickPod's rule: listed_storage_cost (USD per TB-hour) x
+// the billed disk / 1024.
+func storageCost(o map[string]any, disk int) float64 {
+	return num(machine(o), "listed_storage_cost") * float64(max(disk, minDiskGB)) / 1024
+}
+
+// runningCost is the hourly cost of the owner's running pods (but skip).
+func (m *Mock) runningCost(owner string, skip *pod) float64 {
+	sum := 0.0
+	for _, p := range m.pods {
+		if p.owner == owner && p != skip && !p.Destroyed && p.Intended == "running" {
+			sum += p.hourly()
+		}
+	}
+	return sum
+}
+
+// creditFail answers insufficient_credit (402 with numbers, as QuickPod
+// sends it): the credit must cover 30 minutes of every running pod plus this
+// one.
+func (m *Mock) creditFail(w http.ResponseWriter, owner string, f mockkit.Faults, hourly float64, skip *pod, action string) bool {
 	cur := f.Balance(m.credit)
-	if !f.NoCredit && cur >= hourly*minRuntime {
+	need := (m.runningCost(owner, skip) + hourly) * minRuntimeMinutes / 60
+	if !f.NoCredit && cur >= need {
 		return false
 	}
-	mockkit.WriteJSON(w, m.CreditStatus, map[string]string{
-		"error": "insufficient_credit", "current_credit": strconv.FormatFloat(cur, 'f', 2, 64),
-		"required_credit": strconv.FormatFloat(hourly*minRuntime, 'f', 2, 64), "hourly_cost": strconv.FormatFloat(hourly, 'f', -1, 64),
-		"minimum_runtime_minutes": "120", "action": action,
+	mockkit.WriteJSON(w, m.CreditStatus, map[string]any{
+		"error":          "insufficient_credit",
+		"message":        "Insufficient credit to " + action + " this pod",
+		"current_credit": cur, "required_credit": need, "hourly_cost": hourly,
+		"minimum_runtime_minutes": minRuntimeMinutes, "action": "Add credit to your account",
 	}, "")
 	return true
+}
+
+// dbFail is createpod's answer to any failure of its database step.
+func dbFail(w http.ResponseWriter, msg string) {
+	mockkit.WriteJSON(w, http.StatusNotAcceptable, map[string]string{"error": "Database query failed", "message": msg}, "")
 }
 
 func (m *Mock) createPod(w http.ResponseWriter, r *http.Request) {
@@ -591,25 +632,26 @@ func (m *Mock) createPod(w http.ResponseWriter, r *http.Request) {
 	oid := int64(num(in, "offers_id"))
 	o := m.offer(oid)
 	_, taken := m.occupied[oid]
-	if o == nil || taken || f.NoCapacity {
-		fail(w, http.StatusNotAcceptable, "message", "offer is busy")
+	if o == nil {
+		dbFail(w, "offer or machine not found")
+		return
+	}
+	if taken || f.NoCapacity {
+		dbFail(w, "offer is busy")
 		return
 	}
 	if maxDisk := int(num(o, "max_disk_size")); maxDisk > 0 && disk > maxDisk {
-		fail(w, http.StatusBadRequest, "error", fmt.Sprintf("disk_size %d is above the offer's max_disk_size %d", disk, maxDisk))
+		dbFail(w, fmt.Sprintf("requested disk size %dGB exceeds the maximum disk size %dGB", disk, maxDisk))
 		return
 	}
-	if m.creditFail(w, f, num(o, "hourly_cost"), "create") {
+	if m.creditFail(w, owner, f, num(o, "hourly_cost")+storageCost(o, disk), nil, "create") {
 		return
 	}
 	env, port := podEnv(f.PodEnv, t.DockerOptions, opts)
 	if f.NoPortMapping {
 		port = false
 	}
-	image := t.ImagePath
-	if t.VersionTag != "" && !strings.Contains(image[strings.LastIndex(image, "/")+1:], ":") {
-		image += ":" + t.VersionTag
-	}
+	image := t.ImagePath // createpod runs image_path alone; version_tag is never read
 	now := m.o.Clock.Now()
 	m.nextID++
 	p := &pod{
@@ -622,9 +664,18 @@ func (m *Mock) createPod(w http.ResponseWriter, r *http.Request) {
 	}
 	m.pods = append(m.pods, p)
 	m.occupied[oid] = p.UUID
-	// No pod id in the answer (spec: quickpod.md §6.1): the pod is found by
-	// offers_id + altname in the next list.
-	mockkit.WriteJSON(w, 200, map[string]string{"status": "success", "message": "Pod created successfully"}, "")
+	start := int(num(o, "open_port_start"))
+	mockkit.WriteJSON(w, 200, map[string]any{
+		"status": "success", "pod_uuid": p.UUID, "public_ipaddress": str(machine(o), "public_ipaddr"),
+		"open_port_start": start, "open_port_end": int(num(o, "open_port_end")),
+	}, "")
+}
+
+// hourly is what the pod bills while running: compute plus storage
+// (QuickPod's hourly_cost already includes storage_cost).
+func (p *pod) hourly() float64 {
+	disk, _ := strconv.Atoi(p.DiskSize)
+	return num(p.offer, "hourly_cost") + storageCost(p.offer, disk)
 }
 
 // state is the pod's Docker State now (lazy, spec: PLAN §6 common rules).
@@ -670,31 +721,31 @@ func (m *Mock) stopNode(p *pod) {
 	p.nodeStop, p.NodeURL = nil, ""
 }
 
-// portMappings is the pod field the console parses (spec: quickpod.md §6.3).
+// portMappings is the field the host agent writes: one entry per -p option,
+// the address as a link, host ports from open_port_start+1.
 func portMappings(p *pod, state string) string {
-	if state != "running" {
+	if state != "running" || !p.Ports {
 		return ""
 	}
-	mm := machine(p.offer)
-	ip, start := str(mm, "public_ipaddr"), int(num(p.offer, "open_port_start"))
-	ssh := fmt.Sprintf("22 -> %s:%d", ip, start)
-	if !p.Ports {
-		return ssh
-	}
+	ip, port := str(machine(p.offer), "public_ipaddr"), int(num(p.offer, "open_port_start"))+1
 	if p.NodeURL != "" {
-		host := strings.TrimPrefix(p.NodeURL, "http://")
-		if h, port, err := net.SplitHostPort(host); err == nil {
-			n, _ := strconv.Atoi(port)
-			return fmt.Sprintf("8675 -> %s:%d | 22 -> %s:%d", h, n, h, n-1)
+		if h, ps, err := net.SplitHostPort(strings.TrimPrefix(p.NodeURL, "http://")); err == nil {
+			ip, port = h, atoi(ps)
 		}
 	}
-	return fmt.Sprintf("8675 -> %s:%d | %s", ip, start+1, ssh)
+	return mapping(8675, ip, port)
 }
+
+func mapping(container int, ip string, port int) string {
+	return fmt.Sprintf(`%d -> <a target="_new" href="http://%s:%d">%s:%d</a> |`, container, ip, port, ip, port)
+}
+
+func atoi(s string) int { n, _ := strconv.Atoi(s); return n }
 
 func podJSON(p *pod, state string, now time.Time) map[string]any {
 	mm := machine(p.offer)
 	disk, _ := strconv.Atoi(p.DiskSize)
-	storage := num(mm, "listed_storage_cost") * float64(disk) / 1000
+	storage, hourly := storageCost(p.offer, disk), p.hourly()
 	status := ""
 	switch state {
 	case "running":
@@ -706,11 +757,11 @@ func podJSON(p *pod, state string, now time.Time) map[string]any {
 		"id": p.ID, "Names": p.UUID, "altname": p.Altname, "State": state, "intended_state": p.Intended,
 		"Status": status, "destroyed": p.Destroyed, "public_ipaddr": str(mm, "public_ipaddr"),
 		"open_port_start": num(p.offer, "open_port_start"), "open_port_end": num(p.offer, "open_port_end"),
-		"port_mappings": portMappings(p, state), "hourly_cost": num(p.offer, "hourly_cost"), "storage_cost": storage,
-		"inet_cost": 0, "pod_cost": num(p.offer, "hourly_cost") * now.Sub(p.created).Hours(),
-		"disk_size": disk, "gpu_count": num(p.offer, "num_gpus"), "offers_id": p.OfferID, "machines_id": num(p.offer, "machines_id"),
+		"port_mappings": portMappings(p, state), "hourly_cost": hourly, "storage_cost": storage,
+		"inet_cost": 0, "pod_cost": hourly * now.Sub(p.created).Hours(),
+		"disk_size": max(disk, minDiskGB), "gpu_count": num(p.offer, "num_gpus"), "offers_id": p.OfferID, "machines_id": num(p.offer, "machines_id"),
 		"created_at": p.created.UnixMilli(), "last_seen": now.UnixMilli(), "Image": p.Image,
-		"launch_mode": "docker", "pod_type": "GPU", "docker_sshd": false, "logs": "",
+		"launch_mode": "docker", "pod_type": "GPU", "docker_sshd": false, "logs": p.logs,
 		"_machines": map[string]any{
 			"id": num(mm, "id"), "online": mm["online"], "geoinfo": str(mm, "geoinfo"),
 			"geolocation": str(mm, "geolocation"), "public_ipaddr": str(mm, "public_ipaddr"),
@@ -732,7 +783,7 @@ func (m *Mock) listPods(bearerOK bool) http.HandlerFunc {
 		now := m.o.Clock.Now()
 		out := []map[string]any{}
 		for _, p := range m.pods {
-			if p.owner == owner {
+			if p.owner == owner && !p.Destroyed { // terminated pods are not listed
 				out = append(out, podJSON(p, m.observe(p, now), now))
 			}
 		}
@@ -750,7 +801,7 @@ func (m *Mock) me(w http.ResponseWriter, r *http.Request) {
 	c := f.Balance(m.credit)
 	m.mu.Unlock()
 	mockkit.WriteJSON(w, 200, map[string]any{
-		"id": 1234, "name": "Sim", "email": "sim@example.com", "user_type": "user", "role": "user",
+		"id": MeID, "name": "Sim", "email": "sim@example.com", "user_type": "user", "role": "user",
 		"can_pay": true, "credit": c, "credit_limit": 0, "total_billed": 0, "email_verified": true,
 	}, "")
 }
@@ -768,7 +819,7 @@ func (m *Mock) action(a string) http.HandlerFunc {
 		}
 		id := r.URL.Query().Get("pod_uuid")
 		if id == "" {
-			fail(w, http.StatusBadRequest, "error", "pod_uuid is required")
+			fail(w, http.StatusBadRequest, "error", "Missing pod_uuid parameter")
 			return
 		}
 		m.mu.Lock()
@@ -779,21 +830,26 @@ func (m *Mock) action(a string) http.HandlerFunc {
 				p = q
 			}
 		}
-		if p == nil {
-			fail(w, http.StatusBadRequest, "error", "pod not found") // UNCONFIRMED text and status
-			return
+		// startpod checks the offer before the pod's owner, as QuickPod does.
+		if a == "startpod" && p != nil {
+			if holder, taken := m.occupied[p.OfferID]; taken && holder != p.UUID {
+				fail(w, http.StatusConflict, "error", "Offer is busy")
+				return
+			}
 		}
-		if p.owner != owner {
-			fail(w, http.StatusForbidden, "error", "forbidden")
+		// A missing, destroyed or foreign pod reads as user 0: a 403 in
+		// QuickPod's own words ("start" on every call but stop).
+		if p == nil || p.Destroyed || p.owner != owner {
+			verb := "start"
+			if a == "stoppod" {
+				verb = "stop"
+			}
+			fail(w, http.StatusForbidden, "error", "You do not have permission to "+verb+" this pod")
 			return
 		}
 		now := m.o.Clock.Now()
 		ok200 := func(msg string) {
 			mockkit.WriteJSON(w, 200, map[string]string{"message": msg, "pod_uuid": p.UUID}, "")
-		}
-		if p.Destroyed && a != "destroypod" {
-			fail(w, http.StatusBadRequest, "error", "pod is destroyed")
-			return
 		}
 		switch a {
 		case "stoppod":
@@ -802,13 +858,9 @@ func (m *Mock) action(a string) http.HandlerFunc {
 			if m.occupied[p.OfferID] == p.UUID {
 				delete(m.occupied, p.OfferID) // the GPU is released; the disk stays
 			}
-			ok200("Pod stop command sent")
+			ok200("Pod stopped")
 		case "startpod", "restartpod":
-			if holder, taken := m.occupied[p.OfferID]; taken && holder != p.UUID {
-				fail(w, http.StatusConflict, "message", "This machine is in use at the moment")
-				return
-			}
-			if m.creditFail(w, f, num(p.offer, "hourly_cost"), "start") {
+			if m.creditFail(w, owner, f, p.hourly(), p, "start") {
 				return
 			}
 			p.Intended = "running"
@@ -820,22 +872,27 @@ func (m *Mock) action(a string) http.HandlerFunc {
 			}
 			p.to, p.at, p.delay, p.seen = "running", now, p.faults.Scale(m.o.Delays.Start), false
 			m.occupied[p.OfferID] = p.UUID
-			ok200("Pod start command sent")
+			if a == "restartpod" {
+				ok200("Pod restarted")
+			} else {
+				ok200("Pod started")
+			}
 		case "destroypod":
-			if !p.Destroyed {
-				p.Destroyed, p.Intended = true, "exited"
-				m.stopNode(p)
-				if m.occupied[p.OfferID] == p.UUID {
-					delete(m.occupied, p.OfferID)
-				}
+			p.Destroyed, p.Intended = true, "terminated"
+			m.stopNode(p)
+			if m.occupied[p.OfferID] == p.UUID {
+				delete(m.occupied, p.OfferID)
 			}
 			ok200("Pod destroyed")
 		case "podlogs":
-			logs := "Pulling image " + p.Image + "\n"
+			// podlogs only queues "docker logs"; the host agent uploads the
+			// last lines joined with <br> (here at once) into the pod's logs.
+			lines := []string{"Pulling image " + p.Image}
 			if s := m.state(p, now); s == "running" || s == "exited" || s == "dead" {
-				logs += "Status: Downloaded newer image for " + p.Image + "\naitk: listening on :8675\n"
+				lines = append(lines, "Status: Downloaded newer image for "+p.Image, "aitk: listening on :8675")
 			}
-			mockkit.WriteJSON(w, 200, map[string]string{"logs": logs}, "")
+			p.logs = strings.Join(lines, "<br>")
+			ok200("Pod logs fetched")
 		}
 	}
 }

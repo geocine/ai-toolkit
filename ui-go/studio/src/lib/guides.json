@@ -9,7 +9,7 @@
         "name": "AI_TOOLKIT_AUTH",
         "value": "<a long random token>",
         "secret": true,
-        "note": "In the template's docker options, so the server never starts without a token."
+        "note": "In the template's docker options, so the server never starts without a token. A pod the studio creates gets its own token, which wins over this one."
       },
       {
         "name": "AITK_CORS_ORIGINS",
@@ -53,10 +53,10 @@
       }
     ],
     "steps": [
-      "Sign in at console.quickpod.io and add credit under Settings. QuickPod support is in beta. For the studio to create pods for you later, a key under Settings → Secure API keys needs Pods read, Pods write, Templates read, Account read and Profile read.",
+      "Sign in at console.quickpod.io and add credit under Settings. For the studio to create pods for you later, a key under Settings → Secure API keys needs Pods read, Pods write, Templates read and Profile read.",
       "Open Templates and click Create New Template.",
       "Fill in the fields above. Leave Private Docker Repository unticked, and leave Docker Entrypoint Run Options and On Start Script empty.",
-      "Paste the docker options into Docker Options. Keep both parts: -p 8675:8675 publishes the port, and AI_TOOLKIT_AUTH keeps the server from starting without a token.",
+      "Paste the docker options into Docker Options. Keep both parts: -p 8675:8675 publishes the port, and AI_TOOLKIT_AUTH keeps the server from starting without a token. If you change the token, use only letters, digits, - and _: QuickPod silently drops other characters from docker options.",
       "Click Create Template. On GPU Search, pick an offer with a max CUDA of 13.0 or newer on an RTX 30-series, A100 or newer GPU: the image needs a driver for CUDA 13.0 or newer (580+). On an older host the image fails, and the rental still bills. Choose aitk headless under My Templates and click Create.",
       "On Pods, wait for running and click Connect. Under Exposed Ports, the 8675 row has an HTTPS link (https://<pod id>-8675.proxy.quickpod.io/) and an HTTP link (http://<ip>:<port>).",
       "When it shows running, copy its URL and add it on the Servers page with the same token."
@@ -68,7 +68,6 @@
       "pods:read",
       "pods:write",
       "templates:read",
-      "account:read",
       "profile:read"
     ]
   },

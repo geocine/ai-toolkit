@@ -684,7 +684,7 @@ Every change is a `lifecycle.state` event carrying Lifecycle.
 ## GPU providers and machines
 
 This server can rent GPU servers ("machines") that run this image on RunPod,
-Vast.ai and QuickPod (beta), watch them until they answer, and hand out
+Vast.ai and QuickPod, watch them until they answer, and hand out
 their URL and token so the studio or an agent can use them
 (`internal/provision`, one adapter per provider written from its published
 API). Usually the studio API (docs/studio-api.md: no GPU, on a laptop, a VPS

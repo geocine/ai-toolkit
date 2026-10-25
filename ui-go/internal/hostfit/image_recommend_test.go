@@ -171,10 +171,10 @@ func TestRecommendTemplate(t *testing.T) {
 		t.Fatalf("template: %+v", out.Choice)
 	}
 	tag := checkOf(t, out.Checks, "image_template_tag")
-	if tag.Message != "Edit the template's version tag to f53a407." || tag.Action.Kind != "edit_template" || tag.Action.Value != rev {
+	if tag.Message != "Change the tag in the template's image path to f53a407." || tag.Action.Kind != "edit_template" || tag.Action.Value != rev {
 		t.Errorf("edit_template: %+v", tag)
 	}
-	if len(out.Alternatives) != 1 || out.Alternatives[0].Image != goRepo+":"+rev || out.Alternatives[0].Label != "Edit the template's version tag to f53a407" {
+	if len(out.Alternatives) != 1 || out.Alternatives[0].Image != goRepo+":"+rev || out.Alternatives[0].Label != "Change the tag in the template's image path to f53a407" {
 		t.Errorf("alternatives: %+v", out.Alternatives)
 	}
 	// The template's tag blocks here (an old build that drops sm_89) while

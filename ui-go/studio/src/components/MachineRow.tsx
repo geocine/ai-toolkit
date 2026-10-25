@@ -162,7 +162,7 @@ export function MachineRow({
         <p className="server-name">
           <span className="machine-name">{m.name}</span>
           <span className="badge tone-quiet">{label}</span>
-          {(t.provider?.stage === 'beta' || (!t.provider && m.provider === 'quickpod')) && <span className="badge tone-quiet">Beta</span>}
+          {t.provider?.stage === 'beta' && <span className="badge tone-quiet">Beta</span>}
           {m.simulated && <span className="badge tone-quiet">Simulated</span>}
           {inUse && <span className="badge tone-accent">In use</span>}
         </p>
