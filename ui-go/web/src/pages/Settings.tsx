@@ -137,7 +137,7 @@ function Keys() {
   return (
     <Section title="API keys">
       <form className="row" onSubmit={create} style={{ marginBottom: 12, maxWidth: 440 }}>
-        <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Key name, e.g. studio-laptop" aria-label="Key name" />
+        <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Key name, e.g. studio" aria-label="Key name" />
         <button className="btn" disabled={creating || !name.trim()}>
           {creating ? <Spinner size={14} /> : <Plus size={14} />} Create key
         </button>

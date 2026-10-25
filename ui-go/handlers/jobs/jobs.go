@@ -18,6 +18,7 @@ import (
 	"github.com/geocine/aitoolkit/internal/apicache"
 	"github.com/geocine/aitoolkit/internal/engines"
 	"github.com/geocine/aitoolkit/internal/httpx"
+	"github.com/geocine/aitoolkit/internal/photocheck"
 	"github.com/geocine/aitoolkit/internal/proc"
 	"github.com/geocine/aitoolkit/internal/settings"
 	"github.com/geocine/aitoolkit/internal/store"
@@ -165,6 +166,12 @@ func save(w http.ResponseWriter, r *http.Request) {
 	if raw, ok := body["job_type"]; ok {
 		if err := json.Unmarshal(raw, &jobType); err != nil || jobType == nil {
 			fail(errors.New("job_type must be a string"))
+			return
+		}
+		// a face check runs this server's own script, so only the photos
+		// route makes one (as POST /v1/jobs refuses it)
+		if *jobType == photocheck.FaceJobType {
+			httpx.Error(w, http.StatusBadRequest, "job_type photo_faces is a face check; start one with POST /v1/datasets/{name}/photos/faces")
 			return
 		}
 		f["job_type"] = *jobType
