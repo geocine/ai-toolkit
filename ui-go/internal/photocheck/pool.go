@@ -150,7 +150,7 @@ func (p *pool) run(t *task) {
 		return
 	}
 	t.sha = sha
-	if rows, err := state.GetPhotoMetrics(ctx, []string{sha}, MetricsVersion); err == nil {
+	if rows, err := state.GetPhotoMetrics(ctx, []string{sha}, MetricsCacheVersion); err == nil {
 		if m, ok := decodeMetrics(rows[sha], t.rel); ok {
 			t.m = m
 			return
@@ -240,7 +240,7 @@ func storeMetrics(ctx context.Context, m Metrics) error {
 	if err != nil {
 		return err
 	}
-	return state.PutPhotoMetrics(ctx, m.SHA256, MetricsVersion, data)
+	return state.PutPhotoMetrics(ctx, m.SHA256, MetricsCacheVersion, data)
 }
 
 // decodeMetrics reads a cached row for the file rel.

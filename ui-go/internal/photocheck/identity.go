@@ -503,7 +503,8 @@ func (j *judge) faceFlags(fvs []*photo, mx *cosMatrix) {
 		if faceCut(s, th) {
 			p.set(FlagFaceCut, LevelInfo, "")
 		}
-		soft := s.Sharp < th.FaceFloor
+		// a face in deep shadow is flagged dark; its sharpness cannot be judged
+		soft := s.Sharp < th.FaceFloor && s.MeanY >= th.DarkFace
 		if medFace > 0 {
 			soft = soft && s.Sharp < th.FaceBlurRel*medFace
 		}

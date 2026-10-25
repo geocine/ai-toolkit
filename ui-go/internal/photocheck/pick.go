@@ -54,6 +54,14 @@ const (
 // deterministic: ties go to the first file. n <= 0 picks the kind's
 // default. Stored photos (Existing) are never picked.
 func PickBest(in []Input, r *Review, n int, opts Options) Pick {
+	return pickBest(in, r, n, opts, false)
+}
+
+// pickBest is PickBest; with dataset, r's readiness is the dataset's with
+// the photos added (an assess with a dataset), so a short pick's note gives
+// that readiness's hint, and no count of its own when there is none: the
+// stored photos make up the rest.
+func pickBest(in []Input, r *Review, n int, opts Options, dataset bool) Pick {
 	if n <= 0 {
 		n = DefaultPick(r.Kind)
 	}
@@ -108,20 +116,21 @@ func PickBest(in []Input, r *Review, n int, opts Options) Pick {
 	}
 	slices.SortStableFunc(items, func(a, b *pickItem) int { return collation.Compare(a.file, b.file) })
 
-	pk := &picker{r: r, n: n, opts: opts, items: items, out: Pick{N: n, Kept: []string{}, LeftOut: []LeftOut{}}}
+	pk := &picker{r: r, n: n, opts: opts, dataset: dataset, items: items, out: Pick{N: n, Kept: []string{}, LeftOut: []LeftOut{}}}
 	pk.run()
 	return pk.out
 }
 
 // picker holds one PickBest call.
 type picker struct {
-	r     *Review
-	n     int
-	opts  Options
-	items []*pickItem
-	pool  []*pickItem
-	sim   [][]float32
-	out   Pick
+	r       *Review
+	n       int
+	opts    Options
+	dataset bool // r's readiness counts the dataset's stored photos too
+	items   []*pickItem
+	pool    []*pickItem
+	sim     [][]float32
+	out     Pick
 
 	picked []int // indices into pool, in pick order
 	in     []bool
@@ -178,10 +187,10 @@ func (k *picker) run() {
 		if count < k.n {
 			// the set's own hint says how many to add when it has one: a second
 			// count beside it ("Add 10 more: add 3 more ...") reads as a contradiction
-			note := fmt.Sprintf("Only %d photos pass, so all are kept.", count)
+			note := "Only " + plural(count, "photo passes", "photos pass") + ", so all are kept."
 			if len(k.r.Hints) > 0 {
 				note += " " + k.r.Hints[0]
-			} else {
+			} else if !k.dataset {
 				note += fmt.Sprintf(" Add %d more.", k.n-count)
 			}
 			k.out.Note = note

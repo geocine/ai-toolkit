@@ -60,6 +60,7 @@ type PhotoReview = {
   grade: 'A' | 'B' | 'C' | 'D' | 'F'; grade_line: string; provisional: boolean; basis: string[];
   coverage: PhotoCoverage; findings: PhotoFinding[]; hints: string[];
   set_aside: { file: string; from: string; flags: PhotoFlag[] }[];
+  originals: { file: string; from: string; of: string }[];
   faces: PhotoFaces; reference?: string; pick?: PhotoPick; thresholds: Record<string, number>; convert: string[];
 };
 type PhotoFix = { changes: { file: string; op: string; to?: string; reason?: string }[]; applied: boolean; review: PhotoReview };

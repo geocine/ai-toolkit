@@ -94,54 +94,80 @@ func asideFile(rel string) string { return SetAsideDir + "/" + rel }
 
 // asideFromFile records where a set-aside photo came from when a name
 // clash in .set_aside/ renamed it, so restore can put it back under its
-// own name. Being a dot file, nothing that walks the folder lists it.
+// own name, and which set-aside photos are the originals a convert or a
+// bake kept. Being a dot file, nothing that walks the folder lists it.
 const asideFromFile = ".from.json"
 
 // asideOrigin is one asideFromFile record: the dataset path, and the
 // photo's sha256 when known, so a record never passes to another photo
-// that later takes the name.
+// that later takes the name. Of is set on an original a convert or a bake
+// kept: the dataset path of the photo made from it, with that photo's
+// sha256 as it was made (OfSHA256), so restoring the original can tell the
+// photo was not changed since.
 type asideOrigin struct {
-	From   string `json:"from"`
-	SHA256 string `json:"sha256,omitempty"`
+	From     string `json:"from,omitempty"`
+	SHA256   string `json:"sha256,omitempty"`
+	Of       string `json:"of,omitempty"`
+	OfSHA256 string `json:"of_sha256,omitempty"`
 }
 
-// readAsideFrom maps the set-aside photos to the dataset paths recorded
-// for them. A record for a photo that is gone, or whose content changed,
-// is dropped, and so is one whose path is not a clean photo path inside
-// the dataset (restore moves the photo there; the file may have been
-// written by hand).
-func readAsideFrom(dir string, aside []*entry) map[string]string {
-	out := map[string]string{}
+// original is what a set-aside original was replaced by.
+type original struct {
+	of  string // the dataset path of the photo a convert or a bake made from it
+	sha string // that photo's sha256 when it was made; "" in a preview
+}
+
+// readAside reads the records for the set-aside photos: from maps them to
+// the dataset paths they came from, of maps the originals to the photos
+// made from them. A record for a photo that is gone, or whose content
+// changed, is dropped, and so is a path that is not a clean photo path
+// inside the dataset (restore moves the photo there; the file may have
+// been written by hand).
+func readAside(dir string, aside []*entry) (from map[string]string, of map[string]original) {
+	from, of = map[string]string{}, map[string]original{}
 	data, err := os.ReadFile(filepath.Join(dir, SetAsideDir, asideFromFile))
 	if err != nil {
-		return out
+		return from, of
 	}
 	var recs map[string]asideOrigin
 	if json.Unmarshal(data, &recs) != nil {
-		return out
+		return from, of
+	}
+	clean := func(p string) bool {
+		_, rel, ok := photoPath(dir, p)
+		return ok && rel == p && !strings.HasPrefix(rel, SetAsideDir+"/") && filepath.IsLocal(filepath.FromSlash(rel))
 	}
 	for _, e := range aside {
 		r, ok := recs[e.rel]
-		if !ok || r.From == "" || r.From == e.rel || (r.SHA256 != "" && e.sha != "" && r.SHA256 != e.sha) {
+		if !ok || (r.SHA256 != "" && e.sha != "" && r.SHA256 != e.sha) {
 			continue
 		}
-		if _, rel, ok := photoPath(dir, r.From); !ok || rel != r.From || strings.HasPrefix(rel, SetAsideDir+"/") ||
-			!filepath.IsLocal(filepath.FromSlash(rel)) {
-			continue
+		if r.From != "" && r.From != e.rel && clean(r.From) {
+			from[e.rel] = r.From
 		}
-		out[e.rel] = r.From
+		if r.Of != "" && clean(r.Of) {
+			of[e.rel] = original{of: r.Of, sha: r.OfSHA256}
+		}
 	}
-	return out
+	return from, of
 }
 
-// writeAsideFrom stores the records for the set-aside photos, removing
-// the file when there are none.
-func writeAsideFrom(dir string, from map[string]string, aside []*entry) error {
+// writeAside stores the records for the set-aside photos, removing the
+// file when there are none.
+func writeAside(dir string, from map[string]string, of map[string]original, aside []*entry) error {
 	p := filepath.Join(dir, SetAsideDir, asideFromFile)
 	recs := map[string]asideOrigin{}
 	for _, e := range aside {
+		var r asideOrigin
 		if f := from[e.rel]; f != "" && f != e.rel {
-			recs[e.rel] = asideOrigin{From: f, SHA256: e.sha}
+			r.From = f
+		}
+		if o, ok := of[e.rel]; ok {
+			r.Of, r.OfSHA256 = o.of, o.sha
+		}
+		if r != (asideOrigin{}) {
+			r.SHA256 = e.sha
+			recs[e.rel] = r
 		}
 	}
 	if len(recs) == 0 {

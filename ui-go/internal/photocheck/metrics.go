@@ -248,15 +248,36 @@ const (
 	barPairTol = 0.25
 	barOneMin  = 0.04
 	barStep    = 40.0
+	// A pair counts only where what lies inside a band differs from it:
+	// brighter than dark bars (darker than light ones) by barPairStep, or
+	// textured (line std barPairStd). An evenly dark photo has uniform
+	// lines reaching in from every edge, but nothing inside them differs.
+	barPairStep = 8.0
+	barPairStd  = 6.0
 )
 
 // barScan is how far uniform dark or light lines reach in from one edge.
 type barScan struct {
-	frac  float64
-	n     int
-	light bool
-	mean  float64 // mean of the bar lines
-	inner float64 // mean of the next 2 lines inward; NaN when there are none
+	frac     float64
+	n        int
+	light    bool
+	mean     float64 // mean of the bar lines
+	inner    float64 // mean of the next 2 lines inward; NaN when there are none
+	innerStd float64 // their mean std
+	capped   bool    // the band ran to barMaxFrac, so the lines inward are band too
+}
+
+// differs reports content of mean m and std sd that stands apart from the
+// band: brighter than dark bars, darker than light ones, or textured.
+func (s barScan) differs(m, sd float64) bool {
+	if math.IsNaN(m) {
+		return false
+	}
+	step := m - s.mean
+	if s.light {
+		step = -step
+	}
+	return step >= barPairStep || sd >= barPairStd
 }
 
 // scanBar walks lines (rows or columns) in from an edge. line(i) returns
@@ -281,12 +302,13 @@ func scanBar(total int, line func(i int) (mean, std float64)) barScan {
 	}
 	s.frac = float64(s.n) / float64(total)
 	s.inner = math.NaN()
+	s.capped = s.n > 0 && s.n >= limit
 	if s.n > 0 {
 		s.mean = sum / float64(s.n)
 		if s.n+2 <= total {
-			a, _ := line(s.n)
-			b, _ := line(s.n + 1)
-			s.inner = (a + b) / 2
+			a, sa := line(s.n)
+			b, sb := line(s.n + 1)
+			s.inner, s.innerStd = (a+b)/2, (sa+sb)/2
 		}
 	}
 	return s
@@ -304,15 +326,44 @@ func bars(wk []float32, w, h int) float64 {
 	bottom := scanBar(h, func(i int) (float64, float64) { return row(h - 1 - i) })
 	left := scanBar(w, col)
 	right := scanBar(w, func(i int) (float64, float64) { return col(w - 1 - i) })
-	t, b := countBars(top, bottom)
-	l, r := countBars(left, right)
+	cm, cs := centreStats(wk, w, h)
+	t, b := countBars(top, bottom, cm, cs)
+	l, r := countBars(left, right, cm, cs)
 	return 1 - (1-t-b)*(1-l-r)
 }
 
-// countBars returns the counted fractions of two opposite edges.
-func countBars(a, b barScan) (float64, float64) {
+// centreStats is the mean and std of the middle half of W on both axes.
+func centreStats(wk []float32, w, h int) (float64, float64) {
+	x0, x1, y0, y1 := w/4, w-w/4, h/4, h-h/4
+	var sum, sq float64
+	for y := y0; y < y1; y++ {
+		for _, v := range wk[y*w+x0 : y*w+x1] {
+			f := float64(v)
+			sum += f
+			sq += f * f
+		}
+	}
+	n := float64((x1 - x0) * (y1 - y0))
+	if n <= 0 {
+		return math.NaN(), 0
+	}
+	m := sum / n
+	return m, math.Sqrt(math.Max(0, sq/n-m*m))
+}
+
+// countBars returns the counted fractions of two opposite edges; cm and cs
+// are the mean and std of W's centre.
+func countBars(a, b barScan, cm, cs float64) (float64, float64) {
+	// each band of a pair gives way to content that differs from it: the
+	// lines just inside it, or the centre when the band ran to barMaxFrac
+	apart := func(s barScan) bool {
+		if s.capped {
+			return s.differs(cm, cs)
+		}
+		return s.differs(s.inner, s.innerStd)
+	}
 	if a.frac >= barPairMin && b.frac >= barPairMin && a.light == b.light &&
-		math.Abs(a.frac-b.frac) <= barPairTol*math.Max(a.frac, b.frac) {
+		math.Abs(a.frac-b.frac) <= barPairTol*math.Max(a.frac, b.frac) && apart(a) && apart(b) {
 		return a.frac, b.frac
 	}
 	single := func(s barScan) float64 {

@@ -1,6 +1,7 @@
 package photocheck
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -25,8 +26,11 @@ import (
 // judge's view of that copy. Photos are never deleted: set_aside moves them
 // (with their caption and thumbs) into .set_aside/, and a bake or a
 // convert moves the original there too, even when the new file keeps its
-// name. Only remove_face_crops deletes, and only
-// the crops face_crops wrote. Every change purges the photo's thumbs and
+// name. Such an original is a backup, not a left-out photo: restore all
+// leaves it, and restoring it by name puts it back in place of the photo
+// made from it. Only remove_face_crops deletes the crops face_crops wrote,
+// and restoring an original deletes the photo made from it while that is
+// still as the convert or bake left it. Every change purges the photo's thumbs and
 // trainer caches. The handler checks for training and caption jobs first.
 
 // faceCropSuffix names a face crop: <stem>__face.jpg.
@@ -126,7 +130,7 @@ type fixer struct {
 	opts        Options
 	changes     []Change
 	setChanged  bool
-	fromChanged bool // s.from changed: the .set_aside/ origins need writing
+	fromChanged bool // s.from or s.of changed: the .set_aside/ records need writing
 
 	dirty bool // the snapshot changed since r was judged
 	in    []Input
@@ -151,7 +155,7 @@ func (f *fixer) save() error {
 	}
 	var errs []error
 	if f.fromChanged {
-		errs = append(errs, writeAsideFrom(f.s.dir, f.s.from, f.s.aside))
+		errs = append(errs, writeAside(f.s.dir, f.s.from, f.s.of, f.s.aside))
 		f.fromChanged = false
 	}
 	if f.setChanged {
@@ -341,7 +345,7 @@ func (f *fixer) fill(e *entry) {
 	if e.m != nil || f.shaOf(e) == "" {
 		return
 	}
-	rows, err := state.GetPhotoMetrics(f.ctx, []string{e.sha}, MetricsVersion)
+	rows, err := state.GetPhotoMetrics(f.ctx, []string{e.sha}, MetricsCacheVersion)
 	if err != nil {
 		return
 	}
@@ -423,6 +427,43 @@ func (f *fixer) setFrom(rel, from string) {
 	f.fromChanged = true
 }
 
+// setOf records the set-aside photo rel as the original of the photo o
+// names (nil: it is not one, or no longer).
+func (f *fixer) setOf(rel string, o *original) {
+	cur, had := f.s.of[rel]
+	if o == nil {
+		if had {
+			delete(f.s.of, rel)
+			f.fromChanged = true
+		}
+		return
+	}
+	if had && cur == *o {
+		return
+	}
+	if f.s.of == nil {
+		f.s.of = map[string]original{}
+	}
+	f.s.of[rel] = *o
+	f.fromChanged = true
+}
+
+// retarget follows the photo made from an original when it changes path
+// or content: a record of from with content oldSha ("" = any) now names to
+// with newSha ("" with oldSha "" too: a rename, the content is the same).
+func (f *fixer) retarget(from, oldSha, to, newSha string) {
+	for rel, o := range f.s.of {
+		if o.of != from || (o.sha != "" && oldSha != "" && o.sha != oldSha) {
+			continue
+		}
+		sha := newSha
+		if oldSha == "" && newSha == "" {
+			sha = o.sha
+		}
+		f.setOf(rel, &original{of: to, sha: sha})
+	}
+}
+
 func (f *fixer) setAside(files []string) error {
 	if len(files) == 0 {
 		return badRequest("set_aside needs files")
@@ -452,7 +493,13 @@ func (f *fixer) setAside(files []string) error {
 func (f *fixer) restore(files []string, all bool) error {
 	var picked []*entry
 	if all {
-		picked = slices.Clone(f.s.aside)
+		// the left-out photos: an original a convert or a bake kept is a
+		// backup, and bringing it back too would add a second copy
+		for _, e := range f.s.aside {
+			if !f.s.isOriginal(e) {
+				picked = append(picked, e)
+			}
+		}
 	} else {
 		if len(files) == 0 {
 			return badRequest("restore needs files or all: true")
@@ -475,6 +522,12 @@ func (f *fixer) restore(files []string, all bool) error {
 	}
 	for _, e := range picked {
 		f.fill(e)
+		if f.s.isOriginal(e) {
+			if err := f.restoreOriginal(e); err != nil {
+				return err
+			}
+			continue
+		}
 		// back to the path it came from, else its .set_aside/ name, else
 		// that with _2, _3 (a clash by name or by stem)
 		taken := f.destTaken(false)
@@ -497,6 +550,89 @@ func (f *fixer) restore(files []string, all bool) error {
 		sortEntries(f.s.items)
 		f.change(Change{File: asideFile(from), Op: "restore", To: to})
 	}
+	return nil
+}
+
+// restoreOriginal puts an original a convert or a bake kept back where it
+// came from, in place of the photo made from it while that photo is as the
+// convert or bake left it: the made photo is removed (another convert or
+// bake makes it again), and its caption, decision, reference and crops
+// pass back to the original. A made photo changed since stays, and the
+// original comes back beside it.
+func (f *fixer) restoreOriginal(e *entry) error {
+	o := f.s.of[e.rel]
+	from, origin := e.rel, f.s.originOf(e)
+	v := f.item(o.of)
+	replace := v != nil && (o.sha == "" || f.shaOf(v) == o.sha)
+	reason := ""
+	vSha, vRel, vCaption := "", "", ""
+	if replace {
+		vSha, vRel, vCaption = f.shaOf(v), v.rel, captionFor(v.abs)
+		if f.apply {
+			f.settle(v)
+			if err := os.Remove(v.abs); err != nil && !isNotExist(err) {
+				return err
+			}
+			PurgeDerived(f.s.dir, v.rel)
+		}
+		f.dropItem(v)
+		reason = "in place of " + vRel
+	} else if v != nil {
+		reason = "beside " + v.rel + ", which changed since it was made"
+	}
+	taken := f.destTaken(false)
+	if replace {
+		// the made photo's caption is free for the original: with the same
+		// stem it was the original's before the convert or bake, and one a
+		// convert copied to a new stem was the original's caption too
+		inUse, free, other := f.takenIn(false), stemOf(vRel), taken
+		taken = func(rel string) bool {
+			if !strings.EqualFold(stemOf(rel), free) {
+				return other(rel)
+			}
+			if inUse(rel) {
+				return true
+			}
+			for _, x := range f.s.items {
+				if strings.EqualFold(stemOf(x.rel), free) {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	to := origin
+	if taken(to) {
+		to = uniqueName(e.rel, taken)
+	}
+	abs := filepath.Join(f.s.dir, filepath.FromSlash(to))
+	if f.apply {
+		f.settle(e)
+		if err := move(e.abs, abs, captionStays); err != nil {
+			return err
+		}
+		// a caption the convert copied to a new stem follows the original
+		// when it has none, and goes when it is the same text
+		if replace && !strings.EqualFold(stemOf(vRel), stemOf(to)) && exists(vCaption) {
+			if oc := captionFor(abs); !exists(oc) {
+				os.Rename(vCaption, oc)
+			} else if a, err := os.ReadFile(vCaption); err == nil {
+				if b, err := os.ReadFile(oc); err == nil && bytes.Equal(a, b) {
+					os.Remove(vCaption)
+				}
+			}
+		}
+		if replace {
+			f.carry(vSha, f.shaOf(e))
+		}
+	}
+	f.setFrom(from, "")
+	f.setOf(from, nil)
+	f.dropAside(e)
+	e.rel, e.abs = to, abs
+	f.s.items = append(f.s.items, e)
+	sortEntries(f.s.items)
+	f.change(Change{File: asideFile(from), Op: "restore", To: to, Reason: reason})
 	return nil
 }
 
@@ -620,6 +756,7 @@ func (f *fixer) rewrite(e *entry, ext, op, reason string, write func(src, dst st
 	oldSha := e.sha
 	var m *Metrics
 	sha := ""
+	kept := "" // the original's name in .set_aside/
 	if f.apply {
 		f.settle(e)
 		if sameFile {
@@ -635,6 +772,7 @@ func (f *fixer) rewrite(e *entry, ext, op, reason string, write func(src, dst st
 				os.Remove(tmp)
 				return err
 			}
+			kept = e.rel
 			f.changes = f.changes[:len(f.changes)-1] // the bake or convert change says it
 			if err := os.Rename(tmp, abs); err != nil {
 				os.Remove(tmp)
@@ -654,6 +792,7 @@ func (f *fixer) rewrite(e *entry, ext, op, reason string, write func(src, dst st
 				os.Remove(abs)
 				return err
 			}
+			kept = e.rel
 			f.changes = f.changes[:len(f.changes)-1] // the convert change says it
 		}
 		got, gotSha, err := measureNow(abs, to)
@@ -678,8 +817,13 @@ func (f *fixer) rewrite(e *entry, ext, op, reason string, write func(src, dst st
 		if err := f.moveAside(e, "", false); err != nil {
 			return err
 		}
+		kept = e.rel
 		f.changes = f.changes[:len(f.changes)-1]
 	}
+	// the original is a backup of the new photo, and so is one an earlier
+	// convert or bake of this photo kept
+	f.retarget(from, oldSha, to, sha)
+	f.setOf(kept, &original{of: to, sha: sha})
 	st, _ := os.Stat(abs)
 	n := &entry{rel: to, abs: abs, info: st, sha: sha, m: m}
 	if st == nil {
@@ -854,6 +998,7 @@ func (f *fixer) renameSameStem() error {
 			}
 			e.rel, e.abs = to, abs
 			sortEntries(f.s.items)
+			f.retarget(file, "", to, "")
 			f.change(Change{File: file, Op: "rename_same_stem", To: to, Reason: "shared a caption with " + keep})
 		}
 	}
@@ -1021,6 +1166,7 @@ func (f *fixer) removeFaceCrops() error {
 			}
 			if aside {
 				f.setFrom(e.rel, "")
+				f.setOf(e.rel, nil)
 				f.dropAside(e)
 			} else {
 				f.dropItem(e)

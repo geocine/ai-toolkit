@@ -101,7 +101,7 @@ func drainPhotos(t *testing.T, dir string) {
 			}
 			sha, ok, _ := state.LookupFileSHA256(ctx, p, info)
 			if ok {
-				rows, _ := state.GetPhotoMetrics(ctx, []string{sha}, photocheck.MetricsVersion)
+				rows, _ := state.GetPhotoMetrics(ctx, []string{sha}, photocheck.MetricsCacheVersion)
 				ok = rows[sha] != nil
 			}
 			done = done && ok

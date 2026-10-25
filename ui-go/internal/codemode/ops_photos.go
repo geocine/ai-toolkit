@@ -14,7 +14,7 @@ const photoResolutionTS = "number | number[]"
 
 var photoOps = []Op{
 	{Group: "photos", Name: "assess", Method: "POST", Path: "/v1/photos/assess", Result: "PhotoReview",
-		Doc: "Judge photo metrics measured elsewhere (the studio measures in the browser before upload) with the same rules as checkPhotos. With dataset, stored photos join the duplicate check. items: [] returns the formats the server can convert.",
+		Doc: "Judge photo metrics measured elsewhere (the studio measures in the browser before upload) with the same rules as checkPhotos. With dataset, stored photos join the duplicate check and the readiness (usable, grade, grade_line, coverage, findings, hints) is the dataset's once these photos are added; items and counts stay the posted photos'. items: [] returns the formats the server can convert.",
 		Params: []Param{p("items", "PhotoMetrics[]", "body", "at most 2000"), opt("kind", "PhotoKind", "body", "default person"),
 			opt("resolution", photoResolutionTS, "body", "the run's resolution(s), default 1024"), opt("dataset", "string", "body", "a dataset whose stored photos join the duplicate check"),
 			opt("pick", "number", "body", "also pick the best n"), opt("decisions", "Record<string, PhotoDecision>", "body", "by file"),
@@ -25,7 +25,7 @@ var photoOps = []Op{
 			opt("resolution", photoResolutionTS, "query", "the run's resolution(s), e.g. [512, 768, 1024]; default 1024"),
 			opt("pick", "number", "query", "also pick the best n (pick in the review)"), opt("wait_ms", "number", "query", "wait for analysis up to this long (default 3000, max 20000)")}},
 	{Group: "datasets", Name: "fixPhotos", Method: "POST", Path: "/v1/datasets/{name}/photos/fix", Result: "PhotoFix",
-		Doc: "Ops run in order: set_aside {files} / restore {files | all} (moved to .set_aside/, never deleted), set_aside_flagged {flags?} (default duplicate, tiny, unreadable), keep_best {n?} (the best n for quality and variety; the rest set aside), bake_orientation, convert (bmp/gif/tiff/heic when supported/gray16/transparent/cmyk/huge to JPEG or PNG), rename_same_stem, face_crops {max?}, remove_face_crops. Preview unless apply: true; 409 while a training or caption job uses the dataset.",
+		Doc: "Ops run in order: set_aside {files} / restore {files | all} (moved to .set_aside/, never deleted), set_aside_flagged {flags?} (default duplicate, tiny, unreadable), keep_best {n?} (the best n for quality and variety; the rest set aside), bake_orientation, convert (bmp/gif/tiff/heic when supported/gray16/transparent/cmyk/huge to JPEG or PNG; both keep the original in .set_aside/ as a backup listed in review.originals, which restore all leaves and restore {files: [it]} puts back in place of the photo made from it), rename_same_stem, face_crops {max?}, remove_face_crops. Preview unless apply: true; 409 while a training or caption job uses the dataset.",
 		Params: []Param{p("name", "string", "path", ""), p("ops", "PhotoFixOp[]", "body", ""), opt("files", "string[]", "body", "only these files"),
 			opt("apply", "boolean", "body", "write the changes (default false: preview)"), opt("kind", "PhotoKind", "body", "for the review returned"),
 			opt("resolution", photoResolutionTS, "body", "the run's resolution(s), for keep_best and the review")}},

@@ -13,9 +13,16 @@ import (
 	"time"
 )
 
-// MetricsVersion bumps whenever a measurement definition changes; cached rows
-// with an older version are recomputed lazily.
+// MetricsVersion bumps whenever the Metrics shape changes: the version a
+// client posts to assess, and the one cached rows carry.
 const MetricsVersion = 1
+
+// MetricsCacheVersion is the photo_metrics version the server keeps its
+// measurements under. It bumps whenever a measurement definition changes;
+// cached rows under an older one are measured again lazily, while posted
+// metrics of the same MetricsVersion stay accepted. 2: a pair of bars needs
+// content inside that differs from them.
+const MetricsCacheVersion = 2
 
 // FaceAlgo bumps whenever the face job's measurements change.
 const FaceAlgo = 1
@@ -253,6 +260,7 @@ type SetState struct {
 	Identity  *Identity
 	Faces     FacesState
 	SetAside  []SetAsideItem
+	Originals []OriginalItem
 	Convert   []string
 }
 
@@ -394,11 +402,21 @@ type Pick struct {
 	Note    string    `json:"note,omitempty"`
 }
 
-// SetAsideItem is a photo in .set_aside/.
+// SetAsideItem is a photo left out into .set_aside/.
 type SetAsideItem struct {
 	File  string `json:"file"` // path under .set_aside/
 	From  string `json:"from"` // the dataset path it came from
 	Flags []Flag `json:"flags"`
+}
+
+// OriginalItem is an original a convert or a bake kept in .set_aside/ as a
+// backup of the photo made from it. It is not a left-out photo: restore
+// with all leaves it, and restoring it by name puts it back in place of
+// that photo.
+type OriginalItem struct {
+	File string `json:"file"` // path under .set_aside/
+	From string `json:"from"` // the dataset path it came from
+	Of   string `json:"of"`   // the dataset path of the photo made from it
 }
 
 // Review is the judged photo report (PhotoReview).
@@ -421,6 +439,7 @@ type Review struct {
 	Findings       []Finding          `json:"findings"`
 	Hints          []string           `json:"hints"`
 	SetAside       []SetAsideItem     `json:"set_aside"`
+	Originals      []OriginalItem     `json:"originals"`
 	Faces          FacesState         `json:"faces"`
 	Reference      string             `json:"reference,omitempty"` // file
 	Pick           *Pick              `json:"pick,omitempty"`

@@ -180,6 +180,27 @@ func TestMetrics(t *testing.T) {
 			t.Errorf("bars %.3f", m.Bars)
 		}
 	})
+	// every edge of an evenly underexposed photo is a near-black band that
+	// runs a quarter of the way in, but nothing inside differs from it
+	t.Run("evenly dark has no bars", func(t *testing.T) {
+		m := measureBytes(t, "under.jpg", testutil.JPEG(testutil.Underexpose(sc), 90))
+		if m.LumaMean >= 10 || m.Bars != 0 {
+			t.Errorf("luma_mean %.1f bars %.3f", m.LumaMean, m.Bars)
+		}
+	})
+	t.Run("a dark scene letterboxed still has bars", func(t *testing.T) {
+		m := measureBytes(t, "dark_bars.jpg", testutil.JPEG(testutil.Letterbox(testutil.Darken(sc), 0.1, color.Black), 90))
+		if m.LumaMean >= 40 || m.Bars <= 0.04 {
+			t.Errorf("luma_mean %.1f bars %.3f", m.LumaMean, m.Bars)
+		}
+	})
+	// bars wider than the scan reaches are told apart by the centre
+	t.Run("pillarbox past a quarter of the width", func(t *testing.T) {
+		m := measureBytes(t, "pillar.jpg", testutil.JPEG(testutil.Pillarbox(testutil.Scene(1, 600, 900), 1600, color.Black), 90))
+		if m.Bars < 0.4 {
+			t.Errorf("bars %.3f", m.Bars)
+		}
+	})
 	t.Run("sizes", func(t *testing.T) {
 		for _, sz := range [][2]int{{300, 400}, {700, 900}} {
 			m := measureBytes(t, "small.jpg", testutil.JPEG(testutil.Scene(2, sz[0], sz[1]), 90))
