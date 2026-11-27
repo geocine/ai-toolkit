@@ -28,6 +28,7 @@ func Register(mux *http.ServeMux) {
 	httpx.Handle(mux, "POST /api/img/delete", imgDelete)
 	httpx.Handle(mux, "POST /api/img/upload", imgUpload)
 	httpx.Handle(mux, "POST /api/files/delete", filesDelete)
+	httpx.Handle(mux, "POST /api/files/info", filesInfo)
 	httpx.Handle(mux, "POST /api/zip", zipRoute)
 	httpx.Handle(mux, "POST /api/caption/get", captionGet)
 	httpx.Handle(mux, "POST /api/caption/getBatch", captionGetBatch)
