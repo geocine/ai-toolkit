@@ -48,6 +48,7 @@ func Register(mux *http.ServeMux) {
 	httpx.Handle(mux, "GET /v1/images/tags", imageTags)
 	httpx.Handle(mux, "POST /v1/images/recommend", recommendImage)
 	httpx.Handle(mux, "GET /v1/hosts/gpus", hostGPUs)
+	httpx.Handle(mux, "GET /v1/hosts/models", hostModels)
 	httpx.Handle(mux, "POST /v1/hosts/fit", hostFit)
 }
 
@@ -491,6 +492,15 @@ var gpusCache struct {
 
 func hostGPUs(w http.ResponseWriter, r *http.Request) {
 	v1api.Items(w, GPUs(r.Context()))
+}
+
+// ---- GET /v1/hosts/models ----
+
+// hostModels is upstream's model list as built into this binary
+// (internal/hostfit/upstream_models.json), so the studio API answers it
+// with no upstream checkout. vram says the VRAM table has a row.
+func hostModels(w http.ResponseWriter, r *http.Request) {
+	v1api.Items(w, hostfit.Models())
 }
 
 // GPUs is the GPU table with the default image's verdict on each GPU.

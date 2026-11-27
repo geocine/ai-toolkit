@@ -176,7 +176,7 @@ func InitSizer(simulate bool) {
 // local path) or "none" (unknown). A nil sizer uses the table.
 func (s *ModelSizer) Size(ctx context.Context, m ModelRef) (gb float64, source string) {
 	repos := genericFiles
-	if f, ok := modelFiles[m.Arch]; ok {
+	if f, ok := modelFiles[tableArch(m.Arch)]; ok {
 		repos = f.Repos
 	}
 	var fallback, total float64
@@ -185,7 +185,12 @@ func (s *ModelSizer) Size(ctx context.Context, m ModelRef) (gb float64, source s
 		fallback += rf.FallbackGB
 		repo := rf.Repo
 		if repo == NameOrPath {
+			// an alias ("zimage:deturbo") sizes the repo upstream's form
+			// fills in for it, not its table row's
 			repo = rf.Default
+			if c, ok := catalogEntry(m.Arch); ok && tableArch(m.Arch) != m.Arch && hfRepo.MatchString(c.DefaultRepo) {
+				repo = c.DefaultRepo
+			}
 			if p := strings.TrimSpace(m.NameOrPath); p != "" {
 				repo = p
 			}

@@ -76,9 +76,12 @@ var archNames = map[string]string{
 	"wan22_5b": "Wan 2.2 5B", "wan21": "Wan 2.1 14B", "hidream": "HiDream", "ltx2": "LTX-2", "zimage": "Z-Image", "krea2": "Krea 2",
 }
 
-// ArchName is a model arch's display name ("flux" -> "FLUX.1"); the arch
-// itself when unknown.
+// ArchName is a model arch's display name: upstream's label for it, else
+// the table's ("wan21" -> "Wan 2.1 14B"), else the arch itself.
 func ArchName(arch string) string {
+	if n := catalogName(arch); n != "" {
+		return n
+	}
 	if n, ok := archNames[arch]; ok {
 		return n
 	}
@@ -181,7 +184,7 @@ func tierIndex(vramGB float64) int {
 // quantization becomes tight when the job section (it names its model)
 // turns quantization off. Below the smallest tier nothing fits.
 func VRAMFor(m ModelRef, vramGB float64) VRAMFit {
-	cells, ok := vramTable[m.Arch]
+	cells, ok := vramTable[tableArch(m.Arch)]
 	if !ok || vramGB <= 0 {
 		return VRAMFit{Verdict: VRAMUnknown, Note: "No VRAM data for this model."}
 	}
@@ -196,7 +199,7 @@ func VRAMFor(m ModelRef, vramGB float64) VRAMFit {
 		fit.Verdict = VRAMFits
 	case c.verdict == VRAMFits && c.needs.quantize && m.NameOrPath != "" && !m.Quantize && m.QType == "":
 		fit.Verdict = VRAMTight
-	case m.Arch == "zimage" && i == 0 && m.Resolution > 768:
+	case tableArch(m.Arch) == "zimage" && i == 0 && m.Resolution > 768:
 		fit.Verdict, fit.Recipe = VRAMTight, "train at 768 or below"
 	}
 	fit.Note = vramNote(m.Arch, TierSizes[i], fit, c.note)
@@ -235,7 +238,7 @@ func Tiers(m ModelRef) []Tier {
 
 // KnownArch reports a model arch the VRAM table has cells for.
 func KnownArch(arch string) bool {
-	_, ok := vramTable[arch]
+	_, ok := vramTable[tableArch(arch)]
 	return ok
 }
 

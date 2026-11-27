@@ -662,3 +662,34 @@ return { channel: rec.choice.channel, launch: rec.choice.launch_ref, ok: check.o
 		t.Fatalf("flow result %s", res.Result)
 	}
 }
+
+func TestHostModels(t *testing.T) {
+	_, h := newEnv(t, imagetest.Options{})
+	r := call(t, h, "GET", "/v1/hosts/models", "")
+	if r.code != 200 {
+		t.Fatalf("models: %d %s", r.code, r.body)
+	}
+	var out struct {
+		Items []struct {
+			Arch, Name, Group string
+			Video, VRAM       bool
+		}
+	}
+	r.into(t, &out)
+	m := map[string]int{}
+	for i, x := range out.Items {
+		m[x.Arch] = i
+	}
+	for arch, vram := range map[string]bool{"flux": true, "wan22_14b:t2v": true, "zimage:turbo": true, "wan21:1b": false, "fibo2": false} {
+		i, ok := m[arch]
+		if !ok {
+			t.Fatalf("%s missing from %d models", arch, len(out.Items))
+		}
+		if out.Items[i].VRAM != vram || out.Items[i].Name == "" || out.Items[i].Group == "" {
+			t.Errorf("%s: %+v, want vram %v", arch, out.Items[i], vram)
+		}
+	}
+	if !out.Items[m["wan22_14b:t2v"]].Video {
+		t.Errorf("wan22_14b:t2v is a video model")
+	}
+}

@@ -5,7 +5,7 @@
 import { call, get, post, type Items, type Server } from './api';
 import { query } from './provision';
 import type { ProviderKind } from './provisionTypes';
-import type { CheckAction, GpuInfo, HostFacts, HostFit, ImageCheck, ImageCheckItem, ImageRecommendation, ImageTag, ModelRef } from './serverImageTypes';
+import type { CheckAction, GpuInfo, HostFacts, HostFit, ImageCheck, ImageCheckItem, ImageRecommendation, ImageTag, ModelInfo, ModelRef } from './serverImageTypes';
 
 /** The image GPU servers run unless another is picked (imagecheck.DefaultRepo). */
 export const DEFAULT_REPO = 'ghcr.io/geocine/aitoolkit-go';
@@ -57,27 +57,27 @@ export const hostFit = (s: Server, req: HostFitRequest) => post<HostFit>(s, '/v1
 export const hostGpus = async (s: Server) => (await get<Items<GpuInfo>>(s, '/v1/hosts/gpus')).items;
 
 /**
- * The model archs the host checks know (internal/hostfit vram.go archNames),
- * for "What will you train?". The value travels as offers' model= and as
- * ModelRef.arch.
+ * Upstream's model archs as the server has them built in (GET /v1/hosts/models),
+ * for "What will you train?". The arch travels as offers' model= and as
+ * ModelRef.arch; vram says the server has VRAM data for it.
  */
-export const modelArchs: { arch: string; name: string }[] = [
-  { arch: 'flux', name: 'FLUX.1' },
-  { arch: 'flux_kontext', name: 'FLUX.1 Kontext' },
-  { arch: 'flux2', name: 'FLUX.2' },
-  { arch: 'krea2', name: 'Krea 2' },
-  { arch: 'zimage', name: 'Z-Image' },
-  { arch: 'qwen_image', name: 'Qwen-Image' },
-  { arch: 'qwen_image_edit', name: 'Qwen-Image-Edit' },
-  { arch: 'qwen_image_edit_plus', name: 'Qwen-Image-Edit-2509' },
-  { arch: 'hidream', name: 'HiDream' },
-  { arch: 'wan21', name: 'Wan 2.1 14B' },
-  { arch: 'wan22_5b', name: 'Wan 2.2 5B' },
-  { arch: 'wan22_14b', name: 'Wan 2.2 14B' },
-  { arch: 'ltx2', name: 'LTX-2' },
-];
+export const hostModels = async (s: Server) => (await get<Items<ModelInfo>>(s, '/v1/hosts/models')).items;
 
-export const archName = (arch: string) => modelArchs.find(m => m.arch === arch)?.name ?? arch;
+/** A model's label from the list, else the arch itself. */
+export const archName = (models: readonly ModelInfo[] | null | undefined, arch: string) => models?.find(m => m.arch === arch)?.name ?? arch;
+
+const groupOrder = ['image', 'instruction', 'video', 'audio', 'llm', 'experimental'];
+const groupLabels: Record<string, string> = { image: 'Image', instruction: 'Image editing', video: 'Video', audio: 'Audio', llm: 'Language', experimental: 'Experimental' };
+
+/** The list in upstream's groups (image first), each in the server's order. */
+export function modelGroups(models: readonly ModelInfo[]): { group: string; label: string; models: ModelInfo[] }[] {
+  const by = new Map<string, ModelInfo[]>();
+  for (const m of models) by.set(m.group, [...(by.get(m.group) ?? []), m]);
+  const rank = (g: string) => (groupOrder.includes(g) ? groupOrder.indexOf(g) : groupOrder.length);
+  return [...by.keys()]
+    .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
+    .map(g => ({ group: g, label: groupLabels[g] ?? (g ? g[0].toUpperCase() + g.slice(1) : 'Other'), models: by.get(g)! }));
+}
 
 /** The repository of an image reference, without @digest or :tag (a registry port stays). */
 export function imageRepo(ref: string): string {

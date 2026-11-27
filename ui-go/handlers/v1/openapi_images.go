@@ -10,6 +10,7 @@ func init() {
 		op{"GET", "/v1/images/tags", "images", "Tags of an image with digest, build date, flavor and CUDA floor", []string{"image:string", "limit:integer"}, "", 200, "object"},
 		op{"POST", "/v1/images/recommend", "images", "Pick the image for a host and say why", nil, "object", 200, "object"},
 		op{"GET", "/v1/hosts/gpus", "hosts", "Known GPUs and whether the default image runs on them", nil, "", 200, "object"},
+		op{"GET", "/v1/hosts/models", "hosts", "Upstream's model archs built into this server, and which have VRAM data", nil, "", 200, "object"},
 		op{"POST", "/v1/hosts/fit", "hosts", "VRAM verdict per GPU size and the disk a model needs", nil, "object", 200, "object"},
 	)
 	// images.recommend prefers the build this server runs: the one /v1/health reports.

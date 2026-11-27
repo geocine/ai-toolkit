@@ -6,7 +6,7 @@ import { perHour, providerNames } from '../lib/machines';
 import { priceCap } from '../lib/priceCap';
 import { launch, offers as listOffers, providers, recommend, recommendAll, removeKey, setKey, templates as listTemplates, testKey } from '../lib/provision';
 import type { GpuRecommendation, Machine, Offer, OfferQuery, Provider, ProviderKind, ProviderTemplate, RecommendQuery, WhenDone } from '../lib/provisionTypes';
-import { archName, checkImage, DEFAULT_IMAGE, gb, imageTag, minutes, modelArchs, recommendImage, type ImageCheckRequest, type ImageRecommendRequest } from '../lib/serverImage';
+import { archName, checkImage, DEFAULT_IMAGE, gb, hostModels, imageTag, minutes, modelGroups, recommendImage, type ImageCheckRequest, type ImageRecommendRequest } from '../lib/serverImage';
 import type { CheckAction, ImageCheck, ImageCheckItem, ImageRecommendation, ImageRequirements } from '../lib/serverImageTypes';
 import { Dialog } from './Dialog';
 import { FitBadge, VramBadge } from './FitBadge';
@@ -146,6 +146,9 @@ function CreateForm({
   onGuide: (kind?: ProviderKind) => void;
 }) {
   const provs = useLoad(s, providers, []);
+  // upstream's model list as this server has it built in; an older server
+  // without the route leaves only "Not sure yet" (and a preselected arch)
+  const models = useLoad(s, hostModels, []);
   const extras = useLoad(
     s,
     async x => {
@@ -223,7 +226,8 @@ function CreateForm({
   const [cloud, setCloud] = useState<'secure' | 'community'>('secure');
   const [disk, setDisk] = useState('100');
   const [diskTouched, setDiskTouched] = useState(false); // until then the disk follows what the image and model need
-  const [arch, setArch] = useState(model && modelArchs.some(m => m.arch === model) ? model : '');
+  const [arch, setArch] = useState(model ?? '');
+  const archInfo = models.data?.find(m => m.arch === arch);
   const [fast, setFast] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [offerList, setOfferList] = useState<Offer[] | null>(null);
@@ -718,7 +722,7 @@ function CreateForm({
                 )}
                 <span className="create-summary-disk">
                   Disk: {diskGb} GB
-                  {need ? (diskGb >= need.disk_gb ? ` (${diskParts(need, arch ? archName(arch) : undefined)})` : ` (needs ${need.disk_gb} GB)`) : ''}
+                  {need ? (diskGb >= need.disk_gb ? ` (${diskParts(need, arch ? archName(models.data, arch) : undefined)})` : ` (needs ${need.disk_gb} GB)`) : ''}
                 </span>
               </p>
             )}
@@ -807,10 +811,15 @@ function CreateForm({
                   <span>What will you train?</span>
                   <select value={arch} onChange={e => setArch(e.target.value)}>
                     <option value="">Not sure yet</option>
-                    {modelArchs.map(m => (
-                      <option key={m.arch} value={m.arch}>
-                        {m.name}
-                      </option>
+                    {arch && !archInfo && <option value={arch}>{arch}</option>}
+                    {modelGroups(models.data ?? []).map(g => (
+                      <optgroup key={g.group} label={g.label}>
+                        {g.models.map(m => (
+                          <option key={m.arch} value={m.arch}>
+                            {m.name}
+                          </option>
+                        ))}
+                      </optgroup>
                     ))}
                   </select>
                 </label>
@@ -875,8 +884,9 @@ function CreateForm({
               {diskError ? (
                 <small className="field-error">{diskError}</small>
               ) : (
-                need && <small>Needs {diskBreakdown(need, arch ? archName(arch) : undefined)}.</small>
+                need && <small>Needs {diskBreakdown(need, arch ? archName(models.data, arch) : undefined)}.</small>
               )}
+              {archInfo && !archInfo.vram && <small>No VRAM data for {archInfo.name} yet, so GPUs are not filtered or rated for it: pick by Min VRAM.</small>}
             </div>
             <div ref={offersAnchor} className="offer-block">
               <GpuPicks
@@ -900,7 +910,7 @@ function CreateForm({
                 error={offerError}
                 selected={offer?.id ?? null}
                 onSelect={chooseOffer}
-                model={arch ? archName(arch) : ''}
+                model={arch ? archName(models.data, arch) : ''}
                 pinned={pinned}
                 badge={id => pickBadge(gpuRec, id)}
               />

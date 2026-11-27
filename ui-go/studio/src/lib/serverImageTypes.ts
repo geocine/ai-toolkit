@@ -15,6 +15,7 @@ export type ImageCheck = { ok: boolean; level: 'ok' | CheckLevel; image: ImageFa
 export type ImageTag = { tag: string; digest: string; created: string; flavor?: string; cuda_min?: string; revision?: string; moving: boolean };
 export type ImageChoice = { channel: 'same' | 'latest' | 'flavor' | 'custom' | 'template'; label: string; image: string; launch_ref: string | null; digest: string; revision?: string; flavor?: string; level: 'ok' | CheckLevel; why: string[] };
 export type ImageRecommendation = { choice: ImageChoice | null; alternatives: ImageChoice[]; checks: ImageCheckItem[]; action?: CheckAction };
+export type ModelInfo = { arch: string; name: string; group: string; video: boolean; default_repo: string; vram: boolean };
 export type GpuInfo = { name: string; sm: number; vram_gb: number; class: 'geforce' | 'pro' | 'datacenter'; vendor: 'nvidia' | 'amd'; platform: string; aliases: string[]; speed: number; speed_source: string; verdict: 'ok' | CheckLevel; note: string };
 export type HostFit = { model: ModelRef; tiers: ({ vram_gb: number } & VramFit)[]; need: DiskNeed };
 export type CudaCheck = { ok: boolean; checked_at: string; torch: string; cuda: string; arch_list: string[]; devices: { index: number; name: string; capability: string; driver: string }[]; error: string | null; failure: 'no_kernel_image' | 'driver_too_old' | 'no_gpu' | 'torch_missing' | 'timeout' | null };

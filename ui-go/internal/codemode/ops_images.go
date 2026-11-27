@@ -30,6 +30,8 @@ var imageOps = []Op{
 			opt("template_id", "string", "body", "QuickPod: the template whose image runs"), opt("disk_gb", "number", "body", "the disk the launch will ask for")}},
 	{Group: "hosts", Name: "gpus", Method: "GET", Path: "/v1/hosts/gpus", Result: "Items<GpuInfo>",
 		Doc: "Known GPUs with compute capability, VRAM, class and whether the default image runs on them (verdict and note; the driver is judged per host by images.check)."},
+	{Group: "hosts", Name: "models", Method: "GET", Path: "/v1/hosts/models", Result: "Items<ModelInfo>",
+		Doc: "The model archs upstream's training form offers (built into this server, so the studio API answers too), with label, group, video, the repo the form fills in, and vram: whether the VRAM table has data. Pass arch as ModelRef.arch to hosts.fit, images.check, offers and recommend; an arch without vram gets unknown verdicts and the GPU search starts at the smallest size."},
 	{Group: "hosts", Name: "fit", Method: "POST", Path: "/v1/hosts/fit", Result: "HostFit",
 		Doc: "VRAM verdict per GPU size and the disk a model needs (image + model download + working room). Verdicts are fits, tight (only with the named recipe), no, or unknown; source says repo example or estimate. Without gpus or host it answers the five sizes 16/24/32/48/80 GB.",
 		Params: []Param{p("model", "ModelRef", "body", "the job's model section (arch is required)"), opt("image", "string", "body", "default ghcr.io/geocine/aitoolkit-go:latest"),

@@ -1,0 +1,485 @@
+[
+  {
+    "arch": "ace_step_15",
+    "name": "ACE-Step 1.5",
+    "group": "audio",
+    "video": false,
+    "default_repo": "ostris/ace_step_1.5_ComfyUI_files/ace_step_1.5_base_aio.safetensors"
+  },
+  {
+    "arch": "ace_step_15_xl",
+    "name": "ACE-Step 1.5 XL",
+    "group": "audio",
+    "video": false,
+    "default_repo": "ostris/ace_step_1.5_ComfyUI_files/ace_step_1.5_xl_base_aio.safetensors"
+  },
+  {
+    "arch": "anima",
+    "name": "Anima",
+    "group": "image",
+    "video": false,
+    "default_repo": "circlestone-labs/Anima-Base-v1.0-Diffusers"
+  },
+  {
+    "arch": "boogu_image",
+    "name": "Boogu Image",
+    "group": "image",
+    "video": false,
+    "default_repo": "Boogu/Boogu-Image-0.1-Base"
+  },
+  {
+    "arch": "boogu_image_edit",
+    "name": "Boogu Image Edit",
+    "group": "instruction",
+    "video": false,
+    "default_repo": "Boogu/Boogu-Image-0.1-Edit"
+  },
+  {
+    "arch": "chroma",
+    "name": "Chroma",
+    "group": "image",
+    "video": false,
+    "default_repo": "lodestones/Chroma1-Base"
+  },
+  {
+    "arch": "ernie_image",
+    "name": "ERNIE-Image",
+    "group": "image",
+    "video": false,
+    "default_repo": "baidu/ERNIE-Image"
+  },
+  {
+    "arch": "minimax_h3_vsa",
+    "name": "FastH3 8-Step V2",
+    "group": "video",
+    "video": true,
+    "default_repo": "FastVideo/FastVideo-FastH3-Comfy"
+  },
+  {
+    "arch": "minimax_h3_omni",
+    "name": "FastH3 Omni",
+    "group": "video",
+    "video": true,
+    "default_repo": "FastVideo/FastH3-Omni-Comfy"
+  },
+  {
+    "arch": "fibo2",
+    "name": "Fibo 2.0 Dev",
+    "group": "image",
+    "video": false,
+    "default_repo": "Comfy-Org/Fibo-2.0"
+  },
+  {
+    "arch": "flex1",
+    "name": "Flex.1",
+    "group": "image",
+    "video": false,
+    "default_repo": "ostris/Flex.1-alpha"
+  },
+  {
+    "arch": "flex2",
+    "name": "Flex.2",
+    "group": "image",
+    "video": false,
+    "default_repo": "ostris/Flex.2-preview"
+  },
+  {
+    "arch": "flux",
+    "name": "FLUX.1",
+    "group": "image",
+    "video": false,
+    "default_repo": "black-forest-labs/FLUX.1-dev"
+  },
+  {
+    "arch": "flux_kontext",
+    "name": "FLUX.1-Kontext-dev",
+    "group": "instruction",
+    "video": false,
+    "default_repo": "black-forest-labs/FLUX.1-Kontext-dev"
+  },
+  {
+    "arch": "flux2",
+    "name": "FLUX.2",
+    "group": "image",
+    "video": false,
+    "default_repo": "black-forest-labs/FLUX.2-dev"
+  },
+  {
+    "arch": "flux2_klein_4b",
+    "name": "FLUX.2-klein-base-4B",
+    "group": "image",
+    "video": false,
+    "default_repo": "black-forest-labs/FLUX.2-klein-base-4B"
+  },
+  {
+    "arch": "flux2_klein_9b",
+    "name": "FLUX.2-klein-base-9B",
+    "group": "image",
+    "video": false,
+    "default_repo": "black-forest-labs/FLUX.2-klein-base-9B"
+  },
+  {
+    "arch": "flux3",
+    "name": "FLUX.3 Image Klein (base)",
+    "group": "image",
+    "video": false,
+    "default_repo": "black-forest-labs/flux-3-image-klein-base"
+  },
+  {
+    "arch": "hidream",
+    "name": "HiDream",
+    "group": "image",
+    "video": false,
+    "default_repo": "HiDream-ai/HiDream-I1-Full"
+  },
+  {
+    "arch": "hidream_e1",
+    "name": "HiDream E1",
+    "group": "instruction",
+    "video": false,
+    "default_repo": "HiDream-ai/HiDream-E1-1"
+  },
+  {
+    "arch": "hidream_o1",
+    "name": "HiDream-O1",
+    "group": "image",
+    "video": false,
+    "default_repo": "HiDream-ai/HiDream-O1-Image"
+  },
+  {
+    "arch": "ideogram4",
+    "name": "Ideogram4",
+    "group": "experimental",
+    "video": false,
+    "default_repo": "ideogram-ai/ideogram-4-fp8"
+  },
+  {
+    "arch": "iris3b",
+    "name": "Iris-3B (pixel space)",
+    "group": "image",
+    "video": false,
+    "default_repo": "speridlabs/iris-3b"
+  },
+  {
+    "arch": "krea2",
+    "name": "Krea 2 (raw)",
+    "group": "image",
+    "video": false,
+    "default_repo": "krea/Krea-2-Raw"
+  },
+  {
+    "arch": "krea2:o_edit",
+    "name": "Krea 2 (raw) [Edit Training]",
+    "group": "experimental",
+    "video": false,
+    "default_repo": "krea/Krea-2-Raw"
+  },
+  {
+    "arch": "krea2:turbo",
+    "name": "Krea 2 Turbo (w/ Training Adapter)",
+    "group": "image",
+    "video": false,
+    "default_repo": "krea/Krea-2-Turbo"
+  },
+  {
+    "arch": "krea2:o_edit_turbo",
+    "name": "Krea 2 Turbo (w/ Training Adapter) [Edit Training]",
+    "group": "experimental",
+    "video": false,
+    "default_repo": "krea/Krea-2-Turbo"
+  },
+  {
+    "arch": "ltx2",
+    "name": "LTX-2",
+    "group": "video",
+    "video": true,
+    "default_repo": "Lightricks/LTX-2"
+  },
+  {
+    "arch": "ltx2.3",
+    "name": "LTX-2.3",
+    "group": "video",
+    "video": true,
+    "default_repo": "Lightricks/LTX-2.3/ltx-2.3-22b-dev.safetensors"
+  },
+  {
+    "arch": "ltx2.5",
+    "name": "LTX-2.5",
+    "group": "video",
+    "video": true,
+    "default_repo": "Lightricks/LTX-2.5"
+  },
+  {
+    "arch": "lumina2",
+    "name": "Lumina2",
+    "group": "image",
+    "video": false,
+    "default_repo": "Alpha-VLLM/Lumina-Image-2.0"
+  },
+  {
+    "arch": "mageflow",
+    "name": "Mage-Flow",
+    "group": "image",
+    "video": false,
+    "default_repo": "microsoft/Mage-Flow-Base"
+  },
+  {
+    "arch": "mageflow_edit",
+    "name": "Mage-Flow Edit",
+    "group": "instruction",
+    "video": false,
+    "default_repo": "microsoft/Mage-Flow-Edit-Base"
+  },
+  {
+    "arch": "ming_image",
+    "name": "Ming-Image 0.1 Design (w/ Training Adapter)",
+    "group": "image",
+    "video": false,
+    "default_repo": "Comfy-Org/Ming-Image"
+  },
+  {
+    "arch": "minimax_h3",
+    "name": "MiniMax-H3",
+    "group": "video",
+    "video": true,
+    "default_repo": "Comfy-Org/MiniMax-H3"
+  },
+  {
+    "arch": "minimax_h3_ref2va",
+    "name": "MiniMax-H3 Ref2V",
+    "group": "video",
+    "video": true,
+    "default_repo": "Comfy-Org/MiniMax-H3"
+  },
+  {
+    "arch": "minimax_h3_image",
+    "name": "MiniMax-H3-Image",
+    "group": "image",
+    "video": false,
+    "default_repo": "Comfy-Org/MiniMax-H3-Image"
+  },
+  {
+    "arch": "moss_image:base",
+    "name": "MOSS-Image Base",
+    "group": "image",
+    "video": false,
+    "default_repo": "OpenMOSS-Team/MOSS-Image-Base"
+  },
+  {
+    "arch": "moss_image:base_edit",
+    "name": "MOSS-Image Base [Edit Training]",
+    "group": "experimental",
+    "video": false,
+    "default_repo": "OpenMOSS-Team/MOSS-Image-Base"
+  },
+  {
+    "arch": "moss_image",
+    "name": "MOSS-Image SFT",
+    "group": "image",
+    "video": false,
+    "default_repo": "OpenMOSS-Team/MOSS-Image-SFT"
+  },
+  {
+    "arch": "moss_image:edit",
+    "name": "MOSS-Image SFT [Edit Training]",
+    "group": "experimental",
+    "video": false,
+    "default_repo": "OpenMOSS-Team/MOSS-Image-SFT"
+  },
+  {
+    "arch": "nucleus_image",
+    "name": "Nucleus-Image",
+    "group": "image",
+    "video": false,
+    "default_repo": "NucleusAI/Nucleus-Image"
+  },
+  {
+    "arch": "omnigen2",
+    "name": "OmniGen2",
+    "group": "image",
+    "video": false,
+    "default_repo": "OmniGen2/OmniGen2"
+  },
+  {
+    "arch": "p_h3_image",
+    "name": "PrunaAI P-H3-Image",
+    "group": "image",
+    "video": false,
+    "default_repo": "PrunaAI/P-H3-Image-Comfy"
+  },
+  {
+    "arch": "prx_pixel",
+    "name": "PRXPixel (pixel space)",
+    "group": "image",
+    "video": false,
+    "default_repo": "Photoroom/prxpixel-t2i"
+  },
+  {
+    "arch": "qwen_image",
+    "name": "Qwen-Image",
+    "group": "image",
+    "video": false,
+    "default_repo": "Qwen/Qwen-Image"
+  },
+  {
+    "arch": "qwen_image_2",
+    "name": "Qwen-Image-2.1",
+    "group": "image",
+    "video": false,
+    "default_repo": "Comfy-Org/Qwen-Image-2.1"
+  },
+  {
+    "arch": "qwen_image_2:turbo",
+    "name": "Qwen-Image-2.1 Turbo (w/ Training Adapter)",
+    "group": "image",
+    "video": false,
+    "default_repo": "Comfy-Org/Qwen-Image-2.1/diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors"
+  },
+  {
+    "arch": "qwen_image:2512",
+    "name": "Qwen-Image-2512",
+    "group": "image",
+    "video": false,
+    "default_repo": "Qwen/Qwen-Image-2512"
+  },
+  {
+    "arch": "qwen_image_edit",
+    "name": "Qwen-Image-Edit",
+    "group": "instruction",
+    "video": false,
+    "default_repo": "Qwen/Qwen-Image-Edit"
+  },
+  {
+    "arch": "qwen_image_edit_plus",
+    "name": "Qwen-Image-Edit-2509",
+    "group": "instruction",
+    "video": false,
+    "default_repo": "Qwen/Qwen-Image-Edit-2509"
+  },
+  {
+    "arch": "qwen_image_edit_plus:2511",
+    "name": "Qwen-Image-Edit-2511",
+    "group": "instruction",
+    "video": false,
+    "default_repo": "Qwen/Qwen-Image-Edit-2511"
+  },
+  {
+    "arch": "qwen25_omni",
+    "name": "Qwen2.5-Omni",
+    "group": "llm",
+    "video": false,
+    "default_repo": "ai-toolkit/Qwen2.5-Omni-7B/qwen2_5_omni_7b_convrot8.safetensors"
+  },
+  {
+    "arch": "qwen38",
+    "name": "Qwen3.8 27B",
+    "group": "llm",
+    "video": false,
+    "default_repo": "Comfy-Org/Qwen3.8-27B/text_encoders/qwen3.8_27b_w4a8.safetensors"
+  },
+  {
+    "arch": "sd15",
+    "name": "SD 1.5",
+    "group": "image",
+    "video": false,
+    "default_repo": "stable-diffusion-v1-5/stable-diffusion-v1-5"
+  },
+  {
+    "arch": "sdxl",
+    "name": "SDXL",
+    "group": "image",
+    "video": false,
+    "default_repo": "stabilityai/stable-diffusion-xl-base-1.0"
+  },
+  {
+    "arch": "wan21:1b",
+    "name": "Wan 2.1 (1.3B)",
+    "group": "video",
+    "video": true,
+    "default_repo": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+  },
+  {
+    "arch": "wan21:14b",
+    "name": "Wan 2.1 (14B)",
+    "group": "video",
+    "video": true,
+    "default_repo": "Wan-AI/Wan2.1-T2V-14B-Diffusers"
+  },
+  {
+    "arch": "wan21_i2v:14b480p",
+    "name": "Wan 2.1 I2V (14B-480P)",
+    "group": "video",
+    "video": true,
+    "default_repo": "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
+  },
+  {
+    "arch": "wan21_i2v:14b",
+    "name": "Wan 2.1 I2V (14B-720P)",
+    "group": "video",
+    "video": true,
+    "default_repo": "Wan-AI/Wan2.1-I2V-14B-720P-Diffusers"
+  },
+  {
+    "arch": "wan22_14b:t2v",
+    "name": "Wan 2.2 (14B)",
+    "group": "video",
+    "video": true,
+    "default_repo": "ai-toolkit/Wan2.2-T2V-A14B-Diffusers-bf16"
+  },
+  {
+    "arch": "wan22_14b_i2v",
+    "name": "Wan 2.2 I2V (14B)",
+    "group": "video",
+    "video": true,
+    "default_repo": "ai-toolkit/Wan2.2-I2V-A14B-Diffusers-bf16"
+  },
+  {
+    "arch": "wan22_5b",
+    "name": "Wan 2.2 TI2V (5B)",
+    "group": "video",
+    "video": true,
+    "default_repo": "Wan-AI/Wan2.2-TI2V-5B-Diffusers"
+  },
+  {
+    "arch": "yue2",
+    "name": "YuE2",
+    "group": "audio",
+    "video": false,
+    "default_repo": "Comfy-Org/YuE2/checkpoints/yue2_3b_int8_convrot.safetensors"
+  },
+  {
+    "arch": "zimage",
+    "name": "Z-Image",
+    "group": "image",
+    "video": false,
+    "default_repo": "Tongyi-MAI/Z-Image"
+  },
+  {
+    "arch": "zimage:deturbo",
+    "name": "Z-Image De-Turbo (De-Distilled)",
+    "group": "image",
+    "video": false,
+    "default_repo": "ostris/Z-Image-De-Turbo"
+  },
+  {
+    "arch": "zimage_l2p",
+    "name": "Z-Image L2P (pixel space)",
+    "group": "image",
+    "video": false,
+    "default_repo": "zhen-nan/L2P/model-1k-merge.safetensors"
+  },
+  {
+    "arch": "zimage:turbo",
+    "name": "Z-Image Turbo (w/ Training Adapter)",
+    "group": "image",
+    "video": false,
+    "default_repo": "Tongyi-MAI/Z-Image-Turbo"
+  },
+  {
+    "arch": "zeta_chroma",
+    "name": "Zeta Chroma",
+    "group": "experimental",
+    "video": false,
+    "default_repo": "lodestones/Zeta-Chroma/zeta-chroma-base-x0-pixel-dino-distance.safetensors"
+  }
+]

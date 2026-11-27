@@ -64,7 +64,7 @@ func NeedFor(img *imagecheck.Image, model *ModelRef, sizer *ModelSizer) Need {
 		n.ModelGB = round1(n.ModelGB)
 	}
 	n.DiskGB = max(ceil10((n.ImagePeakGB+n.ModelGB+n.WorkGB)*diskMargin), diskFloorGB)
-	if _, known := modelFiles[archOf(model)]; !known || n.ModelSource == "none" {
+	if _, known := modelFiles[tableArch(archOf(model))]; !known || n.ModelSource == "none" {
 		n.DiskGB = max(n.DiskGB, MinDiskGBUnknownModel)
 		n.ModelSource = "default"
 	}

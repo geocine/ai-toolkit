@@ -38,9 +38,14 @@ git fetch upstream            # or update the local main that mirrors it
 git rebase main               # from the go-react branch; no conflicts expected
 cd ui-go
 go build ./... && go vet ./...
+go generate ./internal/hostfit # refresh the built-in model list (studio's "What will you train?")
 go test ./...                 # route coverage + schema drift fail on anything new upstream
 ../ui-go/scripts/parity.sh    # optional: diff live responses against upstream's server
 ```
+
+`go test ./cmd/modelsgen` fails while the built-in model list differs from
+upstream's; `go generate ./internal/hostfit` rewrites it. A new model has no
+VRAM data until it gets a row in `internal/hostfit/vram.go`.
 
 When `go test ./parity/` fails, it names the route or column to port. Mirror
 the upstream file next to the matching Go package (`handlers/<group>`), then
