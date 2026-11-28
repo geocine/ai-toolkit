@@ -65,7 +65,7 @@ type Layer struct {
 // Image is one tag the mock serves.
 type Image struct {
 	Host          string   // GHCR (default) or Hub
-	Repo, Tag     string   // "geocine/aitoolkit-go", "f53a407"
+	Repo, Tag     string   // "geocine/aitoolkit-worker", "f53a407"
 	Platforms     []string // default ["linux/amd64"]; an attestation entry is added unless NoAttestation
 	Config        []byte   // a real config JSON; its digest is computed
 	Layers        []Layer  // layer list from a real manifest; wins over LayerSizes

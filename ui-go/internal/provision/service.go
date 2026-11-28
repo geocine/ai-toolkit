@@ -19,6 +19,7 @@ import (
 	"github.com/geocine/aitoolkit/internal/events"
 	"github.com/geocine/aitoolkit/internal/hostfit"
 	"github.com/geocine/aitoolkit/internal/state"
+	"github.com/geocine/aitoolkit/internal/tunnel"
 	"github.com/geocine/aitoolkit/internal/v1api"
 )
 
@@ -43,7 +44,35 @@ type Service struct {
 	checks    sync.WaitGroup         // background CUDA checks
 }
 
-func init() { Default = &Service{} }
+func init() {
+	s := &Service{}
+	Default = s
+	tunnel.Default.Lookup = s.tunnelToken
+	tunnel.Default.OnChange = s.tunnelChanged
+}
+
+// tunnelToken is the token a machine's tunnel must prove: only a machine
+// this studio API tracks by that exact id, and not ended.
+func (s *Service) tunnelToken(ctx context.Context, id string) (string, bool) {
+	r, err := getRow(ctx, id)
+	if err != nil || r.ID != id || r.EndedAt != nil || r.Token == "" {
+		return "", false
+	}
+	return r.Token, true
+}
+
+// tunnelChanged refreshes a machine whose tunnel just came up, so it turns
+// ready at once instead of on the next watcher tick.
+func (s *Service) tunnelChanged(id string, up bool) {
+	if !up {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if _, err := s.Get(ctx, id, true); err != nil {
+		log.Printf("provision: refresh %s after its tunnel connected: %v", id, err)
+	}
+}
 
 var _ Manager = (*Service)(nil)
 
@@ -565,7 +594,11 @@ func (s *Service) Launch(ctx context.Context, req LaunchRequest, origin string) 
 	// env
 	id := state.NewID(MachineIDPrefix)
 	token := NewToken()
-	env, warnings, err := BuildEnv(ctx, req, k, id, token, c.Info().Caps, key)
+	apiURL, err := StudioAPIURL(req.SelfURL, sim)
+	if err != nil {
+		return Machine{}, false, err
+	}
+	env, warnings, err := BuildEnv(ctx, req, k, id, token, c.Info().Caps, key, apiURL)
 	if err != nil {
 		return Machine{}, false, scrub(err, key)
 	}
@@ -714,7 +747,7 @@ func (s *Service) RelayTarget(ctx context.Context, id string) (RelayTarget, erro
 	if err != nil {
 		return RelayTarget{}, err
 	}
-	if r.Status != StatusReady || r.BaseURL == "" || CheckEndpoint(r.Provider, r.BaseURL, r.Simulated) != nil {
+	if r.Status != StatusReady || r.BaseURL == "" || CheckBase(r.Provider, r.BaseURL, r.ID, r.Simulated) != nil {
 		return RelayTarget{}, conflict(r.Name + " isn't ready yet")
 	}
 	return RelayTarget{MachineID: r.ID, BaseURL: r.BaseURL, Token: r.Token, Simulated: r.Simulated}, nil
@@ -733,7 +766,7 @@ func (s *Service) Link(ctx context.Context, id string) (MachineLink, error) {
 	if r.Problem == ProblemOpenServer {
 		return MachineLink{}, conflict(detailOpen)
 	}
-	return MachineLink{Name: r.Name, BaseURL: r.BaseURL, Token: r.Token, Secure: strings.HasPrefix(r.BaseURL, "https://"),
+	return MachineLink{Name: r.Name, BaseURL: r.BaseURL, Token: r.Token, Secure: SecureBase(r.BaseURL), Tunnel: TunnelBase(r.BaseURL),
 		RelayPath: "/v1/machines/" + r.ID + "/relay"}, nil
 }
 
@@ -822,7 +855,7 @@ func (s *Service) Update(ctx context.Context, id string, p MachinePatch) (Machin
 	if err := s.save(ctx, r, before); err != nil {
 		return Machine{}, err
 	}
-	if reprobe && (r.Status == StatusRunning || r.Status == StatusReady) && len(r.Endpoints) > 0 && r.Simulated == Simulated.Load() {
+	if reprobe && (r.Status == StatusRunning || r.Status == StatusReady) && (len(r.Endpoints) > 0 || tunnelUp(r.ID)) && r.Simulated == Simulated.Load() {
 		before := *r
 		r.Status = StatusRunning
 		s.applyProbe(ctx, r, before, s.now())
@@ -942,6 +975,7 @@ func (s *Service) Forget(ctx context.Context, id string, force bool) error {
 	if err := deleteRow(ctx, r.ID); err != nil {
 		return err
 	}
+	tunnel.Default.Drop(r.ID)
 	s.forgetMachine(r.ID)
 	events.Emit(ctx, events.MachineDeleted, "", map[string]string{"id": r.ID})
 	return nil
@@ -1129,11 +1163,14 @@ func (s *Service) applyInstance(ctx context.Context, r *row, inst Instance, befo
 	r.Status, r.Problem, r.Detail = status, problem, detail
 
 	if status == StatusRunning {
-		if inst.PortMissing {
+		// a worker's tunnel needs no port or provider endpoint; one that was
+		// ready through its tunnel is probed after it drops, to go unreachable
+		viaTunnel := tunnelUp(r.ID) || TunnelBase(before.BaseURL) || (isWorker(r) && !r.Simulated)
+		if inst.PortMissing && !viaTunnel {
 			if r.RunningAt != nil && now.Sub(time.UnixMilli(*r.RunningAt)) > noPortGrace {
 				r.Problem, r.Detail = ProblemNoPort, detailNoPort
 			}
-		} else if len(r.Endpoints) > 0 {
+		} else if len(r.Endpoints) > 0 || viaTunnel {
 			s.applyProbe(ctx, r, before, now)
 		}
 	}
@@ -1176,8 +1213,17 @@ func (s *Service) classifyFailure(ctx context.Context, r *row, inst Instance, be
 func (s *Service) applyProbe(ctx context.Context, r *row, before row, now time.Time) {
 	// only the endpoints the provider's rules allow ever get the token
 	eps := FilterEndpoints(r.Provider, r.Endpoints, r.Simulated)
+	if isWorker(r) && !r.Simulated {
+		// tunnel only: a public endpoint answering for it is not trusted
+		// with its token (a template's AITK_MODE won, or an older image)
+		eps = nil
+	}
+	if tunnelUp(r.ID) {
+		// the tunnel first: TLS to this studio API, no provider proxy between
+		eps = append([]Endpoint{tunnelEndpoint(r.ID)}, eps...)
+	}
 	var res ProbeResult
-	if DefaultProber != nil {
+	if DefaultProber != nil && len(eps) > 0 {
 		res = DefaultProber.Probe(ctx, eps, r.Token, r.Simulated)
 	}
 	wasReady := before.Status == StatusReady || before.Problem == ProblemUnreachable
@@ -1204,7 +1250,12 @@ func (s *Service) applyProbe(ctx context.Context, r *row, before row, now time.T
 	case wasReady:
 		if r.LastOKAt != nil && now.Sub(time.UnixMilli(*r.LastOKAt)) > unreachableAfter {
 			r.Problem = ProblemUnreachable
-			r.Detail = "It stopped answering at " + before.BaseURL + " " + now.Sub(time.UnixMilli(*r.LastOKAt)).Round(time.Minute).String() + " ago."
+			ago := now.Sub(time.UnixMilli(*r.LastOKAt)).Round(time.Minute).String()
+			if TunnelBase(before.BaseURL) {
+				r.Detail = "Its tunnel to this studio API has been down for " + ago + "."
+			} else {
+				r.Detail = "It stopped answering at " + before.BaseURL + " " + ago + " ago."
+			}
 		} else {
 			// a missed probe or two: still ready until 5 min without an answer
 			r.Status, r.Problem, r.Detail = StatusReady, before.Problem, before.Detail
@@ -1306,5 +1357,18 @@ func (s *Service) applyTimeouts(r *row, now time.Time) {
 	}
 	if now.Sub(time.UnixMilli(r.CreatedAt)) > readyTimeout()+time.Duration(r.Spec.PullS*float64(time.Second)) {
 		r.Status, r.Problem, r.Detail = StatusFailed, ProblemNotReady, detailNotReady
+		if isWorker(r) && r.RunningAt != nil {
+			r.Detail = detailNoTunnel
+		}
 	}
 }
+
+// tunnelUp reports a live tunnel for a machine (tests swap it).
+var tunnelUp = func(id string) bool { return tunnel.Default.Connected(id) }
+
+// detailNoTunnel: a worker that runs but never dialled its tunnel.
+const detailNoTunnel = "It never connected its tunnel to this studio API, so it can't be reached. Check its logs: an image older than worker mode, or a studio API URL it can't reach. It is still billed: terminate it."
+
+// isWorker: launched here as AITK_MODE=worker (BuildEnv), so it is reached
+// only through its tunnel, never over the provider's endpoints.
+func isWorker(r *row) bool { return slices.Contains(r.Spec.EnvKeys, "AITK_STUDIO_API_URL") }

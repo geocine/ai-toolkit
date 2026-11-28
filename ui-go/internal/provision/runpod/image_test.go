@@ -88,7 +88,7 @@ func TestQuoteImageHost(t *testing.T) {
 func TestLaunchSendsMinCuda(t *testing.T) {
 	a, m, _ := setup(t, mockkit.Options{})
 	spec := provision.LaunchSpec{Label: "aitk-cuda", OfferID: OfferID("NVIDIA GeForce RTX 4090", "SECURE", 1),
-		Image: "ghcr.io/geocine/aitoolkit-go:f53a407", DiskGB: 100}
+		Image: "ghcr.io/geocine/aitoolkit-worker:f53a407", DiskGB: 100}
 	if _, err := a.Launch(provision.WithLaunchCUDA(ctx, "13.0"), key, spec); err != nil {
 		t.Fatal(err)
 	}

@@ -1,7 +1,7 @@
 # Deploying
 
 Production is **one image**, configured only through environment variables:
-`ghcr.io/geocine/aitoolkit-go`. It contains upstream's whole toolkit (Python,
+`ghcr.io/geocine/aitoolkit-worker`. It contains upstream's whole toolkit (Python,
 CUDA, torch, extensions), the Go server on port **8675** (API, `/mcp`, events,
 management UI) and its job worker. Nothing else needs to run beside it: no
 compose, no database server, no sidecar.
@@ -10,23 +10,40 @@ A GPU server is treated as disposable. With a remote configured, every
 running job keeps its resumable state there, and the same image started on
 another provider picks the job up and continues from the last checkpoint.
 
+## Modes
+
+`AITK_MODE` decides what a server is. The image defaults to `worker`.
+
+| `AITK_MODE` | Runs | Agents talk to | Listens on |
+|---|---|---|---|
+| `worker` (image default) | The trainer only. No console, studio or `/mcp`. It dials `AITK_STUDIO_API_URL` and is managed from there. Every server the studio creates is one. | The studio API's `/mcp` | `127.0.0.1` only: reached through its tunnel |
+| `standalone` (binary default) | An ordinary server: console at `/`, `/v1`, `/mcp`. No studio. | This server's `/mcp` | `0.0.0.0:8675` |
+| `studio` | The studio and the trainer on one node. No console. | This server's `/mcp` | `0.0.0.0:8675` |
+
+The studio without a trainer is its own image, `ghcr.io/geocine/aitoolkit-studio`
+(docs/studio-api.md): this image refuses `AITK_MODE=studio-api`. A server you
+start by hand needs `AITK_MODE=standalone` (or `studio`). A
+`worker` without `AITK_STUDIO_API_URL` refuses to start, and says so.
+
 ## Quick start
 
 ```bash
 docker run -d --gpus all -p 8675:8675 \
+  -e AITK_MODE=standalone \
   -e AI_TOOLKIT_AUTH=<long random token> \
   -e AITK_S3_ENDPOINT=https://<account>.r2.cloudflarestorage.com \
   -e AITK_S3_BUCKET=<bucket> \
   -e AITK_S3_ACCESS_KEY_ID=<key id> -e AITK_S3_SECRET_ACCESS_KEY=<secret> \
   -e AITK_SYNC_REMOTE=s3 -e AITK_AUTO_RESUME=1 -e AITK_IMPORT_ON_BOOT=all \
   -e HF_TOKEN=<hf token, for gated base models> \
-  ghcr.io/geocine/aitoolkit-go:latest
+  ghcr.io/geocine/aitoolkit-worker:latest
 ```
 
 Then point a client at `http://<host>:8675` with `Authorization: Bearer <token>`:
-the `/v1` API (`/v1/openapi.json`), MCP at `/mcp`, the console at `/`, or the
-studio at `/studio/` (installable on a phone home screen: open it there and
-"Add to Home Screen").
+the `/v1` API (`/v1/openapi.json`), MCP at `/mcp`, or the console at `/`. With
+`AITK_MODE=studio` instead, the studio is at `/studio/` and there is no
+console. The studio installs on a phone home screen: open it there and choose
+"Add to Home Screen".
 
 ## Providers
 
@@ -34,9 +51,9 @@ The container needs a GPU, port 8675 exposed over HTTP, and the env vars.
 
 | Provider | How |
 |---|---|
-| RunPod | Template: container image above, *Expose HTTP Ports* `8675`, env vars in the template. Reach it at `https://<pod id>-8675.proxy.runpod.net`. `PUBLIC_KEY` enables SSH (upstream's start script). Stop and terminate go through RunPod's API v2. |
-| Vast.ai | Image above; *Docker options* `-p 8675:8675 -e ...`. Use the mapped port shown on the instance. |
-| QuickPod | Template: *Docker Image Path* above, *Docker Options* `-p 8675:8675 -e AI_TOOLKIT_AUTH=... -e ...`. Use the URL under *Connect*, *Exposed Ports*. |
+| RunPod | Template: container image above, *Expose HTTP Ports* `8675`, env vars in the template (with `AITK_MODE=standalone`). Reach it at `https://<pod id>-8675.proxy.runpod.net`. `PUBLIC_KEY` enables SSH (upstream's start script). Stop and terminate go through RunPod's API v2. |
+| Vast.ai | Image above; *Docker options* `-p 8675:8675 -e AITK_MODE=standalone -e ...`. Use the mapped port shown on the instance. |
+| QuickPod | Template: *Docker Image Path* above, *Docker Options* `-p 8675:8675 -e AITK_MODE=standalone -e AI_TOOLKIT_AUTH=... -e ...`. Use the URL under *Connect*, *Exposed Ports*. |
 | Lambda, any VM | `docker run` as in the quick start (NVIDIA Container Toolkit installed). |
 
 Or create one from the studio: docs/providers.md (step-by-step template
@@ -51,13 +68,13 @@ same machine.
 
 ## The image
 
-`ghcr.io/geocine/aitoolkit-go` is a **public** GHCR package, so hosts pull it
+`ghcr.io/geocine/aitoolkit-worker` is a **public** GHCR package, so hosts pull it
 without a login. There is one flavor, `cu130`: linux/amd64 only, on
 `nvidia/cuda:13.0.3-runtime-ubuntu24.04` with torch `2.13.0+cu130`, about
 6.5 GB to download and 13.7 GB unpacked.
 
 While the package is missing or private, the studio says "The server image
-ghcr.io/geocine/aitoolkit-go isn't published yet, or it's still private." and
+ghcr.io/geocine/aitoolkit-worker isn't published yet, or it's still private." and
 GPU servers cannot start it. Offers and the suggested GPU still work: hosts
 are judged against the image's built-in requirements (the ones below).
 
@@ -98,7 +115,7 @@ The standard `org.opencontainers.image.*` labels are set too: `title`,
 base), `revision` (the full commit), `created` (the commit time in UTC),
 `source` (links the package to `github.com/geocine/ai-toolkit`) and
 `base.name`. Read them with
-`docker image inspect -f '{{json .Config.Labels}}' ghcr.io/geocine/aitoolkit-go:<sha>`,
+`docker image inspect -f '{{json .Config.Labels}}' ghcr.io/geocine/aitoolkit-worker:<sha>`,
 or without pulling with `aitk-server image-check` (below).
 
 **Host requirements** (the cu130 build). The server checks these before it
@@ -146,7 +163,7 @@ Publishing the first time:
 2. On an amd64 machine with Docker (and buildx, for the `:<sha>` guard), run
    `build_and_push.sh --push`. GHCR creates the package **private**, so the
    verify step fails with "denied" and the settings URL.
-3. Open `https://github.com/users/geocine/packages/container/aitoolkit-go/settings`
+3. Open `https://github.com/users/geocine/packages/container/aitoolkit-worker/settings`
    and set the visibility to Public.
 4. Run `build_and_push.sh --verify`. It runs `image-check --require-go`
    inside the pushed image and must exit 0.
@@ -159,8 +176,8 @@ published, and the newest build otherwise (it then says so).
 
 ```bash
 aitk-server image-check [--require-go] [--platform linux/amd64] [--host-json host.json] [--json] <image>
-docker run --rm --entrypoint /app/ai-toolkit/ui-go/aitk-server ghcr.io/geocine/aitoolkit-go:<sha> \
-  image-check --require-go ghcr.io/geocine/aitoolkit-go:<sha>
+docker run --rm --entrypoint /app/ai-toolkit/ui-go/aitk-server ghcr.io/geocine/aitoolkit-worker:<sha> \
+  image-check --require-go ghcr.io/geocine/aitoolkit-worker:<sha>
 ```
 
 It reads the image's manifest, config and labels from the registry (an
@@ -246,7 +263,9 @@ contacted.
 **Studio API** (no GPU or trainer; creates and tracks GPU servers; docs/studio-api.md)
 | Variable | Meaning |
 |---|---|
-| `AITK_STUDIO_API` (`0`) | `1`, `true` or `yes` runs this server as the studio API (same as `--studio-api`): its own databases, no trainer, no console, and `127.0.0.1` unless `--host` is given. A reachable address needs `AI_TOOLKIT_AUTH`. |
+| `AITK_MODE` (image: `worker`; binary: `standalone`) | `worker`, `standalone` or `studio` (see Modes). The studio API image sets `studio-api` itself; this image refuses it. |
+| `AITK_STUDIO_API_URL` | `worker` only: the studio API this worker dials its tunnel to. https, or plain http only to localhost, `host.docker.internal` or a private address. The studio sets it, with `AITK_MACHINE_ID` and `AI_TOOLKIT_AUTH`, on every server it creates. |
+| `AITK_STUDIO_API` (`0`) | The older switch for studio API mode, which only the studio API image and a source build accept: `1`, `true` or `yes` runs this server as the studio API (same as `--studio-api`): its own databases, no trainer, no console, and `127.0.0.1` unless `--host` is given. A reachable address needs `AI_TOOLKIT_AUTH`. |
 | `AITK_STUDIO_API_DIR` | Where the studio API keeps its databases (same as `--data-dir`; default `<user config dir>/aitk-studio-api`). |
 | `AITK_ALLOWED_HOSTS` | Extra `Host` names an open studio API (no token, no API key) answers besides `127.0.0.1`, `[::1]`, `localhost` and the host of `AITK_PUBLIC_URL`: comma list of `host` or `host:port`. |
 
@@ -283,7 +302,7 @@ docker run -d --gpus all -p 8675:8675 \
   -e AI_TOOLKIT_AUTH=<token> -e HF_TOKEN=<hf token> \
   -e AITK_S3_ENDPOINT=... -e AITK_S3_BUCKET=... -e AITK_S3_ACCESS_KEY_ID=... -e AITK_S3_SECRET_ACCESS_KEY=... \
   -e AITK_BOOTSTRAP=s3:bundles/my_lora_step2000.zip \
-  ghcr.io/geocine/aitoolkit-go:latest
+  ghcr.io/geocine/aitoolkit-worker:latest
 ```
 
 At boot, for each ref in `AITK_BOOTSTRAP`, in order:

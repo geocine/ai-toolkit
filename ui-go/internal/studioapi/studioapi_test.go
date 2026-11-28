@@ -96,6 +96,13 @@ func TestGateHost(t *testing.T) {
 	if body.Error.Code != "forbidden" || body.Error.Message != HostRefusal {
 		t.Errorf("host refusal body = %s", rec.Body)
 	}
+	// a worker dials its tunnel under whatever name reaches this server; the
+	// tunnel refuses browsers (Origin) and needs the token itself
+	for _, host := range []string{"host.docker.internal:8675", "192.168.1.5:8675"} {
+		if rec := serve(h, "GET", "/v1/fleet/tunnel", host); rec.Code != http.StatusTeapot {
+			t.Errorf("tunnel under Host %q = %d", host, rec.Code)
+		}
+	}
 
 	t.Setenv("AITK_ALLOWED_HOSTS", "box.lan, Other.Example:9000")
 	for _, c := range []struct {

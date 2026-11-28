@@ -351,11 +351,11 @@ func TestNodeHealthVersion(t *testing.T) {
 		want  string
 	}{
 		{"", false, "test"}, // no launch ref: inner's own version
-		{"ghcr.io/geocine/aitoolkit-go:f53a407", false, "f53a407"},
-		{"ghcr.io/geocine/aitoolkit-go:c126c12", false, "c126c12"},
-		{"ghcr.io/geocine/aitoolkit-go:latest", false, registrymock.Revision},
-		{"ghcr.io/geocine/aitoolkit-go@sha256:" + strings.Repeat("ab", 32), false, registrymock.Revision},
-		{"ghcr.io/geocine/aitoolkit-go:f53a407", true, StaleVersion},
+		{"ghcr.io/geocine/aitoolkit-worker:f53a407", false, "f53a407"},
+		{"ghcr.io/geocine/aitoolkit-worker:c126c12", false, "c126c12"},
+		{"ghcr.io/geocine/aitoolkit-worker:latest", false, registrymock.Revision},
+		{"ghcr.io/geocine/aitoolkit-worker@sha256:" + strings.Repeat("ab", 32), false, registrymock.Revision},
+		{"ghcr.io/geocine/aitoolkit-worker:f53a407", true, StaleVersion},
 		{"", true, StaleVersion},
 	} {
 		s := spec(map[string]string{"AI_TOOLKIT_AUTH": nodeToken})

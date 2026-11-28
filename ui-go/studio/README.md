@@ -66,7 +66,7 @@ From a hosted build the studio calls the server cross-origin with
 `Authorization: Bearer <token>`. Allow the studio's origin on the server:
 
 ```bash
-docker run ... -e AITK_CORS_ORIGINS=https://studio.example.com ghcr.io/geocine/aitoolkit-go
+docker run ... -e AITK_CORS_ORIGINS=https://studio.example.com ghcr.io/geocine/aitoolkit-worker
 # several: -e AITK_CORS_ORIGINS=https://studio.example.com,http://localhost:5175
 ```
 

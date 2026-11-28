@@ -69,7 +69,7 @@ func TestGuideFields(t *testing.T) {
 			t.Errorf("runpod %s = %q, want %q", label, got, want)
 		}
 	}
-	if rp.EnvBlock != "AI_TOOLKIT_AUTH="+TokenPlaceholder+"\nAITK_CORS_ORIGINS="+OriginPlaceholder || rp.DockerOptions != "" {
+	if rp.EnvBlock != "AI_TOOLKIT_AUTH="+TokenPlaceholder+"\nAITK_MODE=standalone\nAITK_CORS_ORIGINS="+OriginPlaceholder || rp.DockerOptions != "" {
 		t.Errorf("runpod env block %q, docker options %q", rp.EnvBlock, rp.DockerOptions)
 	}
 	if i := slices.IndexFunc(rp.Env, func(e provision.GuideEnv) bool { return e.Name == "HF_TOKEN" }); i < 0 || rp.Env[i].Value != "{{ RUNPOD_SECRET_hf_token }}" || !rp.Env[i].Secret {
@@ -80,7 +80,7 @@ func TestGuideFields(t *testing.T) {
 	}
 
 	va := mustFor(t, provision.Vast, Options{})
-	if va.DockerOptions != "-p 8675:8675 -e OPEN_BUTTON_PORT=8675 -e AITK_CORS_ORIGINS="+OriginPlaceholder || va.EnvBlock != "" {
+	if va.DockerOptions != "-p 8675:8675 -e OPEN_BUTTON_PORT=8675 -e AITK_MODE=standalone -e AITK_CORS_ORIGINS="+OriginPlaceholder || va.EnvBlock != "" {
 		t.Errorf("vast docker options %q", va.DockerOptions)
 	}
 	for label, want := range map[string]string{
@@ -102,7 +102,7 @@ func TestGuideFields(t *testing.T) {
 
 	qp := mustFor(t, provision.QuickPod, Options{})
 	// both are required: the port, and a fallback token so the server never boots open
-	if qp.DockerOptions != "-p 8675:8675 -e AI_TOOLKIT_AUTH="+TokenPlaceholder+" -e AITK_CORS_ORIGINS="+OriginPlaceholder {
+	if qp.DockerOptions != "-p 8675:8675 -e AI_TOOLKIT_AUTH="+TokenPlaceholder+" -e AITK_MODE=standalone -e AITK_CORS_ORIGINS="+OriginPlaceholder {
 		t.Errorf("quickpod docker options %q", qp.DockerOptions)
 	}
 	for label, want := range map[string]string{
@@ -193,7 +193,7 @@ func TestGuideMatchesAdapters(t *testing.T) {
 
 func TestGuideOptions(t *testing.T) {
 	tok := provision.NewToken()
-	o := Options{Image: "ghcr.io/geocine/aitoolkit-go:abc1234", DiskGB: 150, CORSOrigin: "https://studio.example.com,http://localhost:5174", Token: tok}
+	o := Options{Image: "ghcr.io/geocine/aitoolkit-worker:abc1234", DiskGB: 150, CORSOrigin: "https://studio.example.com,http://localhost:5174", Token: tok}
 	for _, k := range kinds {
 		g := mustFor(t, k, o)
 		b, _ := json.Marshal(g)

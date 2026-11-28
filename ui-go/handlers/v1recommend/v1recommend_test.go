@@ -205,7 +205,7 @@ func TestProviderRecommend(t *testing.T) {
 		offer(provision.Vast, "4090", "RTX 4090", 23.99, 0.40),
 		offer(provision.Vast, "5090", "RTX 5090", 31.84, 0.90),
 	}
-	const image = "ghcr.io/geocine/aitoolkit-go:cu130"
+	const image = "ghcr.io/geocine/aitoolkit-worker:cu130"
 	r := get(t, h, "/v1/providers/vast/recommend?model=flux&image="+image+"&disk_gb=150&max_price=2")
 	noNulls(t, r.body)
 	rec := r.rec(t)

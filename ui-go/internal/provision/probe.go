@@ -28,8 +28,8 @@ type prober struct {
 
 func (p *prober) client(simulated bool) *http.Client {
 	p.once.Do(func() {
-		p.strict = netguard.NewClient(netguard.Options{})
-		p.loopback = netguard.NewClient(netguard.Options{AllowLoopback: true})
+		p.strict = netguard.NewClient(netguard.Options{Tunnel: true})
+		p.loopback = netguard.NewClient(netguard.Options{AllowLoopback: true, Tunnel: true})
 	})
 	if simulated {
 		return p.loopback
@@ -73,8 +73,11 @@ func (p *prober) Probe(ctx context.Context, endpoints []Endpoint, token string, 
 
 // probeOne runs the three checks against one endpoint.
 func probeOne(ctx context.Context, c *http.Client, ep Endpoint, token string, simulated bool) ProbeResult {
-	if err := CheckEndpoint("", ep.URL, simulated); err != nil {
-		return ProbeResult{Err: err.Error()}
+	// a tunnel endpoint is only ever added by the service (ViaTunnel)
+	if ep.Via != ViaTunnel || !TunnelBase(ep.URL) {
+		if err := CheckEndpoint("", ep.URL, simulated); err != nil {
+			return ProbeResult{Err: err.Error()}
+		}
 	}
 	status, body, err := probeGet(ctx, c, ep.URL+"/v1/health", "")
 	if err != nil {

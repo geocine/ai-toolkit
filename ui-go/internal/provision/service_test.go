@@ -257,6 +257,11 @@ type testEnv struct {
 	cuda   *fakeCUDA
 	hf     string
 	sinks  notify.Config
+	// legacy: launched machines behave like ones an older studio API
+	// launched (or providers.adopt tracked): reached over their provider
+	// endpoints, with no tunnel. Otherwise every launched machine is a
+	// worker whose tunnel is up (noTunnel: down).
+	legacy, noTunnel bool
 }
 
 // fakeCUDA answers the machine's GET /v1/system/cuda (ok unless set).
@@ -288,7 +293,7 @@ var t0 = time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
 
 // pinnedImage is what a launch of DefaultImage sends: the :latest the
 // registry mock publishes, pinned to its build tag.
-const pinnedImage = "ghcr.io/geocine/aitoolkit-go:" + registrymock.Revision
+const pinnedImage = "ghcr.io/geocine/aitoolkit-worker:" + registrymock.Revision
 
 // newEnv opens a fresh fork database and installs stub adapters for all
 // three kinds, a fake prober and a fake clock.
@@ -318,7 +323,11 @@ func newEnv(t *testing.T) *testEnv {
 	hfToken = func(context.Context) (string, error) { return e.hf, nil }
 	notifyConfig = func() notify.Config { return e.sinks }
 	cudaCheck = e.cuda.check
-	t.Cleanup(func() { DefaultProber, hfToken, notifyConfig, cudaCheck = oldProber, oldHF, oldNotify, oldCUDA })
+	oldTunnelUp := tunnelUp
+	tunnelUp = func(string) bool { return !e.legacy && !e.noTunnel }
+	t.Cleanup(func() {
+		DefaultProber, hfToken, notifyConfig, cudaCheck, tunnelUp = oldProber, oldHF, oldNotify, oldCUDA, oldTunnelUp
+	})
 	e.s = &Service{Now: e.clock.Now}
 	t.Cleanup(e.s.WaitChecks) // before the database closes
 	return e
@@ -355,6 +364,16 @@ func (e *testEnv) launch(k Kind, mod func(*LaunchRequest)) Machine {
 	}
 	if !created {
 		e.t.Fatal("not created")
+	}
+	if e.legacy {
+		r := e.row(m.ID)
+		r.Spec.EnvKeys = slices.DeleteFunc(slices.Clone(r.Spec.EnvKeys), func(k string) bool { return k == "AITK_STUDIO_API_URL" })
+		if err := updateRow(e.ctx, r); err != nil {
+			e.t.Fatal(err)
+		}
+		if isWorker(e.row(m.ID)) {
+			e.t.Fatal("legacy: the row is still a worker")
+		}
 	}
 	return m
 }
@@ -672,7 +691,7 @@ func TestLaunchCreates(t *testing.T) {
 		t.Fatalf("spec %+v", spec)
 	}
 	r := e.row(m.ID)
-	if !slices.Equal(r.Spec.EnvKeys, []string{"AITK_CORS_ORIGINS", "AITK_MACHINE_ID", "AITK_STUDIO_URL", "AI_TOOLKIT_AUTH"}) {
+	if !slices.Equal(r.Spec.EnvKeys, []string{"AITK_CORS_ORIGINS", "AITK_MACHINE_ID", "AITK_MODE", "AITK_STUDIO_API_URL", "AITK_STUDIO_URL", "AI_TOOLKIT_AUTH"}) {
 		t.Fatalf("env keys %v", r.Spec.EnvKeys)
 	}
 	raw, _ := json.Marshal(r.Spec)
@@ -1050,10 +1069,10 @@ func TestStoreRoundTrip(t *testing.T) {
 				StoppedPricePerHour: &stopped, Location: "SE", Reliability: &rel, Availability: "available", MaxDiskGB: &maxDisk},
 			GPUCount: 1, Cloud: "", DiskGB: 120, Image: DefaultImage, TemplateID: "t", WhenDone: WhenDestroy, SelfDestroyKey: true,
 			CopiedRemote: "r2", EnvKeys: []string{"A", "B"}, Warnings: []string{"w1"},
-			ImageCheck: json.RawMessage(`{"ref":"ghcr.io/geocine/aitoolkit-go:latest","ok":true}`), ImageWarnings: []string{"iw"}, PullS: 212.5,
+			ImageCheck: json.RawMessage(`{"ref":"ghcr.io/geocine/aitoolkit-worker:latest","ok":true}`), ImageWarnings: []string{"iw"}, PullS: 212.5,
 		},
 		BaseURL: "http://203.0.113.10:41000", Endpoints: []Endpoint{{URL: "http://203.0.113.10:41000", Via: "direct"}},
-		ImageLaunchRef: "ghcr.io/geocine/aitoolkit-go:abc1234", ImageDigest: "sha256:" + strings.Repeat("a", 64),
+		ImageLaunchRef: "ghcr.io/geocine/aitoolkit-worker:abc1234", ImageDigest: "sha256:" + strings.Repeat("a", 64),
 		Price: &price, StoppedPrice: &stopped, RequestID: &rid, Simulated: true,
 		CreatedAt: 1000, UpdatedAt: 2000, RunningAt: ptr(int64(3000)), ReadyAt: ptr(int64(4000)), LastOKAt: ptr(int64(5000)),
 	}
@@ -1241,6 +1260,7 @@ func (g *gatedCloud) Offers(ctx context.Context, key string, q OfferQuery) ([]Of
 
 func TestServiceReadyFlow(t *testing.T) {
 	e := newEnv(t)
+	e.legacy = true // the provider-endpoint path
 	c := e.clouds[RunPod]
 	m := e.launch(RunPod, nil)
 	c.set("pod1", func(in *Instance) { in.Status = StatusStarting })
@@ -1297,6 +1317,7 @@ func TestServiceRelayTargetNotReady(t *testing.T) {
 // a RunPod record carrying a direct IP never becomes ready through it.
 func TestServiceProbesAllowedEndpoints(t *testing.T) {
 	e := newEnv(t)
+	e.legacy = true // the provider-endpoint path
 	c := e.clouds[RunPod]
 	m := e.launch(RunPod, nil)
 	direct := Endpoint{URL: "http://203.0.113.10:41000", Via: "direct"}
@@ -1339,6 +1360,7 @@ func TestServiceNotReadyTimeout(t *testing.T) {
 
 func TestServiceNoPortGrace(t *testing.T) {
 	e := newEnv(t)
+	e.legacy = true // the provider-endpoint path
 	c := e.clouds[Vast]
 	m := e.launch(Vast, nil)
 	c.set("pod1", func(in *Instance) { in.Status, in.PortMissing = StatusRunning, true })
@@ -1399,6 +1421,7 @@ func TestServiceOpenServer(t *testing.T) {
 
 func TestServiceUnreachableAfterReady(t *testing.T) {
 	e := newEnv(t)
+	e.legacy = true // the provider-endpoint path
 	m := e.launch(RunPod, nil)
 	e.clouds[RunPod].running("pod1")
 	if m = e.refresh(m.ID); m.Status != StatusReady {

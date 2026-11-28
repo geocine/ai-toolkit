@@ -147,7 +147,7 @@ func New(o mockkit.Options) *Mock {
 	m.templates = []map[string]any{
 		{
 			"id": 334501, "hash_id": "5915f1dc1ce881defb572015eb9d8178", "creator_id": userID,
-			"name": "aitk headless", "image": "ghcr.io/geocine/aitoolkit-go", "tag": "latest",
+			"name": "aitk headless", "image": "ghcr.io/geocine/aitoolkit-worker", "tag": "latest",
 			"env":     "-p 8675:8675 -e OPEN_BUTTON_PORT=8675 -e AI_TOOLKIT_AUTH=template-token-0000",
 			"runtype": "args", "args_str": "/start.sh", "private": true, "recommended_disk_space": 100,
 		},

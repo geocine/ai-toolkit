@@ -6,8 +6,10 @@ import (
 	"net/netip"
 	"net/url"
 	"regexp"
+	"strings"
 
 	"github.com/geocine/aitoolkit/internal/netguard"
+	"github.com/geocine/aitoolkit/internal/tunnel"
 )
 
 // Proxy addresses the providers document for port 8675 (spec: runpod.md §7,
@@ -77,6 +79,41 @@ func CheckEndpoint(kind Kind, raw string, simulated bool) error {
 		return checkDirect(raw, u)
 	}
 	return fmt.Errorf("%w: unknown provider %q", ErrEndpoint, kind)
+}
+
+// ViaTunnel marks the endpoint the service adds for a machine whose tunnel
+// is up (tunnel.URL). It never comes from a provider: CheckEndpoint refuses a
+// tunnel host for every provider, so FilterEndpoints drops one a provider
+// answer carries.
+const ViaTunnel = "tunnel"
+
+// tunnelEndpoint is machineID's endpoint through its tunnel.
+func tunnelEndpoint(machineID string) Endpoint {
+	return Endpoint{URL: tunnel.URL(machineID), Secure: true, Via: ViaTunnel}
+}
+
+// CheckBase is CheckEndpoint for a machine's base URL, which may also be
+// that machine's own tunnel URL (never another machine's).
+func CheckBase(kind Kind, base, machineID string, simulated bool) error {
+	if tunnel.IsURL(base, machineID) {
+		return nil
+	}
+	return CheckEndpoint(kind, base, simulated)
+}
+
+// SecureBase: the machine's traffic is encrypted end to end (https, or its
+// tunnel, which is TLS to this studio API).
+func SecureBase(base string) bool {
+	if u, err := url.Parse(base); err == nil && netguard.IsTunnelHost(u.Hostname()) {
+		return true
+	}
+	return strings.HasPrefix(base, "https://")
+}
+
+// TunnelBase: the base URL is a tunnel URL (the browser must use the relay).
+func TunnelBase(base string) bool {
+	u, err := url.Parse(base)
+	return err == nil && netguard.IsTunnelHost(u.Hostname())
 }
 
 // FilterEndpoints keeps the endpoints that pass CheckEndpoint for kind, in

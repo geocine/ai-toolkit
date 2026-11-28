@@ -8,7 +8,7 @@ import type { ProviderKind } from './provisionTypes';
 import type { CheckAction, GpuInfo, HostFacts, HostFit, ImageCheck, ImageCheckItem, ImageRecommendation, ImageTag, ModelInfo, ModelRef } from './serverImageTypes';
 
 /** The image GPU servers run unless another is picked (imagecheck.DefaultRepo). */
-export const DEFAULT_REPO = 'ghcr.io/geocine/aitoolkit-go';
+export const DEFAULT_REPO = 'ghcr.io/geocine/aitoolkit-worker';
 export const DEFAULT_IMAGE = `${DEFAULT_REPO}:latest`;
 
 export type OfferRef = { provider: ProviderKind; offer_id: string };

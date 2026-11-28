@@ -87,7 +87,8 @@ export function MachineRow({
   // the server's forget rule: refused unless ended, or refused before anything was rented
   // (a never_listed create may have been made, so it needs force)
   const live = !m.ended_at && !(m.provider_id === '' && m.status === 'failed' && m.problem !== 'never_listed');
-  const plainHttp = !m.simulated && !!m.base_url && m.base_url.startsWith('http:');
+  // a tunnel's base_url is http://<hex id>.tunnel.aitk, but the link is TLS to the owner
+  const plainHttp = !m.simulated && !m.tunnel && !!m.base_url && m.base_url.startsWith('http:');
   const terminateBtn = can('terminate') && (
     <button className="btn btn-sm btn-danger" onClick={() => setAsk('terminate')} disabled={busy}>
       {m.status === 'terminating' ? 'Terminate again' : 'Terminate'}
@@ -171,7 +172,8 @@ export function MachineRow({
           {m.status === 'failed' && m.detail && !m.problem && <span className="muted">{m.detail}</span>}
         </p>
         {meta(t) && <p className="machine-meta">{meta(t)}</p>}
-        {m.base_url && (
+        {m.tunnel && <p className="quiet-note machine-via">Encrypted tunnel to {s.name}</p>}
+        {m.base_url && !m.tunnel && (
           <p className="server-base">
             <span className="mono">{m.base_url}</span> <span className="quiet-note">via {s.name}</span>
           </p>

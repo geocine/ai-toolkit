@@ -118,7 +118,7 @@ func TestFaultNames(t *testing.T) {
 // launch ref travels with it (sim/node.go sees nothing else).
 func TestNodeSpecWithFaults(t *testing.T) {
 	sim := Options{SimSecret: "S"}
-	base := NodeSpec{Kind: "vast", InstanceID: "1", GPU: "RTX 4090", GPUCount: 1, VRAMGB: 24, Image: "ghcr.io/geocine/aitoolkit-go:f53a407"}
+	base := NodeSpec{Kind: "vast", InstanceID: "1", GPU: "RTX 4090", GPUCount: 1, VRAMGB: 24, Image: "ghcr.io/geocine/aitoolkit-worker:f53a407"}
 	for _, c := range []struct {
 		key  string
 		want NodeSpec

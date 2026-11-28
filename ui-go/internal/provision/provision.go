@@ -47,7 +47,7 @@ func ParseKind(s string) (Kind, bool) {
 
 // Defaults shared by the service, the guides and the studio.
 const (
-	DefaultImage      = "ghcr.io/geocine/aitoolkit-go:latest"
+	DefaultImage      = "ghcr.io/geocine/aitoolkit-worker:latest"
 	DefaultDiskGB     = 100
 	Port              = 8675
 	DefaultMaxRunning = 2
@@ -207,7 +207,7 @@ type Template struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
 	Image         string `json:"image"`
-	Ours          bool   `json:"ours"`           // image contains "aitoolkit-go"
+	Ours          bool   `json:"ours"`           // image contains "aitoolkit-worker"
 	PublishesPort bool   `json:"publishes_port"` // docker options / ports map 8675
 	HasToken      bool   `json:"has_token"`      // sets AI_TOOLKIT_AUTH (the value is never returned)
 }
@@ -538,6 +538,10 @@ type ProviderTest struct {
 }
 
 type LaunchRequest struct {
+	// SelfURL is this server's own origin as its clients reach it
+	// (links.Origin), set by the handler: where the worker dials when
+	// AITK_PUBLIC_URL is unset. Never read from the body.
+	SelfURL         string   `json:"-"`
 	Provider        Kind     `json:"provider"`
 	OfferID         string   `json:"offer_id"`
 	MaxPricePerHour float64  `json:"max_price_per_hour"` // required, > 0
@@ -584,6 +588,7 @@ type Machine struct {
 	DiskGB              int        `json:"disk_gb"`
 	BaseURL             *string    `json:"base_url"`
 	Secure              bool       `json:"secure"`
+	Tunnel              bool       `json:"tunnel"`     // reached through its tunnel: clients use relay_path
 	RelayPath           string     `json:"relay_path"` // "/v1/machines/<id>/relay"
 	PricePerHour        *float64   `json:"price_per_hour"`
 	StoppedPricePerHour *float64   `json:"stopped_price_per_hour"`
@@ -610,6 +615,7 @@ type MachineLink struct {
 	BaseURL   string `json:"base_url"`
 	Token     string `json:"token"`
 	Secure    bool   `json:"secure"`
+	Tunnel    bool   `json:"tunnel"`
 	RelayPath string `json:"relay_path"`
 }
 

@@ -33,7 +33,7 @@ git -C "$repo" init -q -b main
 git -C "$repo" add -A
 git -C "$repo" commit -q -m upstream
 SHA=$(git -C "$repo" rev-parse --short HEAD)
-IMAGE=ghcr.io/geocine/aitoolkit-go
+IMAGE=ghcr.io/geocine/aitoolkit-worker
 
 failed=0
 name=
@@ -170,7 +170,7 @@ log_has "^push \| $IMAGE:$SHA$"
 
 # Verify failures name the package settings page and how to re-check.
 run_case "verify denied" 1 SHIM_BASE_EXISTS=1 SHIM_IMAGECHECK_EXIT=2 --push
-out_has "https://github.com/users/geocine/packages/container/aitoolkit-go/settings"
+out_has "https://github.com/users/geocine/packages/container/aitoolkit-worker/settings"
 out_has "re-run: ui-go/scripts/build_and_push.sh --verify"
 log_lacks '^curl'
 
@@ -181,9 +181,9 @@ out_has "could not run the image check"
 # or 137 when it had to be killed) and the anonymous GHCR token stands in.
 run_case "old server, private" 1 SHIM_BASE_EXISTS=1 SHIM_HAS_IMAGECHECK=0 SHIM_CURL_CODE=403 --push
 log_has 'image-check \| --require-go'
-log_has '^curl \| .*--connect-timeout 10 --max-time 30 .*https://ghcr.io/token\?scope=repository:geocine/aitoolkit-go:pull'
+log_has '^curl \| .*--connect-timeout 10 --max-time 30 .*https://ghcr.io/token\?scope=repository:geocine/aitoolkit-worker:pull'
 out_has "token HTTP 403"
-out_has "https://github.com/users/geocine/packages/container/aitoolkit-go/settings"
+out_has "https://github.com/users/geocine/packages/container/aitoolkit-worker/settings"
 out_has "re-run: ui-go/scripts/build_and_push.sh --verify"
 
 run_case "old server, public" 0 SHIM_BASE_EXISTS=1 SHIM_HAS_IMAGECHECK=0 SHIM_CURL_CODE=200 --push
@@ -220,7 +220,7 @@ out_has "could not be pulled"
 log_lacks 'image-check'
 
 run_case "verify only, still private" 1 SHIM_IMAGECHECK_EXIT=2 --verify
-out_has "https://github.com/users/geocine/packages/container/aitoolkit-go/settings"
+out_has "https://github.com/users/geocine/packages/container/aitoolkit-worker/settings"
 
 run_case "push and verify" 1 --push --verify
 out_has "not both"

@@ -10,7 +10,7 @@
 # token that has the write:packages scope (docs/deploy.md, "Publishing the
 # first time").
 #
-# Env: IMAGE (default ghcr.io/geocine/aitoolkit-go), UPSTREAM_REF (default main,
+# Env: IMAGE (default ghcr.io/geocine/aitoolkit-worker), UPSTREAM_REF (default main,
 # the branch that mirrors upstream), REBUILD_BASE=1 to rebuild the base image,
 # BASE_INSTALLER=uv to build the base with uv instead of pip (opt-in; the
 # Dockerfile is derived from upstream's by ui-go/scripts/uv_dockerfile.sh and
@@ -29,7 +29,7 @@ export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
 
 cd "$(git rev-parse --show-toplevel)"
 
-IMAGE=${IMAGE:-ghcr.io/geocine/aitoolkit-go}
+IMAGE=${IMAGE:-ghcr.io/geocine/aitoolkit-worker}
 UPSTREAM_REF=${UPSTREAM_REF:-main}
 PLATFORM=linux/amd64
 PUSH=false

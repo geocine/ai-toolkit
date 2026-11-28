@@ -45,7 +45,7 @@ var (
 // guardOptions is the netguard setup for a machine; a test swaps it (and
 // clears transports) to resolve a proxy hostname through a fake resolver.
 var guardOptions = func(simulated bool) netguard.Options {
-	return netguard.Options{AllowLoopback: simulated, HeaderTimeout: headerTimeout}
+	return netguard.Options{AllowLoopback: simulated, HeaderTimeout: headerTimeout, Tunnel: true}
 }
 
 func transport(simulated bool) http.RoundTripper {
@@ -89,7 +89,7 @@ func Serve(w http.ResponseWriter, r *http.Request, t provision.RelayTarget, inne
 		return
 	}
 	base := strings.TrimRight(t.BaseURL, "/")
-	if err := provision.CheckEndpoint("", base, t.Simulated); err != nil {
+	if err := provision.CheckBase("", base, t.MachineID, t.Simulated); err != nil {
 		log.Printf("relay %s: %v", t.MachineID, err)
 		v1api.Fail(w, v1api.CodeRemoteFailed, "the machine's address is not one the relay may dial")
 		return

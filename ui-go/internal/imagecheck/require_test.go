@@ -148,7 +148,7 @@ func TestClassifyFailure(t *testing.T) {
 		text, code, problem string
 	}{
 		{"Error response from daemon: manifest unknown", "image_not_found", ProblemImagePull},
-		{"manifest for ghcr.io/geocine/aitoolkit-go:nope not found", "image_not_found", ProblemImagePull},
+		{"manifest for ghcr.io/geocine/aitoolkit-worker:nope not found", "image_not_found", ProblemImagePull},
 		{"pull access denied for x, repository does not exist or may require 'docker login'", "image_denied", ProblemImagePull},
 		{"failed to authorize: 401 Unauthorized", "image_denied", ProblemImagePull},
 		{"Authentication required", "image_denied", ProblemImagePull},

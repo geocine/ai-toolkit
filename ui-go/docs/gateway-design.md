@@ -7,9 +7,9 @@ it says "today".
 
 | Role | What it is | Trusted with |
 |---|---|---|
-| Orchestrator | The studio API on your own server (`ghcr.io/geocine/aitoolkit-studio-api`), persisted on a volume. | Everything: provider keys, configs, datasets, every machine credential. |
+| Orchestrator | The studio API on your own server (`ghcr.io/geocine/aitoolkit-studio`), persisted on a volume. | Everything: provider keys, configs, datasets, every machine credential. |
 | Thin clients | The studio in a browser, and agents over MCP. Both talk only to the orchestrator. | Your orchestrator token. Never a machine token or a provider key. |
-| Workers | Rented GPU servers (`ghcr.io/geocine/aitoolkit-go`). Cattle: created, used and terminated by the orchestrator. | One job's config and dataset while it trains. |
+| Workers | Rented GPU servers (`ghcr.io/geocine/aitoolkit-worker`). Cattle: created, used and terminated by the orchestrator. | One job's config and dataset while it trains. |
 
 Today the orchestrator already creates, probes, relays to, stops and
 terminates workers, but it reaches them through their public URL: the
@@ -38,37 +38,65 @@ everything travels through it. The orchestrator never dials the worker.
   verifies the certificate with the system roots, and can pin it
   (`AITK_ORCHESTRATOR_PIN`, the SPKI sha256) for a self-signed setup.
 - **Identity.** The orchestrator already makes a 256-bit token per machine
-  (`provision.NewToken`). At create time it passes `AITK_ORCHESTRATOR_URL` and
+  (`provision.NewToken`). At create time it passes `AITK_STUDIO_API_URL` and
   that token in the worker's env. The provider can read the env, but the
   provider is the host and can read everything anyway.
-- **Handshake.** The token never crosses the wire. The orchestrator sends a
-  random challenge; the worker answers `HMAC-SHA256(token, "aitk-tunnel-v1" |
-  machine id | challenge | unix time)`. The orchestrator checks it in constant
-  time, refuses a clock skew over 60 s, and refuses a reused challenge. This
-  is celld's peer-tunnel pattern (fleet HMAC, clock limit, replay protection),
-  but with a key per machine instead of one per fleet, and inside TLS, which
-  celld leaves to the network.
+- **Handshake (built).** The token never crosses the wire, and each side
+  proves it to the other.
+  - The orchestrator sends a fresh random challenge. The worker answers with
+    `HMAC-SHA256(token, "aitk-tunnel-v1|worker|" + id + "|" + challenge +
+    "|" + nonce)` and its own fresh nonce.
+  - The orchestrator checks that in constant time, then answers the nonce
+    with the `studio` role. The worker refuses an orchestrator that can't.
+  - Because both challenges are fresh, an answer can't be replayed, so no
+    clock limit or replay cache is needed.
+  - This takes celld's idea of an HMAC handshake on tunnel setup, with a key
+    per machine instead of one per fleet, inside TLS (which celld leaves to
+    the network).
 - **Streams.** The WebSocket carries [yamux](https://github.com/hashicorp/yamux)
   (Hashicorp's multiplexer, used by Consul and Nomad): many independent
   streams with their own flow control on one connection. Each stream is a
   plain HTTP/1.1 request served by the worker's existing mux, so every `/v1`
   route, SSE stream and download works unchanged. A shell is one stream of raw
   bytes.
-- **Tunnel-only by default.** The worker image listens on `127.0.0.1` only,
-  so nothing on its public port answers. Its own `/mcp` and studio are off.
-  The orchestrator's probe, relay, shell and MCP forwarding all use the
-  tunnel. Every worker the orchestrator creates runs this way.
-  - `AITK_PUBLIC_LISTEN=1` opens `0.0.0.0:8675` as today, for a server you
-    start by hand (a RunPod template, a plain `docker run`). It needs
-    `AI_TOOLKIT_AUTH`. The orchestrator never sets it.
-  - This is a breaking change for those hand-started setups:
-    `docs/deploy.md` and `docs/providers.md` gain the variable.
-  - A worker with neither `AITK_ORCHESTRATOR_URL` nor `AITK_PUBLIC_LISTEN`
-    refuses to start, saying which to set.
+- **One mode variable.** `AITK_MODE` decides what a server is. Nothing else
+  turns UIs, MCP or the public port on or off.
+
+  | `AITK_MODE` | Runs | Agents talk to | Listens on |
+  |---|---|---|---|
+  | `worker` (default in the GPU image) | Trainer only. No console, no studio, no `/mcp` of its own. It dials `AITK_STUDIO_API_URL` and is managed from there. | The remote studio's `/mcp` | `127.0.0.1` only |
+  | `standalone` | An ordinary AI Toolkit server: console at `/`, `/v1`, `/mcp`. No studio. | This server's `/mcp` | `0.0.0.0` (set `AI_TOOLKIT_AUTH`: without it the server is open, as upstream) |
+  | `studio` | Studio and trainer on one node. The console does not load. It can also manage remote workers. | The studio's `/mcp` | `0.0.0.0`, with GitHub sign-in or a token |
+  | `studio-api` (default in the slim image) | Studio without a trainer: the orchestrator at `lora.aivan.io` | The studio's `/mcp` | As `studio` |
+
+  - Every worker the orchestrator creates is `worker`. Its probe, relay,
+    shell and MCP forwarding all go through the tunnel.
+  - `studio-api` is only for the slim image, which sets it itself. The GPU
+    image's binary refuses it. `AITK_STUDIO_API=1` (the older flag) stays as an
+    alias in the slim image and source builds.
+  - A `worker` without `AITK_STUDIO_API_URL` refuses to start, saying: set
+    it, or use `AITK_MODE=standalone`.
+  - This is a breaking change for hand-started GPU servers (a RunPod
+    template, a plain `docker run`): they now need `AITK_MODE=standalone`
+    to keep today's behaviour. `docs/deploy.md` and `docs/providers.md` say
+    so.
 - **Reconnects.** The worker reconnects with jittered backoff (1 s up to
   30 s). Pings every 20 s keep provider NAT and proxy idle timers open. The
   orchestrator marks a machine `unreachable` after 5 minutes without a tunnel,
   as it does today without a probe answer.
+- **Where workers dial.** The orchestrator passes its own `AITK_PUBLIC_URL`
+  as `AITK_STUDIO_API_URL`. A launch on a real provider is refused before
+  anything is rented when that URL is missing or loopback, because the worker
+  could never connect. Simulated launches are exempt.
+- **Testing without a public server.**
+  - **Local worker.** A worker container on the same machine dials
+    `http://host.docker.internal:8675`. This covers the tunnel, the shell and
+    MCP forwarding with no rented GPU; only training needs one.
+  - **Rented GPU, local orchestrator.** Expose the local studio API with a
+    throwaway tunnel (`cloudflared tunnel --url http://127.0.0.1:8675`, which
+    gives an `https://….trycloudflare.com` URL with no account or DNS). Set
+    that URL as `AITK_PUBLIC_URL`.
+  - **Production.** `https://lora.aivan.io`.
 - **Old workers.** Machines from images without tunnel support keep today's
   path: the probe and relay dial their public URL. The machine record shows
   which path it uses.
@@ -248,8 +276,7 @@ hibernating WebSockets, but:
 - GPU work is out of scope, and workers must never be celld nodes, because
   the bucket credentials give full control of the fleet.
 
-The parts worth taking are its patterns: an HMAC handshake with a clock limit
-and replay protection, the LTX format for continuous SQLite backup, and steps
+The parts worth taking are its patterns: an HMAC handshake on tunnel setup, the LTX format for continuous SQLite backup, and steps
 that survive a restart.
 
 ## Build order

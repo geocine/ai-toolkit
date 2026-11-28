@@ -142,8 +142,15 @@ func Auth(next http.Handler) http.Handler {
 	})
 }
 
+// tunnelPath is internal/tunnel.Path: a worker's tunnel carries no bearer
+// token; its handshake is the credential.
+const tunnelPath = "/v1/fleet/tunnel"
+
 func needsToken(r *http.Request) bool {
 	p := r.URL.Path
+	if p == tunnelPath && r.Method == http.MethodGet {
+		return false
+	}
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
 		if publicRoute(p) || publicRelay(r) {
 			return false

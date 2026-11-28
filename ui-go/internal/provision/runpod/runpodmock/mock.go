@@ -206,7 +206,7 @@ func New(o mockkit.Options) *Mock {
 		credit: o.Credit,
 		calls:  map[string]int{},
 		templates: []Template{{
-			ID: "tpl_aitk0001", Name: "aitk-go headless", Image: "ghcr.io/geocine/aitoolkit-go:latest", Disk: 60,
+			ID: "tpl_aitk0001", Name: "aitk-go headless", Image: "ghcr.io/geocine/aitoolkit-worker:latest", Disk: 60,
 			Mounts: map[string]any{"persistent": map[string]any{"size": 50, "path": "/workspace"}},
 			Ports:  []string{"8675/http", "22/tcp"},
 			Env:    map[string]string{"AI_TOOLKIT_AUTH": "{{ RUNPOD_SECRET_aitk_token }}", "AITK_CORS_ORIGINS": "*"},

@@ -20,7 +20,7 @@ FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=go-build /out/aitk-server /aitk-server
 COPY --from=go-build --chown=65532:65532 /out/data /data
 COPY --from=studio-build /studio/dist /studio
-ENV AITK_STUDIO_API=1 AITK_STUDIO_API_DIR=/data AITK_STUDIO_DIR=/studio
+ENV AITK_MODE=studio-api AITK_STUDIO_API_DIR=/data AITK_STUDIO_DIR=/studio
 VOLUME /data
 EXPOSE 8675
 ENTRYPOINT ["/aitk-server", "--host", "0.0.0.0", "--port", "8675"]

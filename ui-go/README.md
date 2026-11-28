@@ -77,6 +77,10 @@ cd ui-go
 go run . --port 8675                   # API + frontend on :8675, queue worker included
 ```
 
+That is `AITK_MODE=standalone`, the binary's default. `AITK_MODE=studio` serves
+the studio (`studio/dist`) instead of the console, and `AITK_MODE=worker` is a
+GPU server managed by a studio API through its tunnel (docs/deploy.md, Modes).
+
 No GPU or checkout? `go run . --studio-api` runs the studio API, which only
 creates and tracks GPU servers, with its own databases and the studio at
 `/studio/`: see [docs/studio-api.md](docs/studio-api.md).
@@ -108,11 +112,11 @@ ui-go/scripts/build_and_push.sh --verify   # re-check the pushed <sha> (after ma
 python ui-go/scripts/failover_test.py      # local failover test (docker/compose.local.yml, GPU)
 ```
 
-The image is the public package `ghcr.io/geocine/aitoolkit-go` (linux/amd64,
+The image is the public package `ghcr.io/geocine/aitoolkit-worker` (linux/amd64,
 CUDA 13.0, driver 580 or newer, RTX 30-series or A100 and newer). Its tags,
 labels and host requirements, and how to publish it the first time, are in
 [docs/deploy.md](docs/deploy.md#the-image). `IMAGE` (default
-`ghcr.io/geocine/aitoolkit-go`), `UPSTREAM_REF` (default `main`),
+`ghcr.io/geocine/aitoolkit-worker`), `UPSTREAM_REF` (default `main`),
 `REBUILD_BASE=1`, `BASE_INSTALLER=uv` and `ALLOW_RETAG=1` adjust the build.
 
 ## Headless API

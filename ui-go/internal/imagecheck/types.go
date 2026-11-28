@@ -9,7 +9,7 @@ import "time"
 
 // DefaultRepo is the server image studio-managed GPU servers run. It is
 // published publicly, so it is read with anonymous pulls.
-const DefaultRepo = "ghcr.io/geocine/aitoolkit-go"
+const DefaultRepo = "ghcr.io/geocine/aitoolkit-worker"
 
 // RateLimit is what a registry said about its pull limit (Docker Hub only).
 type RateLimit struct {
@@ -22,7 +22,7 @@ type RateLimit struct {
 // Image is what one platform manifest of a reference says about itself.
 type Image struct {
 	Ref            string            `json:"ref"`  // as asked
-	Repo           string            `json:"repo"` // "ghcr.io/geocine/aitoolkit-go"
+	Repo           string            `json:"repo"` // "ghcr.io/geocine/aitoolkit-worker"
 	Tag            string            `json:"tag,omitempty"`
 	Digest         string            `json:"digest"`          // what the tag points at (index or manifest)
 	PlatformDigest string            `json:"platform_digest"` // the linux/amd64 manifest

@@ -109,7 +109,7 @@ func TestSimSecretKeys(t *testing.T) {
 func TestTemplatesRoutes(t *testing.T) {
 	_, c := start(t, mockkit.Options{})
 	var mine []map[string]any
-	if s := c.authed("GET", "/templates", "", &mine); s != 200 || len(mine) != 2 || mine[0]["image_path"] != "ghcr.io/geocine/aitoolkit-go:latest" {
+	if s := c.authed("GET", "/templates", "", &mine); s != 200 || len(mine) != 2 || mine[0]["image_path"] != "ghcr.io/geocine/aitoolkit-worker:latest" {
 		t.Fatalf("templates %d %v", s, mine)
 	}
 	var pub []map[string]any

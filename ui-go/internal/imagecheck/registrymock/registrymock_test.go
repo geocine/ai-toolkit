@@ -54,7 +54,7 @@ func TestRegistryShapes(t *testing.T) {
 		t.Fatalf("/v2/: %d %q", resp.StatusCode, resp.Header.Get("WWW-Authenticate"))
 	}
 	// GHCR's token has no expires_in; Hub's does.
-	resp = get(t, c, "GET", "https://ghcr.io/token?scope=repository:geocine/aitoolkit-go:pull&service=ghcr.io", "")
+	resp = get(t, c, "GET", "https://ghcr.io/token?scope=repository:geocine/aitoolkit-worker:pull&service=ghcr.io", "")
 	var tok map[string]any
 	_ = json.NewDecoder(resp.Body).Decode(&tok)
 	if _, ok := tok["expires_in"]; ok || tok["token"] == nil {
@@ -68,11 +68,11 @@ func TestRegistryShapes(t *testing.T) {
 	}
 
 	// Manifests need the token, carry their digest, and 404 in the real shape.
-	url := "https://ghcr.io/v2/geocine/aitoolkit-go/manifests/latest"
+	url := "https://ghcr.io/v2/geocine/aitoolkit-worker/manifests/latest"
 	if resp := get(t, c, "HEAD", url, ""); resp.StatusCode != 401 {
 		t.Fatalf("no token: %d", resp.StatusCode)
 	}
-	resp = get(t, c, "GET", url, "Bearer mock-token.geocine/aitoolkit-go")
+	resp = get(t, c, "GET", url, "Bearer mock-token.geocine/aitoolkit-worker")
 	body, _ := io.ReadAll(resp.Body)
 	sum := sha256.Sum256(body)
 	if resp.Header.Get("Docker-Content-Digest") != "sha256:"+hex.EncodeToString(sum[:]) || resp.Header.Get("Content-Type") != MediaOCIIndex {
@@ -81,7 +81,7 @@ func TestRegistryShapes(t *testing.T) {
 	if s.Digest("", DefaultRepo, "latest") != s.Digest("", DefaultRepo, Revision) {
 		t.Fatal("latest and the sha tag differ")
 	}
-	resp = get(t, c, "GET", "https://ghcr.io/v2/geocine/aitoolkit-go/manifests/nope", "Bearer mock-token.geocine/aitoolkit-go")
+	resp = get(t, c, "GET", "https://ghcr.io/v2/geocine/aitoolkit-worker/manifests/nope", "Bearer mock-token.geocine/aitoolkit-worker")
 	body, _ = io.ReadAll(resp.Body)
 	if resp.StatusCode != 404 || !strings.Contains(string(body), "MANIFEST_UNKNOWN") {
 		t.Fatalf("missing tag: %d %s", resp.StatusCode, body)
@@ -95,7 +95,7 @@ func TestRegistryShapes(t *testing.T) {
 	if resp := get(t, c, "OPTIONS", url, ""); resp.StatusCode != 405 || resp.Header.Get("Access-Control-Allow-Origin") != "" {
 		t.Fatalf("OPTIONS: %d", resp.StatusCode)
 	}
-	if !strings.Contains(string(mustBody(t, get(t, c, "GET", "https://ghcr.io/v2/geocine/aitoolkit-go/tags/list", "Bearer mock-token.geocine/aitoolkit-go"))), Revision) {
+	if !strings.Contains(string(mustBody(t, get(t, c, "GET", "https://ghcr.io/v2/geocine/aitoolkit-worker/tags/list", "Bearer mock-token.geocine/aitoolkit-worker"))), Revision) {
 		t.Fatal("tag list lacks the sha tag")
 	}
 }
@@ -111,7 +111,7 @@ func mustBody(t *testing.T, resp *http.Response) []byte {
 
 func TestPrivateAndCDN(t *testing.T) {
 	_, c := start(t, Faults{Private: map[string]bool{DefaultRepo: true}, RedirectBlobs: "cdn"})
-	resp := get(t, c, "GET", "https://ghcr.io/token?scope=repository:geocine/aitoolkit-go:pull", "")
+	resp := get(t, c, "GET", "https://ghcr.io/token?scope=repository:geocine/aitoolkit-worker:pull", "")
 	if resp.StatusCode != 403 || !strings.Contains(string(mustBody(t, resp)), "DENIED") {
 		t.Fatalf("private repo token: %d", resp.StatusCode)
 	}

@@ -262,7 +262,8 @@ func TestLaunchCreatedOrRepeated(t *testing.T) {
 	if w.Code != 201 {
 		t.Fatalf("first launch %d %s", w.Code, w.Body)
 	}
-	want := provision.LaunchRequest{Provider: provision.Vast, OfferID: "o9", MaxPricePerHour: 0.75, RequestID: "req_abcdefgh",
+	// SelfURL is this server's own origin, never the page's Origin
+	want := provision.LaunchRequest{SelfURL: "http://127.0.0.1:8675", Provider: provision.Vast, OfferID: "o9", MaxPricePerHour: 0.75, RequestID: "req_abcdefgh",
 		SkipImageCheck: true, WhenDone: provision.WhenDestroy, CopyRemote: "r2"}
 	if !reflect.DeepEqual(f.launch, want) || f.origin != "https://studio.example" {
 		t.Fatalf("launch got %+v origin %q", f.launch, f.origin)
@@ -346,12 +347,12 @@ func TestErrorMapping(t *testing.T) {
 func TestOfferQueryParams(t *testing.T) {
 	f, h := newEnv(t)
 	w := call(t, h, "GET", "/v1/providers/vast/offers?gpu=4090&min_vram_gb=24&max_price=0.8&gpu_count=2&cloud=community&disk_gb=150"+
-		"&limit=200&image=ghcr.io/geocine/aitoolkit-go:abc1234&model=flux&show_all=1&fast=true&max_vram_gb=48", "")
+		"&limit=200&image=ghcr.io/geocine/aitoolkit-worker:abc1234&model=flux&show_all=1&fast=true&max_vram_gb=48", "")
 	if w.Code != 200 {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
 	want := provision.OfferQuery{GPU: "4090", MinVRAMGB: 24, MaxPrice: 0.8, GPUCount: 2, Cloud: "community", DiskGB: 150, Limit: 200,
-		Image: "ghcr.io/geocine/aitoolkit-go:abc1234", Model: &hostfit.ModelRef{Arch: "flux"}, ShowAll: true, Fast: true, MaxVRAMGB: 48}
+		Image: "ghcr.io/geocine/aitoolkit-worker:abc1234", Model: &hostfit.ModelRef{Arch: "flux"}, ShowAll: true, Fast: true, MaxVRAMGB: 48}
 	if !reflect.DeepEqual(f.query, want) {
 		t.Fatalf("query\n got %+v\nwant %+v", f.query, want)
 	}
@@ -723,7 +724,7 @@ func TestOffersImageFilterReachesVast(t *testing.T) {
 	mux := http.NewServeMux()
 	Register(mux)
 
-	w := call(t, mux, "GET", "/v1/providers/vast/offers?image=ghcr.io/geocine/aitoolkit-go:latest&model=flux&fast=1", "")
+	w := call(t, mux, "GET", "/v1/providers/vast/offers?image=ghcr.io/geocine/aitoolkit-worker:latest&model=flux&fast=1", "")
 	if w.Code != 200 {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}

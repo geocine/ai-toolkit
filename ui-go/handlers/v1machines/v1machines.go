@@ -19,11 +19,13 @@ import (
 	"github.com/geocine/aitoolkit/internal/bg"
 	"github.com/geocine/aitoolkit/internal/hostfit"
 	"github.com/geocine/aitoolkit/internal/httpx"
+	"github.com/geocine/aitoolkit/internal/links"
 	"github.com/geocine/aitoolkit/internal/provision"
 	"github.com/geocine/aitoolkit/internal/provision/guide"
 	"github.com/geocine/aitoolkit/internal/provision/relay"
 	"github.com/geocine/aitoolkit/internal/state"
 	"github.com/geocine/aitoolkit/internal/studioapi"
+	"github.com/geocine/aitoolkit/internal/tunnel"
 	"github.com/geocine/aitoolkit/internal/v1api"
 )
 
@@ -57,6 +59,8 @@ func Register(mux *http.ServeMux) {
 	httpx.Handle(mux, "DELETE /v1/machines/{id}", forgetMachine)
 	httpx.Handle(mux, "POST /v1/machines/{id}/link", linkMachine)
 	httpx.Handle(mux, "GET /v1/machines/{id}/logs", machineLogs)
+	// a worker dials this; its handshake is the credential (internal/tunnel)
+	httpx.Handle(mux, "GET "+tunnel.Path, tunnel.Default.ServeHTTP)
 	for _, m := range relayMethods {
 		httpx.Handle(mux, m+" /v1/machines/{id}/relay/{path...}", relayMachine)
 	}
@@ -369,6 +373,7 @@ func launch(w http.ResponseWriter, r *http.Request) {
 	if !v1api.Decode(w, r, &req) {
 		return
 	}
+	req.SelfURL = links.Origin(r, os.Getenv("AITK_PUBLIC_URL"))
 	m, created, err := provision.Default.Launch(r.Context(), req, r.Header.Get("Origin"))
 	if err != nil {
 		respond(w, r, err)

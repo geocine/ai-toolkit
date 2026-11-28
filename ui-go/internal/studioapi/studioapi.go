@@ -185,7 +185,9 @@ func Gate(next http.Handler) http.Handler {
 		// a page on evil.com re-resolved to 127.0.0.1 is same-origin to CORS
 		// and a loopback peer to the open-server guard; only its Host gives it
 		// away. With a token the page cannot send the bearer header.
-		if httpx.IsOpen() && !HostAllowed(r.Host) {
+		// the worker tunnel is exempt: it refuses any request with an Origin
+		// (every browser page sends one) and its handshake needs the token
+		if httpx.IsOpen() && !HostAllowed(r.Host) && r.URL.Path != tunnelPath {
 			refuse(w, r, http.StatusForbidden, v1api.CodeForbidden, HostRefusal)
 			return
 		}
@@ -196,6 +198,10 @@ func Gate(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+// tunnelPath is internal/tunnel.Path (a worker dials it under whatever
+// name reaches this server: host.docker.internal, a LAN address).
+const tunnelPath = "/v1/fleet/tunnel"
 
 // refuse answers in the shape the path's clients read: upstream's
 // {"error": msg} under /api/, the /v1 envelope everywhere else.

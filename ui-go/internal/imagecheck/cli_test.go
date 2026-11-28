@@ -72,8 +72,8 @@ func TestCLIDeniedDefaultRepo(t *testing.T) {
 		t.Fatalf("exit %d\n%s", code, stderr)
 	}
 	for _, want := range []string{
-		"The server image ghcr.io/geocine/aitoolkit-go isn't published yet, or it's still private.",
-		"https://github.com/users/geocine/packages/container/aitoolkit-go/settings",
+		"The server image ghcr.io/geocine/aitoolkit-worker isn't published yet, or it's still private.",
+		"https://github.com/users/geocine/packages/container/aitoolkit-worker/settings",
 	} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("stderr lacks %q:\n%s", want, stderr)

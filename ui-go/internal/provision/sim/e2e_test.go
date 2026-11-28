@@ -597,7 +597,7 @@ func TestSimImageCheckRoute(t *testing.T) {
 	mux := http.NewServeMux()
 	v1images.Register(mux)
 	req := httptest.NewRequest("POST", "/v1/images/check",
-		strings.NewReader(`{"image":"ghcr.io/geocine/aitoolkit-go:latest"}`))
+		strings.NewReader(`{"image":"ghcr.io/geocine/aitoolkit-worker:latest"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)

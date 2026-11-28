@@ -359,7 +359,7 @@ func TestDefaultRepoDenied(t *testing.T) {
 	}
 	ch := ErrorCheck(err)
 	want := Check{Level: LevelBlock, Code: "image_denied",
-		Message: "The server image ghcr.io/geocine/aitoolkit-go isn't published yet, or it's still private.",
+		Message: "The server image ghcr.io/geocine/aitoolkit-worker isn't published yet, or it's still private.",
 		Fix:     "Its owner publishes it once with ui-go/scripts/build_and_push.sh --push and makes the package public. Until then GPU servers can't start it."}
 	if ch.Level != want.Level || ch.Code != want.Code || ch.Message != want.Message || ch.Fix != want.Fix || ch.Action != nil {
 		t.Fatalf("check\n got %+v\nwant %+v", ch, want)
@@ -421,7 +421,7 @@ func TestBadResponses(t *testing.T) {
 	if _, err := c.Inspect(ctx, goRef, "", false); KindOf(err) != KindBadResponse || !strings.Contains(err.Error(), "declares") {
 		t.Fatalf("oversize config: %v", err)
 	}
-	_, c, _ = newMock(t, registrymock.Faults{Status: map[string]int{"/v2/geocine/aitoolkit-go/manifests/latest": 502}})
+	_, c, _ = newMock(t, registrymock.Faults{Status: map[string]int{"/v2/geocine/aitoolkit-worker/manifests/latest": 502}})
 	if _, err := c.Inspect(ctx, DefaultRepo+":latest", "", false); KindOf(err) != KindUnreachable {
 		t.Fatalf("502: %v", err)
 	} else if ch := ErrorCheck(err); ch.Level != LevelWarn || ch.Code != "image_unreachable" {

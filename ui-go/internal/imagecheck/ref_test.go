@@ -21,8 +21,8 @@ func TestParseRef(t *testing.T) {
 		{"docker.io/alpine", Ref{"docker.io", "registry-1.docker.io", "library/alpine", "latest", ""}, "alpine:latest"},
 		{"ostris/aitoolkit:0.13.39", Ref{"docker.io", "registry-1.docker.io", "ostris/aitoolkit", "0.13.39", ""}, "ostris/aitoolkit:0.13.39"},
 		{"ghcr.io/a/b:c", Ref{"ghcr.io", "ghcr.io", "a/b", "c", ""}, "ghcr.io/a/b:c"},
-		{"ghcr.io/geocine/aitoolkit-go", Ref{"ghcr.io", "ghcr.io", "geocine/aitoolkit-go", "latest", ""}, "ghcr.io/geocine/aitoolkit-go:latest"},
-		{"GHCR.io/geocine/aitoolkit-go:f53a407", Ref{"ghcr.io", "ghcr.io", "geocine/aitoolkit-go", "f53a407", ""}, "ghcr.io/geocine/aitoolkit-go:f53a407"},
+		{"ghcr.io/geocine/aitoolkit-worker", Ref{"ghcr.io", "ghcr.io", "geocine/aitoolkit-worker", "latest", ""}, "ghcr.io/geocine/aitoolkit-worker:latest"},
+		{"GHCR.io/geocine/aitoolkit-worker:f53a407", Ref{"ghcr.io", "ghcr.io", "geocine/aitoolkit-worker", "f53a407", ""}, "ghcr.io/geocine/aitoolkit-worker:f53a407"},
 		{"localhost:5000/a", Ref{"localhost:5000", "localhost:5000", "a", "latest", ""}, "localhost:5000/a:latest"},
 		{"localhost/a/b", Ref{"localhost", "localhost", "a/b", "latest", ""}, "localhost/a/b:latest"},
 		{"[::1]:5000/a", Ref{"[::1]:5000", "[::1]:5000", "a", "latest", ""}, "[::1]:5000/a:latest"},
@@ -58,7 +58,7 @@ func TestParseRefRejects(t *testing.T) {
 	bad := []string{
 		"",
 		"Alpine",
-		"ghcr.io/Geocine/aitoolkit-go",
+		"ghcr.io/Geocine/aitoolkit-worker",
 		"ghcr.io/geocine/AITOOLKIT",
 		"alpine:-bad",
 		"alpine:.bad",
@@ -100,14 +100,14 @@ func TestParseRefRejects(t *testing.T) {
 }
 
 func TestRefHelpers(t *testing.T) {
-	r, err := ParseRef("ghcr.io/geocine/aitoolkit-go@" + testDigest)
+	r, err := ParseRef("ghcr.io/geocine/aitoolkit-worker@" + testDigest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := r.WithTag("f53a407"); got.Digest != "" || got.Tag != "f53a407" || got.String() != "ghcr.io/geocine/aitoolkit-go:f53a407" {
+	if got := r.WithTag("f53a407"); got.Digest != "" || got.Tag != "f53a407" || got.String() != "ghcr.io/geocine/aitoolkit-worker:f53a407" {
 		t.Errorf("WithTag: %+v", got)
 	}
-	if got := r.Pinned(testDigest); got != "ghcr.io/geocine/aitoolkit-go@"+testDigest {
+	if got := r.Pinned(testDigest); got != "ghcr.io/geocine/aitoolkit-worker@"+testDigest {
 		t.Errorf("Pinned: %q", got)
 	}
 	if r.Name() != DefaultRepo {
@@ -115,8 +115,8 @@ func TestRefHelpers(t *testing.T) {
 	}
 
 	// Name drops the registry for Docker Hub and keeps it elsewhere.
-	r, _ = ParseRef("ghcr.io/geocine/aitoolkit-go:f53a407")
-	if p, tag := r.Name(), r.Tag; p != "ghcr.io/geocine/aitoolkit-go" || tag != "f53a407" {
+	r, _ = ParseRef("ghcr.io/geocine/aitoolkit-worker:f53a407")
+	if p, tag := r.Name(), r.Tag; p != "ghcr.io/geocine/aitoolkit-worker" || tag != "f53a407" {
 		t.Errorf("Name: %q %q", p, tag)
 	}
 	r, _ = ParseRef("alpine")
@@ -126,11 +126,11 @@ func TestRefHelpers(t *testing.T) {
 	if p := (Ref{Domain: "docker.io", API: "registry-1.docker.io", Repo: "library/alpine", Digest: testDigest}).Name(); p != "alpine" {
 		t.Errorf("Name digest-only: %q", p)
 	}
-	r, _ = ParseRef("ghcr.io/geocine/aitoolkit-go:f53a407@" + testDigest)
-	if p, tag := r.Name(), r.Tag; p != "ghcr.io/geocine/aitoolkit-go" || tag != "f53a407" {
+	r, _ = ParseRef("ghcr.io/geocine/aitoolkit-worker:f53a407@" + testDigest)
+	if p, tag := r.Name(), r.Tag; p != "ghcr.io/geocine/aitoolkit-worker" || tag != "f53a407" {
 		t.Errorf("Name tag and digest: %q %q", p, tag)
 	}
-	if got := r.Pinned(r.Digest); got != "ghcr.io/geocine/aitoolkit-go@"+testDigest {
+	if got := r.Pinned(r.Digest); got != "ghcr.io/geocine/aitoolkit-worker@"+testDigest {
 		t.Errorf("Pinned with a tag: %q", got)
 	}
 	if p := (Ref{Domain: "docker.io", API: "registry-1.docker.io", Repo: "library/a/b", Tag: "1"}).Name(); p != "library/a/b" {

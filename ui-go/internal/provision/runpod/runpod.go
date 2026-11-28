@@ -476,7 +476,7 @@ func (a *Adapter) Templates(ctx context.Context, key string) ([]provision.Templa
 		for _, t := range body.Templates {
 			_, token := t.Env["AI_TOOLKIT_AUTH"]
 			out = append(out, provision.Template{ID: t.ID, Name: t.Name, Image: t.Image,
-				Ours:          strings.Contains(t.Image, "aitoolkit-go"),
+				Ours:          strings.Contains(t.Image, "aitoolkit-worker"),
 				PublishesPort: slices.Contains(t.Ports, httpPort()),
 				HasToken:      token})
 		}

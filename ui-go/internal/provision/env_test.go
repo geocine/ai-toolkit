@@ -42,7 +42,7 @@ func addHFRemote(t *testing.T, name, token string) *remote.Remote {
 // build runs BuildEnv for k with the stub's caps.
 func (e *testEnv) build(k Kind, req LaunchRequest) (map[string]string, []string, error) {
 	req.Provider = k
-	return BuildEnv(e.ctx, req, k, "mch_test", "aitk_token_value", e.clouds[k].caps, "acct-key-"+string(k))
+	return BuildEnv(e.ctx, req, k, "mch_test", "aitk_token_value", e.clouds[k].caps, "acct-key-"+string(k), "https://studio.example")
 }
 
 func TestEnvRows(t *testing.T) {
@@ -53,7 +53,7 @@ func TestEnvRows(t *testing.T) {
 		Events: []string{"completed", "failed"}}
 
 	env, warn, err := e.build(RunPod, LaunchRequest{})
-	if err != nil || len(env) != 2 || env["AI_TOOLKIT_AUTH"] != "aitk_token_value" || env["AITK_MACHINE_ID"] != "mch_test" || len(warn) != 0 {
+	if err != nil || len(env) != 4 || env["AI_TOOLKIT_AUTH"] != "aitk_token_value" || env["AITK_MACHINE_ID"] != "mch_test" || len(warn) != 0 {
 		t.Fatalf("minimal: %v %v %v", env, warn, err)
 	}
 	if env, _, _ := e.build(Vast, LaunchRequest{}); env["OPEN_BUTTON_PORT"] != "8675" {
@@ -71,6 +71,8 @@ func TestEnvRows(t *testing.T) {
 	want := map[string]string{
 		"AI_TOOLKIT_AUTH":            "aitk_token_value",
 		"AITK_MACHINE_ID":            "mch_test",
+		"AITK_MODE":                  "worker",
+		"AITK_STUDIO_API_URL":        "https://studio.example",
 		"AITK_CORS_ORIGINS":          "https://a.example,http://localhost:5173",
 		"AITK_STUDIO_URL":            "https://a.example/studio/",
 		"AITK_S3_NAME":               "r2",
@@ -109,7 +111,7 @@ func TestEnvRows(t *testing.T) {
 	if env, _, _ := e.build(QuickPod, LaunchRequest{SelfDestroyKey: true}); env["AITK_QUICKPOD_API_KEY"] != "acct-key-quickpod" || env["AITK_RUNPOD_API_KEY"] != "" {
 		t.Fatalf("quickpod key: %v", env)
 	}
-	if env, _, _ := e.build(Vast, LaunchRequest{SelfDestroyKey: true}); len(env) != 3 {
+	if env, _, _ := e.build(Vast, LaunchRequest{SelfDestroyKey: true}); len(env) != 5 {
 		t.Fatalf("vast destroys itself with its builtin key: %v", env)
 	}
 	if env, _, _ := e.build(RunPod, LaunchRequest{WhenDone: WhenKeep, CopyRemote: "r2"}); env["AITK_WHEN_DONE"] != "" {
@@ -197,10 +199,10 @@ func TestEnvLimits(t *testing.T) {
 		}
 		return m
 	}
-	if _, _, err := e.build(RunPod, LaunchRequest{Env: vars(48)}); err != nil {
+	if _, _, err := e.build(RunPod, LaunchRequest{Env: vars(46)}); err != nil {
 		t.Fatalf("50 vars: %v", err)
 	}
-	if _, _, err := e.build(RunPod, LaunchRequest{Env: vars(49)}); codeOf(err) != v1api.CodeInvalidConfig || !strings.Contains(err.Error(), "51") {
+	if _, _, err := e.build(RunPod, LaunchRequest{Env: vars(47)}); codeOf(err) != v1api.CodeInvalidConfig || !strings.Contains(err.Error(), "51") {
 		t.Fatalf("51 vars: %v", err)
 	}
 	// QuickPod: one docker_options string, so a strict charset

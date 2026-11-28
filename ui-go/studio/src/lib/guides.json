@@ -1,7 +1,7 @@
 {
   "quickpod": {
     "kind": "quickpod",
-    "image": "ghcr.io/geocine/aitoolkit-go:latest",
+    "image": "ghcr.io/geocine/aitoolkit-worker:latest",
     "port": 8675,
     "disk_gb": 100,
     "env": [
@@ -12,6 +12,12 @@
         "note": "In the template's docker options, so the server never starts without a token. A pod the studio creates gets its own token, which wins over this one."
       },
       {
+        "name": "AITK_MODE",
+        "value": "standalone",
+        "secret": false,
+        "note": "An ordinary ai-toolkit server you open directly (console at /, /v1, /mcp). Servers the studio creates are workers: the studio sets their own AITK_MODE, which wins."
+      },
+      {
         "name": "AITK_CORS_ORIGINS",
         "value": "<your studio origin>",
         "secret": false,
@@ -19,7 +25,7 @@
       }
     ],
     "env_block": "",
-    "docker_options": "-p 8675:8675 -e AI_TOOLKIT_AUTH=<a long random token> -e AITK_CORS_ORIGINS=<your studio origin>",
+    "docker_options": "-p 8675:8675 -e AI_TOOLKIT_AUTH=<a long random token> -e AITK_MODE=standalone -e AITK_CORS_ORIGINS=<your studio origin>",
     "fields": [
       {
         "label": "Template Type",
@@ -38,7 +44,7 @@
       },
       {
         "label": "Docker Image Path",
-        "value": "ghcr.io/geocine/aitoolkit-go:latest",
+        "value": "ghcr.io/geocine/aitoolkit-worker:latest",
         "note": "The tag goes in the path: there is no separate tag field."
       },
       {
@@ -73,7 +79,7 @@
   },
   "runpod": {
     "kind": "runpod",
-    "image": "ghcr.io/geocine/aitoolkit-go:latest",
+    "image": "ghcr.io/geocine/aitoolkit-worker:latest",
     "port": 8675,
     "disk_gb": 100,
     "env": [
@@ -82,6 +88,12 @@
         "value": "<a long random token>",
         "secret": true,
         "note": "The server asks for it on every request. A RunPod secret works too: {{ RUNPOD_SECRET_aitk_token }}."
+      },
+      {
+        "name": "AITK_MODE",
+        "value": "standalone",
+        "secret": false,
+        "note": "An ordinary ai-toolkit server you open directly (console at /, /v1, /mcp). Servers the studio creates are workers: the studio sets their own AITK_MODE, which wins."
       },
       {
         "name": "AITK_CORS_ORIGINS",
@@ -96,7 +108,7 @@
         "note": "Optional, for gated base models: save your Hugging Face token as the RunPod secret hf_token first."
       }
     ],
-    "env_block": "AI_TOOLKIT_AUTH=<a long random token>\nAITK_CORS_ORIGINS=<your studio origin>",
+    "env_block": "AI_TOOLKIT_AUTH=<a long random token>\nAITK_MODE=standalone\nAITK_CORS_ORIGINS=<your studio origin>",
     "docker_options": "",
     "fields": [
       {
@@ -111,7 +123,7 @@
       },
       {
         "label": "Container Image",
-        "value": "ghcr.io/geocine/aitoolkit-go:latest",
+        "value": "ghcr.io/geocine/aitoolkit-worker:latest",
         "note": "A public image, so Container Registry Credentials stay empty."
       },
       {
@@ -147,7 +159,7 @@
   },
   "vast": {
     "kind": "vast",
-    "image": "ghcr.io/geocine/aitoolkit-go:latest",
+    "image": "ghcr.io/geocine/aitoolkit-worker:latest",
     "port": 8675,
     "disk_gb": 100,
     "env": [
@@ -164,6 +176,12 @@
         "note": "Points the instance's Open button at the server."
       },
       {
+        "name": "AITK_MODE",
+        "value": "standalone",
+        "secret": false,
+        "note": "An ordinary ai-toolkit server you open directly (console at /, /v1, /mcp). Servers the studio creates are workers: the studio sets their own AITK_MODE, which wins. Keep it in the template, never under Account → Environment Variables."
+      },
+      {
         "name": "AITK_CORS_ORIGINS",
         "value": "<your studio origin>",
         "secret": false,
@@ -177,7 +195,7 @@
       }
     ],
     "env_block": "",
-    "docker_options": "-p 8675:8675 -e OPEN_BUTTON_PORT=8675 -e AITK_CORS_ORIGINS=<your studio origin>",
+    "docker_options": "-p 8675:8675 -e OPEN_BUTTON_PORT=8675 -e AITK_MODE=standalone -e AITK_CORS_ORIGINS=<your studio origin>",
     "fields": [
       {
         "label": "Template Name",
@@ -186,7 +204,7 @@
       },
       {
         "label": "Image Path:Tag",
-        "value": "ghcr.io/geocine/aitoolkit-go:latest",
+        "value": "ghcr.io/geocine/aitoolkit-worker:latest",
         "note": "The full registry path. Another tag works too."
       },
       {
@@ -215,7 +233,7 @@
       "Open Templates (cloud.vast.ai/templates/), click + New and stay on the Config tab.",
       "Fill in the fields above and paste the docker options into Docker Options.",
       "Click Create & Use, pick an offer and click RENT. The Extra Filters above keep the offers to hosts with a driver for CUDA 13.0 or newer (580+) and an RTX 30-series, A100 or newer GPU. On an older host the image fails, and the rental still bills.",
-      "When the instance shows running, open IP Port Info: the line ending in -> 8675/tcp gives the URL http://<ip>:<port>. It is plain http only, so the token crosses the internet unencrypted, and a studio served over https cannot call it directly: use the studio the server serves at /studio/.",
+      "When the instance shows running, open IP Port Info: the line ending in -> 8675/tcp gives the URL http://<ip>:<port>. It is plain http only, so the token crosses the internet unencrypted, and a studio served over https cannot call it directly: open the console it serves at /, or create the server from your studio instead, which reaches it through an encrypted tunnel.",
       "When it shows running, copy its URL and add it on the Servers page with the same token."
     ],
     "url_pattern": "http://<ip>:<port>",

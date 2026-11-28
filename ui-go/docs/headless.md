@@ -79,7 +79,8 @@ one by one; they expire.
 
 ### System
 - `GET /v1/health` → `{ok, version, upstream_version, started_at, mode}`;
-  `mode` is `"server"`, or `"studio-api"` when the server runs with
+  `mode` is `"server"` (`AITK_MODE=standalone`), `"studio"`, `"worker"`, or
+  `"studio-api"` when the server runs with `AITK_MODE=studio-api` /
   `--studio-api` / `AITK_STUDIO_API=1`
 - `GET /v1/system` → `{gpus: [...], cpu: {...}, disks: [{path, free, total}], toolkit_root}`
 
@@ -724,12 +725,15 @@ Shapes (`studio/src/lib/provisionTypes.ts` is the exact contract):
 - `Machine = {id, name, label, provider, provider_id, status, problem,
   detail, provider_status, gpu, gpu_count, vram_gb, location, image,
   image_digest, image_launch_ref, image_warnings, disk_gb, base_url, secure,
-  relay_path, price_per_hour, stopped_price_per_hour, when_done,
+  tunnel, relay_path, price_per_hour, stopped_price_per_hour, when_done,
   self_destroy_key, copied_remote, actions, self, simulated, warnings,
   created_at, updated_at, ready_at, ended_at}`. `actions` is what works now
   (`stop`, `start`, `terminate`, `forget`); `self` marks the machine this
-  server runs on. It never holds the token.
-- `MachineLink = {name, base_url, token, secure, relay_path}`;
+  server runs on. It never holds the token. `tunnel` marks a machine reached
+  through its tunnel to this server (`base_url` is then
+  `http://<hex id>.tunnel.aitk`, which only this server can dial): use
+  `relay_path`. `secure` is true for https and for a tunnel.
+- `MachineLink = {name, base_url, token, secure, tunnel, relay_path}`;
   `MachineLogs = {text, source, truncated}`; `ProviderTemplate = {id, name,
   image, ours, publishes_port, has_token}`; `SetupGuide = {kind, image, port,
   disk_gb, env: [{name, value, secret, note}], env_block, docker_options,
@@ -753,7 +757,7 @@ Providers:
   below it); `max_price` is $/h for the whole machine; `cloud` is RunPod's
   `secure` (default) or `community`; `disk_gb` (20-2000, default 100) prices
   the disk; `limit` 1-200 (default 50); `image` is the image the hosts must
-  run (default `ghcr.io/geocine/aitoolkit-go:latest`); `model` is a model
+  run (default `ghcr.io/geocine/aitoolkit-worker:latest`); `model` is a model
   arch (`flux`, `qwen_image`, ...) for VRAM badges and the disk need;
   `show_all=1` keeps offers the image cannot run, marked in `fit`; `fast=1`
   keeps hosts with at least 500 Mbps download and 300 MB/s disk, where the
@@ -782,7 +786,7 @@ self_destroy_key?, env?, skip_image_check?}`:
 - `provider`, `offer_id` (from offers) and `max_price_per_hour` are required;
   `request_id` is 8-64 of `[A-Za-z0-9_-]`;
 - `name` defaults to `<gpu> on <provider>` (1-64 characters, unique among
-  live machines); `image` defaults to `ghcr.io/geocine/aitoolkit-go:latest`;
+  live machines); `image` defaults to `ghcr.io/geocine/aitoolkit-worker:latest`;
   `disk_gb` is 20-2000 and at most the offer's `max_disk_gb`;
 - `gpu_count` and `cloud` are RunPod only; QuickPod needs `template_id` from
   its templates;
@@ -893,9 +897,32 @@ signed links that reach the relay without a token are forwarded with no
 credentials, so the machine decides. 409 `conflict` unless the machine is
 ready with a `base_url`; 502 `remote_failed` when it cannot be reached; a
 private address is refused unless the machine is simulated. Each request
-costs two hops, and this server's `AITK_CORS_ORIGINS` applies. The relay has
-no `aitk` op: agents use `machines.link` and talk to the machine (or its
-`/mcp`) directly.
+costs two hops, and this server's `AITK_CORS_ORIGINS` applies. A machine
+with `tunnel: true` answers only through the relay (its `base_url` is a tunnel
+host only this server can dial, and it has no `/mcp` of its own). WebSocket
+upgrades pass through the relay too.
+
+In code mode, `aitk.machines.relay_get`, `relay_post`, `relay_put`,
+`relay_patch` and `relay_delete` call one route on the machine, for example
+`relay_get("mch_…", "v1/jobs", { limit: 5 })` or
+`relay_post("mch_…", "v1/jobs/j1/start", {})`. The path has no leading slash.
+Other params become the query for GET and DELETE, and the JSON body for the
+rest. A machine without a tunnel can still be reached directly with
+`machines.link`.
+
+**Fleet tunnel** (docs/studio-api.md, "GPU servers dial in"):
+- `GET /v1/fleet/tunnel`
+
+is what a worker (`AITK_MODE=worker`) dials. It is not a client route: it
+needs no bearer token, refuses any request carrying `Origin`, and upgrades to
+a WebSocket.
+- **Handshake.** The worker sends `X-Aitk-Machine: <machine id>`, and both
+  sides prove they hold that machine's token with an HMAC over each other's
+  random challenge. Only a machine this server tracks and that has not ended
+  is accepted.
+- **After the handshake** the connection carries yamux, and each stream is
+  one HTTP connection to the worker.
+- **A new tunnel** from the same machine replaces the old one.
 
 **Finding and adopting servers.** Machines live in this server's database.
 If it is lost (or a machine was forgotten with `force=1`), the machines keep
@@ -939,7 +966,7 @@ provider call. Results are not cached themselves.
 `model` is a model arch (`flux`, `qwen_image`, `wan22_14b`, ...); an arch
 the VRAM table does not know is accepted, starts at 24 GB and adds the note
 `model_unknown`. `image` is the image the picks are judged against (default
-`ghcr.io/geocine/aitoolkit-go:latest`; the studio sends its Image row, or on
+`ghcr.io/geocine/aitoolkit-worker:latest`; the studio sends its Image row, or on
 QuickPod the template's image). `disk_gb` is 20-2000 (default: what the
 image and model need) and `max_price` is above 0. The code-mode ops are
 `providers.recommend(kind, q)` and `hosts.recommend(q)`.
@@ -1058,7 +1085,7 @@ provider call is made), and a ready machine runs a CUDA self-check.
   and a check never answers 5xx because a registry is down.
 - **Caches.** A tag's digest is kept 10 min, a missing or private tag 60 s,
   image facts by digest for the process lifetime; `refresh` re-resolves.
-- **Not published yet.** While `ghcr.io/geocine/aitoolkit-go` cannot be
+- **Not published yet.** While `ghcr.io/geocine/aitoolkit-worker` cannot be
   read (not published, private, unreachable), its built-in requirements
   (`requires.source: "fallback"`: CUDA 13.0, linux/amd64, sm_75 to sm_120)
   still judge hosts, so offers and recommendations work. The check says
@@ -1109,7 +1136,7 @@ Shapes (`studio/src/lib/serverImageTypes.ts` is the exact contract):
 
 Routes:
 - `POST /v1/images/check {image, platform?, host?, offer?: {provider, offer_id}, model?, disk_gb?, refresh?}` → ImageCheck, 200 even when it blocks (400 only for an empty `image`). `offer` re-reads that offer's host through the 30 s quote cache and wins over `host`; with neither only the image-side checks run. `model` is the job's model section (`ModelRef = {arch, name_or_path?, quantize?, qtype?, low_vram?, resolution?, frames?}`) for the disk need and VRAM; `disk_gb` is the disk the launch will ask for.
-- `GET /v1/images/tags?image=ghcr.io/geocine/aitoolkit-go&limit=8` → `{items: [ImageTag]}`, newest first: `latest`, the flavor channels, versions and recent build tags (`limit` up to 20). 400 for a bad or unchecked reference, 404 for a missing or private repo, 502 when the registry cannot be read.
+- `GET /v1/images/tags?image=ghcr.io/geocine/aitoolkit-worker&limit=8` → `{items: [ImageTag]}`, newest first: `latest`, the flavor channels, versions and recent build tags (`limit` up to 20). 400 for a bad or unchecked reference, 404 for a missing or private repo, 502 when the registry cannot be read.
 - `POST /v1/images/recommend {offer?, host?, model?, prefer?, image?, template_id?, disk_gb?}` → ImageRecommendation. The choice is the build this server runs when it is published and fits (`prefer: "latest"` tries the newest first), else the newest build, else another flavor; a different trainer version is never chosen silently (its first `why` line says so). `choice` is null when every candidate blocks, with `action: filter_hosts` when a host filter would fix it. `image` checks a custom image as the only candidate; `template_id` (QuickPod) checks the image that template runs.
 - `GET /v1/hosts/gpus` → `{items: [GpuInfo]}`: the GPU table (compute capability, nominal VRAM, class, the provider names it matches, relative training `speed` with RTX 4090 = 1) with the default image's `verdict` on each GPU and a `note`. The driver is a fact of each host, so `images.check` judges it, not this list; sm_75 GPUs are a warn because offers hide them by default.
 - `GET /v1/hosts/models` → `{items: [ModelInfo]}`: the model archs upstream's training form offers (`arch`, `name` = upstream's label, `group`, `video`, `default_repo` = the repo the form fills in) and `vram`: whether the VRAM table has data for it. The list is built into the binary (`internal/hostfit/upstream_models.json`), so the studio API answers it with no upstream checkout. Pass `arch` as `model.arch`: an arch without `vram` gets `unknown` verdicts and the GPU search starts at the smallest size. Upstream names map to the table's rows where they are the same weights (`wan22_14b:t2v` and `wan22_14b_i2v` → `wan22_14b`, `zimage:turbo` → `zimage`, ...); the older short names (`wan21`, `wan22_14b`) still work in a ModelRef.

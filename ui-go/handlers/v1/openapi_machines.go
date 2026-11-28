@@ -32,5 +32,6 @@ func init() {
 		op{"PUT", "/v1/machines/{id}/relay/{path}", "Machines", "Relay a request to the machine", nil, "binary", 200, "binary"},
 		op{"PATCH", "/v1/machines/{id}/relay/{path}", "Machines", "Relay a request to the machine", nil, "binary", 200, "binary"},
 		op{"DELETE", "/v1/machines/{id}/relay/{path}", "Machines", "Relay a request to the machine", nil, "", 200, "binary"},
+		op{"GET", "/v1/fleet/tunnel", "Machines", "A worker's tunnel (WebSocket upgrade; the handshake is the credential, not a client route)", nil, "", 101, "binary"},
 	)
 }

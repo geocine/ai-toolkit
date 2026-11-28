@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/geocine/aitoolkit/internal/apicache"
+	srvmode "github.com/geocine/aitoolkit/internal/mode"
 	"github.com/geocine/aitoolkit/internal/paths"
 	"github.com/geocine/aitoolkit/internal/studioapi"
 	"github.com/geocine/aitoolkit/internal/sysstats"
@@ -65,10 +66,15 @@ func upstreamVersion() *string {
 	return nil
 }
 
-// mode is "studio-api" on the no-GPU studio API (internal/studioapi), else "server".
+// mode is "studio-api" on the no-GPU studio API (internal/studioapi),
+// "worker" or "studio" for those AITK_MODEs, else "server" (standalone).
 func mode() string {
 	if studioapi.Enabled() {
 		return "studio-api"
+	}
+	switch m := srvmode.Current(); m {
+	case srvmode.Worker, srvmode.Studio:
+		return string(m)
 	}
 	return "server"
 }

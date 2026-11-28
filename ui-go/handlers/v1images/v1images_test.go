@@ -23,7 +23,7 @@ import (
 	"github.com/geocine/aitoolkit/internal/testutil"
 )
 
-const defaultImage = "ghcr.io/geocine/aitoolkit-go:latest"
+const defaultImage = "ghcr.io/geocine/aitoolkit-worker:latest"
 
 // fakeManager answers the offer and template lookups; every other call
 // panics (the embedded nil Manager), since these routes make none.
@@ -173,10 +173,10 @@ func TestCheckDefaultImage(t *testing.T) {
 	if !v.OK || v.Level == "block" || v.Image == nil || v.Image.Revision != registrymock.Revision {
 		t.Fatalf("default image: %+v", v)
 	}
-	if v.LaunchRef == nil || *v.LaunchRef != "ghcr.io/geocine/aitoolkit-go:"+registrymock.Revision {
+	if v.LaunchRef == nil || *v.LaunchRef != "ghcr.io/geocine/aitoolkit-worker:"+registrymock.Revision {
 		t.Fatalf("launch_ref %v", v.LaunchRef)
 	}
-	if v.Pinned == nil || !strings.HasPrefix(*v.Pinned, "ghcr.io/geocine/aitoolkit-go@sha256:") {
+	if v.Pinned == nil || !strings.HasPrefix(*v.Pinned, "ghcr.io/geocine/aitoolkit-worker@sha256:") {
 		t.Fatalf("pinned %v", v.Pinned)
 	}
 	if v.Host != nil || v.Pull != nil || v.VRAM != nil || v.Need == nil || v.Need.DiskGB < hostfit.MinDiskGBUnknownModel {
@@ -273,7 +273,7 @@ func TestCheckImageNotPublished(t *testing.T) {
 func TestCheckRegistryTrouble(t *testing.T) {
 	// a registry 500 is a warn: ok stays true, nothing is pinned
 	_, h := newEnv(t, imagetest.Options{Faults: registrymock.Faults{Status: map[string]int{
-		"/v2/geocine/aitoolkit-go/manifests/latest": 500}}})
+		"/v2/geocine/aitoolkit-worker/manifests/latest": 500}}})
 	v := postCheck(t, h, `{"image":"`+defaultImage+`"}`)
 	if c, ok := v.find("image_unreachable"); !v.OK || v.Level != "warn" || !ok || c.Level != "warn" || v.Image != nil || v.LaunchRef != nil {
 		t.Fatalf("registry 500: %+v", v)
@@ -288,7 +288,7 @@ func TestCheckRegistryTrouble(t *testing.T) {
 
 func TestCheckMissingTag(t *testing.T) {
 	_, h := newEnv(t, imagetest.Options{})
-	v := postCheck(t, h, `{"image":"ghcr.io/geocine/aitoolkit-go:0.14.0"}`)
+	v := postCheck(t, h, `{"image":"ghcr.io/geocine/aitoolkit-worker:0.14.0"}`)
 	c, ok := v.find("image_not_found")
 	if v.OK || !ok || !strings.Contains(c.Fix, registrymock.Revision) || c.Action == nil || c.Action.Kind != "use_image" {
 		t.Fatalf("missing tag: %+v", v)
@@ -332,7 +332,7 @@ func TestCheckOffer(t *testing.T) {
 
 func TestTags(t *testing.T) {
 	_, h := newEnv(t, imagetest.Options{})
-	r := call(t, h, "GET", "/v1/images/tags?image=ghcr.io/geocine/aitoolkit-go&limit=8", "")
+	r := call(t, h, "GET", "/v1/images/tags?image=ghcr.io/geocine/aitoolkit-worker&limit=8", "")
 	var out struct {
 		Items []struct {
 			Tag, Digest, Revision string
@@ -411,7 +411,7 @@ func TestRecommend(t *testing.T) {
 	// this server's build is published: it is the choice
 	ServerBuild = func() (string, string) { return registrymock.RevisionFull[:12], registrymock.Version }
 	v := recommend(t, h, ``)
-	if v.Choice == nil || v.Choice.Channel != "same" || v.Choice.LaunchRef == nil || *v.Choice.LaunchRef != "ghcr.io/geocine/aitoolkit-go:"+registrymock.Revision {
+	if v.Choice == nil || v.Choice.Channel != "same" || v.Choice.LaunchRef == nil || *v.Choice.LaunchRef != "ghcr.io/geocine/aitoolkit-worker:"+registrymock.Revision {
 		t.Fatalf("same build: %+v", v.Choice)
 	}
 
@@ -438,7 +438,7 @@ func TestRecommend(t *testing.T) {
 	}
 
 	// a custom image is the only candidate
-	v = recommend(t, h, `{"image":"ghcr.io/geocine/aitoolkit-go:oldsha1"}`)
+	v = recommend(t, h, `{"image":"ghcr.io/geocine/aitoolkit-worker:oldsha1"}`)
 	if v.Choice == nil || v.Choice.Channel != "custom" || len(v.Alternatives) != 0 {
 		t.Fatalf("custom: %+v", v)
 	}
@@ -656,7 +656,7 @@ return { channel: rec.choice.channel, launch: rec.choice.launch_ref, ok: check.o
 	if err := json.Unmarshal(res.Result, &out); err != nil {
 		t.Fatal(err)
 	}
-	want := "ghcr.io/geocine/aitoolkit-go:" + registrymock.Revision
+	want := "ghcr.io/geocine/aitoolkit-worker:" + registrymock.Revision
 	if out.Channel != "same" || out.Launch != want || !out.OK || out.CheckLaunch != want || out.Host == "" ||
 		out.Disk < 80 || out.GPUs < 40 || out.Tiers != 5 || out.Tags == 0 {
 		t.Fatalf("flow result %s", res.Result)

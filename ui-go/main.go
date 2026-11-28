@@ -27,6 +27,7 @@ import (
 	"github.com/geocine/aitoolkit/internal/imagecheck"
 	"github.com/geocine/aitoolkit/internal/lifecycle"
 	"github.com/geocine/aitoolkit/internal/mcpserver"
+	"github.com/geocine/aitoolkit/internal/mode"
 	"github.com/geocine/aitoolkit/internal/notify"
 	"github.com/geocine/aitoolkit/internal/paths"
 	"github.com/geocine/aitoolkit/internal/provision/sim"
@@ -35,6 +36,7 @@ import (
 	"github.com/geocine/aitoolkit/internal/store"
 	"github.com/geocine/aitoolkit/internal/studioapi"
 	"github.com/geocine/aitoolkit/internal/supervisor"
+	"github.com/geocine/aitoolkit/internal/tunnel"
 	"github.com/geocine/aitoolkit/internal/v1api"
 	"github.com/geocine/aitoolkit/internal/worker"
 )
@@ -58,11 +60,25 @@ func main() {
 	studioAPIFlag := flag.Bool("studio-api", false, "studio API mode: no GPU or trainer; creates and tracks GPU servers (env AITK_STUDIO_API=1)")
 	dataDir := flag.String("data-dir", "", "studio API mode: where the databases live (env AITK_STUDIO_API_DIR; default <user config dir>/aitk-studio-api)")
 	flag.Parse()
-	if *studioAPIFlag || studioapi.FromEnv() {
+	m, err := mode.FromEnv(*studioAPIFlag || studioapi.FromEnv())
+	if err != nil {
+		log.Fatal(err)
+	}
+	mode.Set(m)
+	if m == mode.StudioAPI {
 		studioapi.Enable()
 	}
 	hostSet := false
 	flag.Visit(func(f *flag.Flag) { hostSet = hostSet || f.Name == "host" })
+	var tunnelClient *tunnel.Client
+	if m == mode.Worker {
+		// reached only through the tunnel: nothing listens off this machine
+		*host = "127.0.0.1"
+		tunnelClient, err = workerTunnel()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
 
 	// the checkout this binary was started in, before studio API mode moves
 	// the root: its studio build is still worth serving
@@ -95,15 +111,23 @@ func main() {
 	}
 
 	mux := server.NewMux()
-	if studioapi.Enabled() {
-		// no console: it drives the trainer
+	switch {
+	case m.StudioUI():
+		// no console: the studio is this server's UI
 		mux.Handle("/", studioAPIRoot())
-	} else if dir := resolveUIDir(*uiDir); dir != "" {
-		log.Printf("Serving frontend from %s", dir)
-		mux.Handle("/", spa(dir))
+	case m.Console():
+		if dir := resolveUIDir(*uiDir); dir != "" {
+			log.Printf("Serving frontend from %s", dir)
+			mux.Handle("/", spa(dir))
+		}
+	default:
+		mux.Handle("/", workerRoot())
 	}
 	// the studio at /studio/, so one server URL works from a phone
-	studioDir := resolveStudioDir(checkoutRoot)
+	studioDir := ""
+	if m.StudioUI() {
+		studioDir = resolveStudioDir(checkoutRoot)
+	}
 	if studioDir != "" {
 		log.Printf("Serving studio from %s at /studio/", studioDir)
 		mux.Handle("/studio/", http.StripPrefix("/studio", spa(studioDir)))
@@ -146,6 +170,18 @@ func main() {
 	}
 
 	mcpserver.SetAPI(handler)
+	if !m.MCP() {
+		// agents reach a worker through its studio API's /mcp
+		handler = withoutMCP(handler)
+	}
+	if tunnelClient != nil {
+		tunnelClient.Handler = handler
+		go func() {
+			if err := tunnelClient.Run(ctx); err != nil {
+				log.Fatal(err)
+			}
+		}()
+	}
 	srv := &http.Server{
 		Addr:              net.JoinHostPort(*host, strconv.Itoa(*port)),
 		Handler:           handler,
@@ -157,6 +193,11 @@ func main() {
 		defer done()
 		srv.Shutdown(shutdown)
 	}()
+	if m == mode.Worker {
+		log.Printf("Worker mode: reached only through the tunnel to %s.", tunnelClient.URL)
+	} else if m.StudioUI() && studioDir == "" {
+		log.Printf("No studio build found (cd studio && npm run build, or set AITK_STUDIO_DIR).")
+	}
 	if studioapi.Enabled() {
 		studio := "No studio build found (cd studio && npm run build, or set AITK_STUDIO_DIR)."
 		if studioDir != "" {
@@ -263,6 +304,45 @@ func openStudioAPI(dataDir string) (string, error) {
 
 // studioAPIRoot stands in for the console at / on the studio API: the exact
 // path / goes to the studio, anything else is a miss.
+// workerRoot answers / on a worker: it has no UI of its own.
+func workerRoot() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			http.Error(w, "This GPU server is a worker: manage it from its studio API.", http.StatusNotFound)
+			return
+		}
+		notFound(w, r)
+	})
+}
+
+// withoutMCP answers /mcp with 404 on a worker.
+func withoutMCP(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/mcp" || strings.HasPrefix(r.URL.Path, "/mcp/") {
+			v1api.Fail(w, v1api.CodeNotFound, "this GPU server is a worker: agents reach it through its studio API's /mcp")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// workerTunnel is the tunnel a worker keeps to its studio API, checked
+// before anything starts so a misconfigured worker fails at once.
+func workerTunnel() (*tunnel.Client, error) {
+	raw := os.Getenv("AITK_STUDIO_API_URL")
+	if strings.TrimSpace(raw) == "" {
+		return nil, errors.New("AITK_MODE=worker needs AITK_STUDIO_API_URL, the studio API that manages this server; to run it on its own, set AITK_MODE=standalone")
+	}
+	if _, err := tunnel.CheckURL(raw); err != nil {
+		return nil, err
+	}
+	c := &tunnel.Client{URL: raw, MachineID: os.Getenv("AITK_MACHINE_ID"), Token: os.Getenv("AI_TOOLKIT_AUTH")}
+	if c.MachineID == "" || c.Token == "" {
+		return nil, errors.New("AITK_MODE=worker needs AITK_MACHINE_ID and AI_TOOLKIT_AUTH, which the studio API sets when it launches the server")
+	}
+	return c, nil
+}
+
 func studioAPIRoot() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {

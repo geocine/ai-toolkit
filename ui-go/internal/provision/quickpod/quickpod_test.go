@@ -269,22 +269,22 @@ func TestQuoteBusy(t *testing.T) {
 func TestTemplates(t *testing.T) {
 	m, _ := setup(t, mockkit.Options{})
 	// version_tag is never read by createpod: only image_path counts.
-	m.AddTemplate(quickpodmock.Template{UUID: "pinned", Name: "aitk pinned", ImagePath: "ghcr.io/geocine/aitoolkit-go:f53a407", VersionTag: "ignored",
+	m.AddTemplate(quickpodmock.Template{UUID: "pinned", Name: "aitk pinned", ImagePath: "ghcr.io/geocine/aitoolkit-worker:f53a407", VersionTag: "ignored",
 		DockerOptions: "--shm-size=16g -p   8675:8675"})
 	// Another user's public template is listed by /templates but left out.
-	m.AddTemplate(quickpodmock.Template{UUID: "theirs", Name: "aitk copy", ImagePath: "ghcr.io/someone/aitoolkit-go:latest",
+	m.AddTemplate(quickpodmock.Template{UUID: "theirs", Name: "aitk copy", ImagePath: "ghcr.io/someone/aitoolkit-worker:latest",
 		DockerOptions: "-p 8675:8675", Public: true, UserID: quickpodmock.OtherUserID})
 	// The account's own public template stays.
-	m.AddTemplate(quickpodmock.Template{UUID: "mine-public", Name: "aitk shared", ImagePath: "ghcr.io/geocine/aitoolkit-go:latest",
+	m.AddTemplate(quickpodmock.Template{UUID: "mine-public", Name: "aitk shared", ImagePath: "ghcr.io/geocine/aitoolkit-worker:latest",
 		DockerOptions: "-p 8675:8675", Public: true})
 	got, err := a.Templates(context.Background(), key)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []provision.Template{
-		{ID: quickpodmock.AitkTemplateUUID, Name: "aitk headless", Image: "ghcr.io/geocine/aitoolkit-go:latest", Ours: true, PublishesPort: true, HasToken: true},
-		{ID: "pinned", Name: "aitk pinned", Image: "ghcr.io/geocine/aitoolkit-go:f53a407", Ours: true, PublishesPort: true},
-		{ID: "mine-public", Name: "aitk shared", Image: "ghcr.io/geocine/aitoolkit-go:latest", Ours: true, PublishesPort: true},
+		{ID: quickpodmock.AitkTemplateUUID, Name: "aitk headless", Image: "ghcr.io/geocine/aitoolkit-worker:latest", Ours: true, PublishesPort: true, HasToken: true},
+		{ID: "pinned", Name: "aitk pinned", Image: "ghcr.io/geocine/aitoolkit-worker:f53a407", Ours: true, PublishesPort: true},
+		{ID: "mine-public", Name: "aitk shared", Image: "ghcr.io/geocine/aitoolkit-worker:latest", Ours: true, PublishesPort: true},
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("templates\n%+v\nwant\n%+v", got, want)
@@ -302,7 +302,7 @@ func TestTemplates(t *testing.T) {
 func TestLaunchBody(t *testing.T) {
 	m, _ := setup(t, mockkit.Options{})
 	ctx := context.Background()
-	spec := provision.LaunchSpec{Label: "aitk-abc", OfferID: "6302336", Image: "ghcr.io/geocine/aitoolkit-go:f53a407", DiskGB: 150,
+	spec := provision.LaunchSpec{Label: "aitk-abc", OfferID: "6302336", Image: "ghcr.io/geocine/aitoolkit-worker:f53a407", DiskGB: 150,
 		TemplateID: quickpodmock.AitkTemplateUUID, Env: map[string]string{"AI_TOOLKIT_AUTH": "aitk_tok", "AITK_STUDIO_URL": "https://studio.example.com/x"}}
 	ref, err := a.Launch(ctx, key, spec)
 	if err != nil {
@@ -330,7 +330,7 @@ func TestLaunchBody(t *testing.T) {
 			t.Errorf("%s = %#v, want %#v", k, body[k], v)
 		}
 	}
-	if strings.Contains(string(r.Body), "aitoolkit-go") {
+	if strings.Contains(string(r.Body), "aitoolkit-worker") {
 		t.Error("the image comes from the template and must not be sent")
 	}
 
@@ -795,7 +795,7 @@ func TestPodEnvModes(t *testing.T) {
 				t.Errorf("%q: a node started without a port mapping", c.mode)
 			}
 		} else if len(nodes) != 1 || nodes[0].Env["AI_TOOLKIT_AUTH"] != c.token || nodes[0].Kind != "quickpod" ||
-			nodes[0].Image != "ghcr.io/geocine/aitoolkit-go:latest" || nodes[0].VRAMGB != 24 {
+			nodes[0].Image != "ghcr.io/geocine/aitoolkit-worker:latest" || nodes[0].VRAMGB != 24 {
 			t.Errorf("%q: nodes %+v", c.mode, nodes)
 		}
 		mu.Unlock()

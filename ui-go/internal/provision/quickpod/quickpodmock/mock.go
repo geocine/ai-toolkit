@@ -70,7 +70,7 @@ const (
 	TemplateToken     = "template-token-0000"
 	// AitkTemplateImage is the aitk template's image: the tag lives in
 	// image_path (createpod never reads version_tag), so it follows :latest.
-	AitkTemplateImage = "ghcr.io/geocine/aitoolkit-go:latest"
+	AitkTemplateImage = "ghcr.io/geocine/aitoolkit-worker:latest"
 	// PinnedTemplateUUID is PinnedTemplate's id.
 	PinnedTemplateUUID = "5e1f9f29-aitk-4c1e-9d6a-00000000f53a"
 )
@@ -79,7 +79,7 @@ const (
 // the studio's "change the tag in the Docker Image Path" fix leaves it
 // (simulate seeds it with registrymock's revision).
 func PinnedTemplate(build string) Template {
-	return Template{UUID: PinnedTemplateUUID, Name: "aitk headless (pinned)", ImagePath: "ghcr.io/geocine/aitoolkit-go:" + build,
+	return Template{UUID: PinnedTemplateUUID, Name: "aitk headless (pinned)", ImagePath: "ghcr.io/geocine/aitoolkit-worker:" + build,
 		DockerOptions: "-p 8675:8675 -e AI_TOOLKIT_AUTH=" + TemplateToken}
 }
 

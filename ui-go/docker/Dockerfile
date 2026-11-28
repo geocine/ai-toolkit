@@ -18,7 +18,7 @@ RUN go mod download
 COPY ui-go/ ./
 ARG GIT_SHA=
 RUN CGO_ENABLED=0 go test ./internal/... && \
-    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X github.com/geocine/aitoolkit/handlers/v1.buildVersion=${GIT_SHA}" -o /out/aitk-server .
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X github.com/geocine/aitoolkit/handlers/v1.buildVersion=${GIT_SHA} -X github.com/geocine/aitoolkit/internal/mode.image=gpu" -o /out/aitk-server .
 
 # The frontend: whatever ui-go/web builds to dist/ is served at / by the Go server.
 FROM node:22-alpine AS web-build
@@ -56,6 +56,11 @@ RUN sed -i 's/\r$//' /start.sh /tmp/start-go.sh && \
     rm /tmp/start-go.sh && \
     chmod +x /start.sh
 
+# A worker by default: reached only through its tunnel to the studio API that
+# launched it (AITK_STUDIO_API_URL). Set AITK_MODE=standalone for a server you
+# open directly, or studio for the studio and trainer on one node. The studio
+# API (no trainer) is its own image: this binary refuses AITK_MODE=studio-api.
+ENV AITK_MODE=worker
 EXPOSE 8675
 WORKDIR /
 CMD ["/start.sh"]
@@ -66,7 +71,7 @@ CMD ["/start.sh"]
 # check treats as missing. Kept last so a new value only rebuilds this layer.
 ARG AITK_VERSION= AITK_REVISION= AITK_REVISION_SHORT= AITK_CREATED= AITK_UPSTREAM= AITK_BASE_NAME= \
     AITK_FLAVOR= AITK_CUDA= AITK_DRIVER_MIN= AITK_TORCH= AITK_SM= AITK_PTX= AITK_SM_FLASH_ATTN= AITK_BASE_UNPACKED=
-LABEL org.opencontainers.image.title="aitoolkit-go" \
+LABEL org.opencontainers.image.title="aitoolkit-worker" \
       org.opencontainers.image.version="${AITK_VERSION}" \
       org.opencontainers.image.revision="${AITK_REVISION}" \
       org.opencontainers.image.created="${AITK_CREATED}" \

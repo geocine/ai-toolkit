@@ -12,11 +12,12 @@
 name: aitk-local
 
 x-node: &node
-  image: ${AITK_IMAGE:-ghcr.io/geocine/aitoolkit-go:latest}
+  image: ${AITK_IMAGE:-ghcr.io/geocine/aitoolkit-worker:latest}
   depends_on:
     bucket:
       condition: service_completed_successfully
   environment:
+    AITK_MODE: standalone
     AI_TOOLKIT_AUTH: ${AI_TOOLKIT_AUTH:-secret}
     AITK_S3_ENDPOINT: http://minio:9000
     AITK_S3_BUCKET: aitk

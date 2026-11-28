@@ -49,7 +49,7 @@ func (c client) do(method, path, body string, hdr ...string) (*http.Response, st
 	return res, string(b)
 }
 
-const goodPod = `{"name":"aitk-x","image":"ghcr.io/geocine/aitoolkit-go:latest","gpu":{"id":"NVIDIA GeForce RTX 4090","count":1},"cloud":"SECURE","disk":50,"ports":["8675/http"],"env":{"AI_TOOLKIT_AUTH":"tok"}}`
+const goodPod = `{"name":"aitk-x","image":"ghcr.io/geocine/aitoolkit-worker:latest","gpu":{"id":"NVIDIA GeForce RTX 4090","count":1},"cloud":"SECURE","disk":50,"ports":["8675/http"],"env":{"AI_TOOLKIT_AUTH":"tok"}}`
 
 func create(t *testing.T, c client, body string) map[string]any {
 	t.Helper()
@@ -162,7 +162,7 @@ func TestCreateValidation(t *testing.T) {
 	// the template copy merges env, the body winning
 	p := create(t, c, `{"name":"t","templateId":"tpl_aitk0001","gpu":{"id":"NVIDIA GeForce RTX 4090"},"env":{"AI_TOOLKIT_AUTH":"mine"}}`)
 	env := p["env"].(map[string]any)
-	if p["image"] != "ghcr.io/geocine/aitoolkit-go:latest" || env["AI_TOOLKIT_AUTH"] != "mine" || env["AITK_CORS_ORIGINS"] != "*" || p["template"] != nil {
+	if p["image"] != "ghcr.io/geocine/aitoolkit-worker:latest" || env["AI_TOOLKIT_AUTH"] != "mine" || env["AITK_CORS_ORIGINS"] != "*" || p["template"] != nil {
 		t.Errorf("template pod %v", p)
 	}
 }

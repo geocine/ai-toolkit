@@ -19,7 +19,7 @@ var testdata embed.FS
 // Fixture facts other packages assert on.
 const (
 	// DefaultRepo is the server image's repository on GHCR.
-	DefaultRepo = "geocine/aitoolkit-go"
+	DefaultRepo = "geocine/aitoolkit-worker"
 	// Revision is the build the default fixtures publish as :<sha>, :latest,
 	// :cu130 and :0.13.34.
 	Revision = "f53a407"
@@ -65,7 +65,7 @@ func layersOf(name string) []Layer {
 // (IMAGE-PLAN §1.3).
 func GoLabels() map[string]string {
 	return map[string]string{
-		"org.opencontainers.image.title":            "aitoolkit-go",
+		"org.opencontainers.image.title":            "aitoolkit-worker",
 		"org.opencontainers.image.version":          Version,
 		"org.opencontainers.image.revision":         RevisionFull,
 		"org.opencontainers.image.created":          "2026-10-24T09:00:00Z",
@@ -142,7 +142,7 @@ func goConfig(labels map[string]string, env map[string]string, created string) [
 }
 
 // Fixtures are the images simulate mode and the tests serve:
-//   - ghcr.io/geocine/aitoolkit-go :f53a407, :latest, :cu130, :0.13.34 (one
+//   - ghcr.io/geocine/aitoolkit-worker :f53a407, :latest, :cu130, :0.13.34 (one
 //     labelled cu130 build), :oldsha1 (a Go image without labels, bare
 //     manifest), :cu126test (a synthetic cu126 flavor), :arm64only;
 //   - ghcr.io/geocine/aitoolkit :latest (CUDA 13.0.3) and :0.11.1 (CUDA

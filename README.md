@@ -1,6 +1,6 @@
 # AI Toolkit (geocine fork)
 
-A fork of [ostris/ai-toolkit](https://github.com/ostris/ai-toolkit) that adds a headless Go server, studio UI, versioned HTTP `/v1` API, and MCP server under [`ui-go/`](ui-go/), published as the public container image `ghcr.io/geocine/aitoolkit-go`.
+A fork of [ostris/ai-toolkit](https://github.com/ostris/ai-toolkit) that adds a headless Go server, studio UI, versioned HTTP `/v1` API, and MCP server under [`ui-go/`](ui-go/), published as the public container image `ghcr.io/geocine/aitoolkit-worker`.
 
 ## How this fork differs from upstream
 
@@ -11,8 +11,9 @@ A fork of [ostris/ai-toolkit](https://github.com/ostris/ai-toolkit) that adds a 
   - `/api/*` — upstream-compatible UI API (checked against upstream by `ui-go/parity/`).
   - `/v1/*` — headless JSON API (`/v1/openapi.json`) with named API keys, signed download links, SSE/long-poll events, dataset caption and photo checks, S3/R2 and Hugging Face remotes, portable job failover, resumable run bundles (`AITK_BOOTSTRAP`), notifications, unattended stop/destroy lifecycle, and GPU server provisioning/recommendations across RunPod, Vast.ai, and QuickPod.
   - `/mcp` — Streamable HTTP MCP server in code mode (`aitk_api`, `aitk_run`, `aitk_view`) over `/v1`.
-- **Built-in UIs:** Management console at `/` (`ui-go/web`) and Studio at `/studio/` (`ui-go/studio`), plus a `--studio-api` mode that runs with no GPU, Python, or upstream checkout to manage rented GPU servers.
-- **Container image:** `ghcr.io/geocine/aitoolkit-go` layers the Go server and UIs on top of upstream's `docker/Dockerfile` (`linux/amd64`, CUDA 13.0, driver 580+, RTX 30-series / A100 or newer).
+- **Built-in UIs:** Management console at `/` (`ui-go/web`) and Studio at `/studio/` (`ui-go/studio`). One `AITK_MODE` picks what a GPU server is: `standalone` (console), `studio` (studio + trainer), or `worker` (trainer only, managed by a studio API through an outbound tunnel). The studio API itself (no GPU, Python, or upstream checkout) is its own image, `ghcr.io/geocine/aitoolkit-studio`.
+- **Fleet tunnel:** GPU servers created by the studio dial home over one TLS WebSocket (mutual HMAC handshake, yamux streams), so they need no public port and provider proxies never see the traffic.
+- **Container image:** `ghcr.io/geocine/aitoolkit-worker` layers the Go server and UIs on top of upstream's `docker/Dockerfile` (`linux/amd64`, CUDA 13.0, driver 580+, RTX 30-series / A100 or newer).
 
 ## Quick start
 
@@ -21,18 +22,19 @@ A fork of [ostris/ai-toolkit](https://github.com/ostris/ai-toolkit) that adds a 
 Requires an `amd64` host with an NVIDIA GPU (RTX 30-series / A100 or newer, `sm_80+`), a CUDA 13.0+ driver (`580+`), and the NVIDIA Container Toolkit.
 
 ```bash
-docker pull ghcr.io/geocine/aitoolkit-go:latest
+docker pull ghcr.io/geocine/aitoolkit-worker:latest
 
 docker run -d --gpus all -p 8675:8675 \
+  -e AITK_MODE=standalone \
   -e AI_TOOLKIT_AUTH=<long-random-token> \
   -e HF_TOKEN=<hf-token-for-gated-models> \
-  ghcr.io/geocine/aitoolkit-go:latest
+  ghcr.io/geocine/aitoolkit-worker:latest
 ```
 
-Connect to `http://<host>:8675` with `Authorization: Bearer <token>`:
+The image defaults to `AITK_MODE=worker`, which only a studio API can reach, so a server you start by hand sets `standalone` (or `studio`). Connect to `http://<host>:8675` with `Authorization: Bearer <token>`:
 
-- `/` — management console
-- `/studio/` — Studio UI (installable on a phone home screen)
+- `/` — management console (`standalone`)
+- `/studio/` — Studio UI (`studio`; installable on a phone home screen)
 - `/v1` — headless API (OpenAPI schema at `/v1/openapi.json`)
 - `/mcp` — MCP server (Streamable HTTP)
 
@@ -47,7 +49,8 @@ cd ui && npx prisma db push && cd ..   # once: create/migrate aitk_db.db with up
 cd ui-go
 (cd web && npm ci && npm run build)    # console -> web/dist, served at /
 (cd studio && npm ci && npm run build) # studio  -> studio/dist, served at /studio/
-go run . --port 8675                   # API, UIs, /mcp, and queue worker on :8675
+go run . --port 8675                   # standalone: API, console, /mcp, and queue worker on :8675
+AITK_MODE=studio go run . --port 8675  # or the studio instead of the console
 ```
 
 **Studio API only (no GPU or Python needed)** — holds provider keys and creates/tracks GPU servers on RunPod, Vast.ai, or QuickPod:

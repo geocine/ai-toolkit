@@ -131,7 +131,7 @@ func TestMachineDefaults(t *testing.T) {
 	if spec != "{}" || endpoints != "[]" || launchRef != "" || digest != "" || problem != "" || simulated != 0 || price.Valid {
 		t.Fatalf("defaults = %q %q %q %q %q %d %v", spec, endpoints, launchRef, digest, problem, simulated, price)
 	}
-	if _, err := DB.Exec(`UPDATE machines SET image_launch_ref = 'ghcr.io/geocine/aitoolkit-go@sha256:ab', image_digest = 'sha256:ab' WHERE id = 'm1'`); err != nil {
+	if _, err := DB.Exec(`UPDATE machines SET image_launch_ref = 'ghcr.io/geocine/aitoolkit-worker@sha256:ab', image_digest = 'sha256:ab' WHERE id = 'm1'`); err != nil {
 		t.Fatal(err)
 	}
 }

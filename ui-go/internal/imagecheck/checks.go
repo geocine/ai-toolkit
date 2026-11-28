@@ -31,7 +31,7 @@ type CheckAction struct {
 }
 
 // SettingsURL is where the owner makes the default image's package public.
-const SettingsURL = "https://github.com/users/geocine/packages/container/aitoolkit-go/settings"
+const SettingsURL = "https://github.com/users/geocine/packages/container/aitoolkit-worker/settings"
 
 // DeniedCopy is the message and fix for an image a registry (or a provider
 // pulling it) refused anonymously. The default image gets the "not

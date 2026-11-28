@@ -268,7 +268,7 @@ func (s *Service) machine(r *row) Machine {
 		ID: r.ID, Name: r.Name, Label: r.Label, Provider: r.Provider, ProviderID: r.ProviderID, Status: r.Status,
 		Detail: r.Detail, ProviderStatus: r.ProviderStatus, GPU: r.Spec.Offer.GPU, GPUCount: r.Spec.GPUCount,
 		VRAMGB: r.Spec.Offer.VRAMGB, Location: r.Spec.Offer.Location, Image: r.Spec.Image,
-		ImageWarnings: nonNil(r.Spec.ImageWarnings), DiskGB: r.Spec.DiskGB, Secure: strings.HasPrefix(r.BaseURL, "https://"),
+		ImageWarnings: nonNil(r.Spec.ImageWarnings), DiskGB: r.Spec.DiskGB, Secure: SecureBase(r.BaseURL), Tunnel: TunnelBase(r.BaseURL),
 		RelayPath: "/v1/machines/" + r.ID + "/relay", PricePerHour: r.Price, StoppedPricePerHour: r.StoppedPrice,
 		WhenDone: r.Spec.WhenDone, SelfDestroyKey: r.Spec.SelfDestroyKey, CopiedRemote: r.Spec.CopiedRemote,
 		Actions: s.actions(r), Self: r.isSelf(), Simulated: r.Simulated, Warnings: nonNil(r.Spec.Warnings),

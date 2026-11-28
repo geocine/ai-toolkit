@@ -9,7 +9,7 @@ import (
 type Ref struct {
 	Domain string // as the user means it: "ghcr.io", "docker.io", "localhost:5000"
 	API    string // registry API host: "ghcr.io", "registry-1.docker.io"
-	Repo   string // "geocine/aitoolkit-go", "library/alpine"
+	Repo   string // "geocine/aitoolkit-worker", "library/alpine"
 	Tag    string // as typed; "latest" when neither tag nor digest was given, "" for a digest alone
 	Digest string // "sha256:<64 hex>"; when both are given the digest is what gets resolved
 }
@@ -104,7 +104,7 @@ func isSpace(c rune) bool {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\v' || c == '\f' || c == 0x85 || c == 0xA0
 }
 
-// Name is the familiar repository name: "ghcr.io/geocine/aitoolkit-go",
+// Name is the familiar repository name: "ghcr.io/geocine/aitoolkit-worker",
 // "alpine", "x/y" (Docker Hub drops its domain, and "library/" when nothing
 // else follows it: "library/a/b" stays as it is).
 func (r Ref) Name() string {
@@ -117,7 +117,7 @@ func (r Ref) Name() string {
 	return r.Domain + "/" + r.Repo
 }
 
-// String is the familiar form: "ghcr.io/geocine/aitoolkit-go:latest",
+// String is the familiar form: "ghcr.io/geocine/aitoolkit-worker:latest",
 // "alpine:3.20", "alpine@sha256:...", "a/b:t@sha256:..." (tag and digest both
 // kept, as docker prints them).
 func (r Ref) String() string {
@@ -137,5 +137,5 @@ func (r Ref) WithTag(tag string) Ref {
 	return r
 }
 
-// Pinned is the reference by digest: "ghcr.io/geocine/aitoolkit-go@sha256:...".
+// Pinned is the reference by digest: "ghcr.io/geocine/aitoolkit-worker@sha256:...".
 func (r Ref) Pinned(digest string) string { return r.Name() + "@" + digest }

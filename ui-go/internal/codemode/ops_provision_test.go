@@ -106,7 +106,7 @@ func TestProvisionOpsWire(t *testing.T) {
 	var calls []recorded
 	res := Run(context.Background(), `
 await aitk.providers.offers("vast", { gpu: "4090", min_vram_gb: 24, max_vram_gb: 48, max_price: 0.8, gpu_count: 1, cloud: "community",
-  disk_gb: 150, limit: 200, image: "ghcr.io/geocine/aitoolkit-go:latest", model: "flux", show_all: true, fast: true });
+  disk_gb: 150, limit: 200, image: "ghcr.io/geocine/aitoolkit-worker:latest", model: "flux", show_all: true, fast: true });
 await aitk.machines.launch({ provider: "vast", offer_id: "o1", max_price_per_hour: 0.5, request_id: "req_12345", skip_image_check: true });
 await aitk.machines.terminate("mch_1", { confirm_self: true });
 return 1`, Options{Call: fakeAPI(t, &calls)})
@@ -115,7 +115,7 @@ return 1`, Options{Call: fakeAPI(t, &calls)})
 	}
 	q, _ := url.ParseQuery(calls[0].query)
 	want := map[string]string{"gpu": "4090", "min_vram_gb": "24", "max_vram_gb": "48", "max_price": "0.8", "gpu_count": "1", "cloud": "community",
-		"disk_gb": "150", "limit": "200", "image": "ghcr.io/geocine/aitoolkit-go:latest", "model": "flux", "show_all": "true", "fast": "true"}
+		"disk_gb": "150", "limit": "200", "image": "ghcr.io/geocine/aitoolkit-worker:latest", "model": "flux", "show_all": "true", "fast": "true"}
 	if calls[0].method != "GET" || calls[0].path != "/v1/providers/vast/offers" || len(q) != len(want) {
 		t.Fatalf("offers call %+v", calls[0])
 	}

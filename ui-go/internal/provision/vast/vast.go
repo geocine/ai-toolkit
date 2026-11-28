@@ -484,7 +484,7 @@ func (adapter) Templates(ctx context.Context, key string) ([]provision.Template,
 			ID:            id,
 			Name:          t.Name,
 			Image:         image,
-			Ours:          strings.Contains(image, "aitoolkit-go"),
+			Ours:          strings.Contains(image, "aitoolkit-worker"),
 			PublishesPort: strings.Contains(env, strconv.Itoa(provision.Port)),
 			HasToken:      strings.Contains(env, "AI_TOOLKIT_AUTH="),
 		})

@@ -35,7 +35,7 @@ func TestImageTypesMatchStudio(t *testing.T) {
 func TestImageDeclaration(t *testing.T) {
 	decl := Declaration("")
 	for _, s := range []string{"type ImageCheck = ", "type HostFacts = ", "type CudaCheck = ", "  images: {\n", "  hosts: {\n",
-		"check(params: { /** e.g. ghcr.io/geocine/aitoolkit-go:latest */ image: string;", "recommend(params?: {", "gpus(): Promise<Items<GpuInfo>>;", "Promise<HostFit>;"} {
+		"check(params: { /** e.g. ghcr.io/geocine/aitoolkit-worker:latest */ image: string;", "recommend(params?: {", "gpus(): Promise<Items<GpuInfo>>;", "Promise<HostFit>;"} {
 		if !strings.Contains(decl, s) {
 			t.Errorf("declaration lacks %q", s)
 		}

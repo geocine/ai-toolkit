@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -37,6 +38,56 @@ type Options struct {
 	TLSTimeout         time.Duration // default 5 s
 	HeaderTimeout      time.Duration // default 8 s
 	Resolver           *net.Resolver // nil = net.DefaultResolver; tests pass StaticResolver
+	Tunnel             bool          // dial *.tunnel.aitk through the tunnel dialer (provision probe/relay only)
+}
+
+// TunnelSuffix ends the synthetic host of a GPU server reached through its
+// tunnel (internal/tunnel). Such a host is never resolved: a transport with
+// Options.Tunnel hands it to the dialer SetTunnelDialer installed, and every
+// other transport refuses it.
+const TunnelSuffix = ".tunnel.aitk"
+
+var tunnelDialer atomic.Pointer[func(ctx context.Context, host string) (net.Conn, error)]
+
+// SetTunnelDialer installs the dialer for TunnelSuffix hosts (nil removes it).
+func SetTunnelDialer(f func(ctx context.Context, host string) (net.Conn, error)) {
+	if f == nil {
+		tunnelDialer.Store(nil)
+		return
+	}
+	tunnelDialer.Store(&f)
+}
+
+// IsTunnelHost reports a host (no port) under TunnelSuffix.
+func IsTunnelHost(host string) bool {
+	return strings.HasSuffix(strings.ToLower(strings.TrimSuffix(host, ".")), TunnelSuffix)
+}
+
+var errTunnel = fmt.Errorf("%w: a tunnel host on a transport without tunnels", ErrBlocked)
+
+// withTunnel routes TunnelSuffix hosts away from DNS, the guard and any proxy.
+func withTunnel(t *http.Transport, allowed bool) *http.Transport {
+	dial := t.DialContext
+	t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, _, err := net.SplitHostPort(addr)
+		if err != nil || !IsTunnelHost(host) {
+			return dial(ctx, network, addr)
+		}
+		f := tunnelDialer.Load()
+		if !allowed || f == nil {
+			return nil, errTunnel
+		}
+		return (*f)(ctx, host)
+	}
+	if proxy := t.Proxy; proxy != nil {
+		t.Proxy = func(r *http.Request) (*url.URL, error) {
+			if IsTunnelHost(r.URL.Hostname()) {
+				return nil, nil
+			}
+			return proxy(r)
+		}
+	}
+	return t
 }
 
 // NoTimeout as Options.Timeout leaves the whole request bounded only by its
@@ -144,6 +195,10 @@ func control(check func(netip.Addr) error) func(network, address string, c sysca
 // a literal IP is checked before the proxy is asked, so a refused address
 // never reaches it; a destination hostname is resolved by the proxy.
 func Transport(o Options) *http.Transport {
+	return withTunnel(transport(o), o.Tunnel)
+}
+
+func transport(o Options) *http.Transport {
 	dialTimeout := orDefault(o.DialTimeout, defaultDialTimeout)
 	strict := &net.Dialer{Timeout: dialTimeout, KeepAlive: 30 * time.Second, Resolver: o.Resolver, Control: Control(o.AllowLoopback)}
 	t := &http.Transport{

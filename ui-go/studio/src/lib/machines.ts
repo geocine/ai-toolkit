@@ -159,12 +159,13 @@ export function useMachines(servers: Server[]) {
 }
 
 /**
- * How the studio reaches a linked machine. Direct when the machine is https or
- * this page is plain http (no mixed content); otherwise through the
- * owner's relay with the owner's token.
+ * How the studio reaches a linked machine. A machine reached through its
+ * tunnel only ever answers through the owner's relay. Otherwise direct when
+ * the machine is https or this page is plain http (no mixed content), else
+ * through the relay with the owner's token.
  */
 export function linkVia(owner: Server, l: MachineLink): { base: string; token: string; via: 'direct' | 'relay' } {
-  if (l.secure || window.location.protocol === 'http:') return { base: trimBase(l.base_url), token: l.token, via: 'direct' };
+  if (!l.tunnel && (l.secure || window.location.protocol === 'http:')) return { base: trimBase(l.base_url), token: l.token, via: 'direct' };
   return { base: trimBase(owner.base) + l.relay_path, token: owner.token, via: 'relay' };
 }
 
@@ -210,7 +211,7 @@ export function clearLinked(id: string) {
 export function relinked(s: Server, m: Machine, owner: Server): Server | null {
   if (s.machine?.id !== m.id || s.machine.via !== 'direct' || s.machine.control !== owner.id) return null;
   if (m.status !== 'ready' || m.problem || !m.base_url) return null;
-  const { base, token, via } = linkVia(owner, { name: s.name, base_url: m.base_url, token: s.token, secure: m.secure, relay_path: m.relay_path });
+  const { base, token, via } = linkVia(owner, { name: s.name, base_url: m.base_url, token: s.token, secure: m.secure, tunnel: m.tunnel, relay_path: m.relay_path });
   if (base === s.base && token === s.token && via === s.machine.via) return null;
   return { ...s, base, token, machine: { ...s.machine, via } };
 }

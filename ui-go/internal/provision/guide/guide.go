@@ -170,12 +170,13 @@ var labels = map[provision.Kind][]string{
 func runpodGuide(o Options, token string) provision.SetupGuide {
 	env := []provision.GuideEnv{
 		{Name: "AI_TOOLKIT_AUTH", Value: token, Secret: true, Note: "The server asks for it on every request. A RunPod secret works too: {{ RUNPOD_SECRET_aitk_token }}."},
+		{Name: "AITK_MODE", Value: "standalone", Note: "An ordinary ai-toolkit server you open directly (console at /, /v1, /mcp). Servers the studio creates are workers: the studio sets their own AITK_MODE, which wins."},
 		{Name: "AITK_CORS_ORIGINS", Value: o.CORSOrigin, Note: "Lets your studio call the server from the browser."},
 		{Name: "HF_TOKEN", Value: "{{ RUNPOD_SECRET_hf_token }}", Secret: true, Note: "Optional, for gated base models: save your Hugging Face token as the RunPod secret hf_token first."},
 	}
 	return provision.SetupGuide{
 		Env:      env,
-		EnvBlock: envBlock(env[:2]),
+		EnvBlock: envBlock(env[:3]),
 		Fields: []provision.GuideField{
 			{Label: "Name", Value: TemplateName},
 			{Label: "Visibility", Value: "Private", Note: "The template holds your token."},
@@ -206,12 +207,13 @@ func vastGuide(o Options, token string) provision.SetupGuide {
 	env := []provision.GuideEnv{
 		{Name: "AI_TOOLKIT_AUTH", Value: token, Secret: true, Note: "Under Account → Environment Variables, so it stays out of the template. Or, with Template Visibility Private, as -e AI_TOOLKIT_AUTH=" + token + " in Docker Options. An account-wide value also reaches the servers the studio creates for you."},
 		{Name: "OPEN_BUTTON_PORT", Value: port, Note: "Points the instance's Open button at the server."},
+		{Name: "AITK_MODE", Value: "standalone", Note: "An ordinary ai-toolkit server you open directly (console at /, /v1, /mcp). Servers the studio creates are workers: the studio sets their own AITK_MODE, which wins. Keep it in the template, never under Account → Environment Variables."},
 		{Name: "AITK_CORS_ORIGINS", Value: o.CORSOrigin, Note: "Lets your studio call the server from the browser."},
 		{Name: "HF_TOKEN", Value: "<your Hugging Face token>", Secret: true, Note: "Optional, for gated base models. Also under Account → Environment Variables."},
 	}
 	return provision.SetupGuide{
 		Env:           env,
-		DockerOptions: "-p " + port + ":" + port + " " + envFlags(env[1:3]),
+		DockerOptions: "-p " + port + ":" + port + " " + envFlags(env[1:4]),
 		Fields: []provision.GuideField{
 			{Label: "Template Name", Value: TemplateName},
 			{Label: "Image Path:Tag", Value: o.Image, Note: "The full registry path. Another tag works too."},
@@ -228,7 +230,7 @@ func vastGuide(o Options, token string) provision.SetupGuide {
 			"Open Templates (cloud.vast.ai/templates/), click + New and stay on the Config tab.",
 			"Fill in the fields above and paste the docker options into Docker Options.",
 			"Click Create & Use, pick an offer and click RENT. The Extra Filters above keep the offers to hosts with " + hostDriver + " and " + hostGPUs + ". " + hostOlder,
-			"When the instance shows running, open IP Port Info: the line ending in -> " + port + "/tcp gives the URL http://<ip>:<port>. It is plain http only, so the token crosses the internet unencrypted, and a studio served over https cannot call it directly: use the studio the server serves at /studio/.",
+			"When the instance shows running, open IP Port Info: the line ending in -> " + port + "/tcp gives the URL http://<ip>:<port>. It is plain http only, so the token crosses the internet unencrypted, and a studio served over https cannot call it directly: open the console it serves at /, or create the server from your studio instead, which reaches it through an encrypted tunnel.",
 		},
 		URLPattern: "http://<ip>:<port>",
 		ConsoleURL: "https://cloud.vast.ai/templates/",
@@ -243,6 +245,7 @@ func quickpodGuide(o Options, token string) provision.SetupGuide {
 	port := strconv.Itoa(provision.Port)
 	env := []provision.GuideEnv{
 		{Name: "AI_TOOLKIT_AUTH", Value: token, Secret: true, Note: "In the template's docker options, so the server never starts without a token. A pod the studio creates gets its own token, which wins over this one."},
+		{Name: "AITK_MODE", Value: "standalone", Note: "An ordinary ai-toolkit server you open directly (console at /, /v1, /mcp). Servers the studio creates are workers: the studio sets their own AITK_MODE, which wins."},
 		{Name: "AITK_CORS_ORIGINS", Value: o.CORSOrigin, Note: "Lets your studio call the server from the browser."},
 	}
 	return provision.SetupGuide{

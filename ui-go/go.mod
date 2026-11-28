@@ -4,9 +4,11 @@ go 1.26.0
 
 require (
 	github.com/andybalholm/brotli v1.2.6
+	github.com/coder/websocket v1.8.15
 	github.com/dop251/goja v0.0.0-20261004200024-481fdb442bb4
 	github.com/evanw/esbuild v0.28.2
 	github.com/google/uuid v1.6.0
+	github.com/hashicorp/yamux v0.1.2
 	github.com/minio/minio-go/v7 v7.3.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	go.yaml.in/yaml/v3 v3.0.5

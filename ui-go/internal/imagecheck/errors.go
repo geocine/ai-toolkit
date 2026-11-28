@@ -28,7 +28,7 @@ type Error struct {
 
 	// What was asked, for the friendly copy (ErrorCheck). Empty when the
 	// reference did not parse.
-	Repo      string   // familiar repository name: "ghcr.io/geocine/aitoolkit-go"
+	Repo      string   // familiar repository name: "ghcr.io/geocine/aitoolkit-worker"
 	Tag       string   // tag as asked; "" for a digest reference
 	Digest    string   // digest as asked
 	Platforms []string // KindNoPlatform: what the image is built for

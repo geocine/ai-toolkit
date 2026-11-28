@@ -316,7 +316,7 @@ func TestVerifyReadsCreditAndDropsAPIKey(t *testing.T) {
 func launch(t *testing.T, e env, offer, label string) provision.Ref {
 	t.Helper()
 	ref, err := e.c.Launch(context.Background(), testKey, provision.LaunchSpec{
-		Label: label, OfferID: offer, Image: "ghcr.io/geocine/aitoolkit-go:abc1234", DiskGB: 100,
+		Label: label, OfferID: offer, Image: "ghcr.io/geocine/aitoolkit-worker:abc1234", DiskGB: 100,
 		Env: map[string]string{"AI_TOOLKIT_AUTH": "aitk_tok", "OPEN_BUTTON_PORT": "8675"},
 	})
 	if err != nil {
@@ -337,7 +337,7 @@ func TestLaunchBody(t *testing.T) {
 	}
 	exact := `{"args_str":"/start.sh","cancel_unavail":true,"client_id":"me","disk":100,` +
 		`"env":{"-p 8675:8675":"1","AI_TOOLKIT_AUTH":"aitk_tok","OPEN_BUTTON_PORT":"8675"},` +
-		`"image":"ghcr.io/geocine/aitoolkit-go:abc1234","label":"aitk-abc","runtype":"args"}`
+		`"image":"ghcr.io/geocine/aitoolkit-worker:abc1234","label":"aitk-abc","runtype":"args"}`
 	if got, _ := json.Marshal(decode(t, rec.Body)); string(got) != exact {
 		t.Fatalf("create body\n%s\nwant\n%s", got, exact)
 	}
@@ -487,7 +487,7 @@ func TestNodeFactoryGetsTheContainer(t *testing.T) {
 		t.Fatalf("endpoint %+v, want the node %s", in.Endpoints, node.URL)
 	}
 	if got.Kind != "vast" || got.InstanceID != ref.ID || got.Env["AI_TOOLKIT_AUTH"] != "aitk_tok" || got.Env["CONTAINER_ID"] != ref.ID ||
-		got.Env["CONTAINER_API_KEY"] == "" || got.Image != "ghcr.io/geocine/aitoolkit-go:abc1234" || !got.OpenNode || got.GPU != "RTX 4090" || got.VRAMGB != 24 {
+		got.Env["CONTAINER_API_KEY"] == "" || got.Image != "ghcr.io/geocine/aitoolkit-worker:abc1234" || !got.OpenNode || got.GPU != "RTX 4090" || got.VRAMGB != 24 {
 		t.Fatalf("node spec %+v", got)
 	}
 	if _, has := got.Env["-p 8675:8675"]; has {
@@ -541,7 +541,7 @@ func TestTemplates(t *testing.T) {
 		t.Fatalf("own templates only: %+v", ts)
 	}
 	tp := ts[0]
-	if tp.ID != "5915f1dc1ce881defb572015eb9d8178" || tp.Name != "aitk headless" || tp.Image != "ghcr.io/geocine/aitoolkit-go:latest" ||
+	if tp.ID != "5915f1dc1ce881defb572015eb9d8178" || tp.Name != "aitk headless" || tp.Image != "ghcr.io/geocine/aitoolkit-worker:latest" ||
 		!tp.Ours || !tp.PublishesPort || !tp.HasToken {
 		t.Fatalf("template %+v", tp)
 	}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/netip"
+	"os"
 	"regexp"
 	"slices"
 	"strconv"
@@ -12,6 +14,7 @@ import (
 	"github.com/geocine/aitoolkit/internal/notify"
 	"github.com/geocine/aitoolkit/internal/remote"
 	"github.com/geocine/aitoolkit/internal/settings"
+	"github.com/geocine/aitoolkit/internal/tunnel"
 	"github.com/geocine/aitoolkit/internal/v1api"
 )
 
@@ -38,7 +41,7 @@ var (
 // may never pass them.
 func reservedEnv(k string) bool {
 	switch k {
-	case "AI_TOOLKIT_AUTH", "AITK_CORS_ORIGINS", "AITK_STUDIO_URL", "AITK_MACHINE_ID", "PORT", "PUBLIC_IPADDR":
+	case "AI_TOOLKIT_AUTH", "AITK_CORS_ORIGINS", "AITK_STUDIO_URL", "AITK_MACHINE_ID", "AITK_MODE", "AITK_STUDIO_API_URL", "PORT", "PUBLIC_IPADDR":
 		return true
 	}
 	if strings.HasPrefix(k, "AITK_WHEN_DONE") || strings.HasPrefix(k, "AITK_PROVISION_") ||
@@ -63,11 +66,14 @@ const warnRunPodNoKey = "Without your key this pod can only stop itself, not del
 // BuildEnv is the machine's environment (PLAN §5 Launch step 7) and the
 // warnings to show on the Machine. req has its defaults applied (when_done,
 // cors_origins). key is the stored launcher key (self_destroy_key copies it).
-// Errors name the variable, never its value.
-func BuildEnv(ctx context.Context, req LaunchRequest, kind Kind, machineID, token string, caps Caps, key string) (map[string]string, []string, error) {
+// studioAPIURL is where the machine dials its tunnel (StudioAPIURL): every
+// machine launched here is a worker. Errors name the variable, never its value.
+func BuildEnv(ctx context.Context, req LaunchRequest, kind Kind, machineID, token string, caps Caps, key, studioAPIURL string) (map[string]string, []string, error) {
 	env := map[string]string{
-		"AI_TOOLKIT_AUTH": token,
-		"AITK_MACHINE_ID": machineID,
+		"AI_TOOLKIT_AUTH":     token,
+		"AITK_MACHINE_ID":     machineID,
+		"AITK_MODE":           "worker",
+		"AITK_STUDIO_API_URL": studioAPIURL,
 	}
 	var warnings []string
 	if len(req.CORSOrigins) > 0 {
@@ -267,4 +273,43 @@ func checkEnvLimits(kind Kind, caps Caps, env map[string]string) error {
 		return envInvalid("the environment is %d characters; %s takes at most %d", total, p, caps.EnvTotalMax)
 	}
 	return nil
+}
+
+// StudioAPIURL is where a machine launched now dials its tunnel: this studio
+// API's AITK_PUBLIC_URL, else self, its own origin as the launch's client
+// reached it (never the page's Origin: a studio hosted elsewhere would send
+// workers to the wrong host). A real launch
+// is refused before anything is rented when neither is a URL the machine
+// could reach: it would never connect and bill until terminated. A simulated
+// one never dials, so it takes any URL.
+func StudioAPIURL(self string, simulated bool) (string, error) {
+	raw := strings.TrimRight(strings.TrimSpace(os.Getenv("AITK_PUBLIC_URL")), "/")
+	if raw == "" {
+		raw = strings.TrimRight(strings.TrimSpace(self), "/")
+	}
+	if simulated {
+		if raw == "" {
+			raw = "http://127.0.0.1:" + strconv.Itoa(Port)
+		}
+		return raw, nil
+	}
+	const fix = " A GPU server dials this studio API, so it needs a public https URL: set AITK_PUBLIC_URL (for a test on this computer, `cloudflared tunnel --url http://127.0.0.1:8675` prints one)."
+	if raw == "" {
+		return "", v1api.Errorf(v1api.CodeConflict, "This studio API doesn't know its public URL."+fix)
+	}
+	u, err := tunnel.CheckURL(raw)
+	if err != nil || u.Scheme != "https" || tunnelLocal(u.Hostname()) {
+		return "", v1api.Errorf(v1api.CodeConflict, "This studio API's URL "+raw+" can't be reached from a rented server."+fix)
+	}
+	return raw, nil
+}
+
+// tunnelLocal: a host only this machine or its LAN can reach.
+func tunnelLocal(h string) bool {
+	h = strings.ToLower(h)
+	if h == "localhost" || strings.HasSuffix(h, ".localhost") || h == "host.docker.internal" {
+		return true
+	}
+	a, err := netip.ParseAddr(h)
+	return err == nil && (a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast() || a.IsUnspecified())
 }

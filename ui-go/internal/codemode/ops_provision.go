@@ -30,7 +30,7 @@ var provisionOps = []Op{
 			opt("min_vram_gb", "number", "query", "per GPU"), opt("max_vram_gb", "number", "query", "per GPU, exclusive: keeps offers below it"),
 			opt("max_price", "number", "query", "$/h ceiling for the whole machine"), opt("gpu_count", "number", "query", "default 1"),
 			opt("cloud", `"secure" | "community"`, "query", "RunPod only (default secure)"), opt("disk_gb", "number", "query", "prices the disk (default 100)"),
-			opt("limit", "number", "query", "default 50, max 200"), opt("image", "string", "query", "the image the hosts must run (default ghcr.io/geocine/aitoolkit-go:latest)"),
+			opt("limit", "number", "query", "default 50, max 200"), opt("image", "string", "query", "the image the hosts must run (default ghcr.io/geocine/aitoolkit-worker:latest)"),
 			opt("model", "string", "query", "model arch (flux, qwen_image, ...) for VRAM badges and the disk need"),
 			opt("show_all", "boolean", "query", "include offers the image cannot run, marked in fit"),
 			opt("fast", "boolean", "query", "only hosts with fast download and disk (offers that do not report them pass)")}},
@@ -56,7 +56,7 @@ var provisionOps = []Op{
 		Params: []Param{p("provider", "ProviderKind", "body", ""), p("offer_id", "string", "body", "an offer id from providers.offers"),
 			p("max_price_per_hour", "number", "body", "the price the user agreed to; refused when the offer now costs more"),
 			opt("request_id", "string", "body", "8-64 of [A-Za-z0-9_-]; repeating it returns the same machine"),
-			opt("name", "string", "body", "default <gpu> on <provider>"), opt("image", "string", "body", "default ghcr.io/geocine/aitoolkit-go:latest"),
+			opt("name", "string", "body", "default <gpu> on <provider>"), opt("image", "string", "body", "default ghcr.io/geocine/aitoolkit-worker:latest"),
 			opt("disk_gb", "number", "body", "20 to 2000, at most the offer's max_disk_gb"), opt("gpu_count", "number", "body", "RunPod only"),
 			opt("cloud", `"secure" | "community"`, "body", "RunPod only"), opt("template_id", "string", "body", "QuickPod: required (providers.templates)"),
 			opt("cors_origins", "string[]", "body", "origins the machine allows (default the caller's Origin)"), opt("studio_url", "string", "body", "AITK_STUDIO_URL on the machine"),
@@ -88,6 +88,21 @@ var provisionOps = []Op{
 		Params: []Param{p("id", "string", "path", "")}},
 	{Group: "machines", Name: "logs", Method: "GET", Path: "/v1/machines/{id}/logs", Result: "MachineLogs",
 		Doc: "The container's log tail from the provider (256 KiB at most).", Params: []Param{p("id", "string", "path", ""), opt("tail", "number", "query", "lines, default 200, max 2000")}},
+	relayOp("GET", "get", "Every other param is the query string."),
+	relayOp("POST", "post", "Every other param is the JSON body."),
+	relayOp("PUT", "put", "Every other param is the JSON body."),
+	relayOp("PATCH", "patch", "Every other param is the JSON body."),
+	relayOp("DELETE", "delete", "Every other param is the query string."),
+}
+
+// relayOp calls one /v1 route on a launched machine through this server's
+// relay, which adds the machine's token: the way to drive a worker, which
+// answers only through its tunnel (machine.tunnel) and has no /mcp of its own.
+func relayOp(method, name, rest string) Op {
+	return Op{Group: "machines", Name: "relay_" + name, Method: method, Path: "/v1/machines/{id}/relay/{path...}", Result: "unknown",
+		Doc: method + " a route on the ready machine, e.g. path \"v1/jobs\" (no leading slash), through this server's relay with the machine's token. " + rest +
+			" Works for every machine, and is the only way to reach one with tunnel: true. The answer is the machine's JSON; its errors keep their codes.",
+		Params: []Param{p("id", "string", "path", "machine id"), p("path", "string", "path", "the machine's route, e.g. v1/jobs/{id}")}}
 }
 
 const machineWaitTS = `    /** Poll machines.get (refreshing it) until the machine's status is one of until (default: ready, failed, stopped, terminated) or timeout_ms (default 100000) passes, then return the last Machine. Check status and problem: ready with problem open_server cannot be linked. Counts toward the call limit. */
@@ -131,9 +146,9 @@ interface OfferQuery { gpu?: string; min_vram_gb?: number; max_price?: number; g
 interface Offer { id: string; provider: ProviderKind; gpu: string; gpu_count: number; vram_gb: number; price_per_hour: number; stopped_price_per_hour: number | null; location: string; reliability: number | null; availability: 'high' | 'medium' | 'low' | 'available'; max_disk_gb: number | null; cloud?: string; https: boolean; host: HostFacts | null; fit: OfferFit | null }
 interface ProviderTemplate { id: string; name: string; image: string; ours: boolean; publishes_port: boolean; has_token: boolean }
 interface LaunchRequest { provider: ProviderKind; offer_id: string; max_price_per_hour: number; request_id?: string; name?: string; image?: string; disk_gb?: number; gpu_count?: number; cloud?: 'secure' | 'community'; template_id?: string; cors_origins?: string[]; studio_url?: string; copy_remote?: string; copy_hf_token?: boolean; copy_notify?: boolean; when_done?: WhenDone; self_destroy_key?: boolean; env?: Record<string, string>; skip_image_check?: boolean }
-interface Machine { id: string; name: string; label: string; provider: ProviderKind; provider_id: string; status: MachineStatus; problem: MachineProblem | null; detail: string; provider_status: string; gpu: string; gpu_count: number; vram_gb: number; location: string; image: string; image_digest: string | null; image_launch_ref: string | null; image_warnings: string[]; disk_gb: number; base_url: string | null; secure: boolean; relay_path: string; price_per_hour: number | null; stopped_price_per_hour: number | null; when_done: WhenDone; self_destroy_key: boolean; copied_remote: string; actions: ('stop' | 'start' | 'terminate' | 'forget')[]; self: boolean; simulated: boolean; warnings: string[]; created_at: string; updated_at: string; ready_at: string | null; ended_at: string | null }
+interface Machine { id: string; name: string; label: string; provider: ProviderKind; provider_id: string; status: MachineStatus; problem: MachineProblem | null; detail: string; provider_status: string; gpu: string; gpu_count: number; vram_gb: number; location: string; image: string; image_digest: string | null; image_launch_ref: string | null; image_warnings: string[]; disk_gb: number; base_url: string | null; secure: boolean; tunnel: boolean; relay_path: string; price_per_hour: number | null; stopped_price_per_hour: number | null; when_done: WhenDone; self_destroy_key: boolean; copied_remote: string; actions: ('stop' | 'start' | 'terminate' | 'forget')[]; self: boolean; simulated: boolean; warnings: string[]; created_at: string; updated_at: string; ready_at: string | null; ended_at: string | null }
 interface MachinePatch { name?: string; token?: string }
-interface MachineLink { name: string; base_url: string; token: string; secure: boolean; relay_path: string }
+interface MachineLink { name: string; base_url: string; token: string; secure: boolean; tunnel: boolean; relay_path: string }
 interface MachineLogs { text: string; source: string; truncated: boolean }
 interface GuideEnv { name: string; value: string; secret: boolean; note: string }
 interface GuideField { label: string; value: string; note: string }

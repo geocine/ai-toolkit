@@ -56,7 +56,7 @@ func lastReq(t *testing.T, m *runpodmock.Mock, method, pathPrefix string) mockki
 func launch(t *testing.T, a *Adapter, label string) provision.Ref {
 	t.Helper()
 	ref, err := a.Launch(ctx, key, provision.LaunchSpec{Label: label, OfferID: OfferID("NVIDIA GeForce RTX 4090", "SECURE", 1),
-		Image: "ghcr.io/geocine/aitoolkit-go:abc1234", DiskGB: 100, Env: map[string]string{"AI_TOOLKIT_AUTH": "aitk_token_value_123"}})
+		Image: "ghcr.io/geocine/aitoolkit-worker:abc1234", DiskGB: 100, Env: map[string]string{"AI_TOOLKIT_AUTH": "aitk_token_value_123"}})
 	if err != nil {
 		t.Fatalf("launch: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestQuoteRoundTripAndCapacity(t *testing.T) {
 func TestLaunchBodyPassesTheContract(t *testing.T) {
 	a, m, _ := setup(t, mockkit.Options{})
 	ref, err := a.Launch(ctx, key, provision.LaunchSpec{Label: "aitk-abc", OfferID: OfferID("NVIDIA RTX A6000", "COMMUNITY", 2),
-		Image: "ghcr.io/geocine/aitoolkit-go:abc1234", DiskGB: 120, Env: map[string]string{"AI_TOOLKIT_AUTH": "aitk_x", "AITK_MACHINE_ID": "mch_abc"}})
+		Image: "ghcr.io/geocine/aitoolkit-worker:abc1234", DiskGB: 120, Env: map[string]string{"AI_TOOLKIT_AUTH": "aitk_x", "AITK_MACHINE_ID": "mch_abc"}})
 	if err != nil {
 		t.Fatalf("launch: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestLaunchBodyPassesTheContract(t *testing.T) {
 		t.Errorf("body %s", lastReq(t, m, "POST", "/v2/pods").Body)
 	}
 	pods := m.Instances()
-	if len(pods) != 1 || pods[0].ID != ref.ID || pods[0].Env["AITK_MACHINE_ID"] != "mch_abc" || pods[0].Image != "ghcr.io/geocine/aitoolkit-go:abc1234" {
+	if len(pods) != 1 || pods[0].ID != ref.ID || pods[0].Env["AITK_MACHINE_ID"] != "mch_abc" || pods[0].Image != "ghcr.io/geocine/aitoolkit-worker:abc1234" {
 		t.Fatalf("mock pods %+v", pods)
 	}
 }
@@ -482,7 +482,7 @@ func TestTemplates(t *testing.T) {
 	if err != nil || len(got) != 2 {
 		t.Fatalf("templates %+v %v", got, err)
 	}
-	ours := provision.Template{ID: "tpl_aitk0001", Name: "aitk-go headless", Image: "ghcr.io/geocine/aitoolkit-go:latest", Ours: true, PublishesPort: true, HasToken: true}
+	ours := provision.Template{ID: "tpl_aitk0001", Name: "aitk-go headless", Image: "ghcr.io/geocine/aitoolkit-worker:latest", Ours: true, PublishesPort: true, HasToken: true}
 	if got[0] != ours {
 		t.Errorf("aitk template %+v", got[0])
 	}
@@ -497,7 +497,7 @@ func TestTemplatesFollowNextCursor(t *testing.T) {
 		queries = append(queries, r.URL.RawQuery)
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Query().Get("cursor") == "" {
-			_, _ = w.Write([]byte(`{"templates":[{"id":"t1","name":"aitk","image":"ghcr.io/geocine/aitoolkit-go:latest","ports":["8675/http"],"env":{"AI_TOOLKIT_AUTH":"x"}}],"pagination":{"nextCursor":"c2","hasNextPage":true}}`))
+			_, _ = w.Write([]byte(`{"templates":[{"id":"t1","name":"aitk","image":"ghcr.io/geocine/aitoolkit-worker:latest","ports":["8675/http"],"env":{"AI_TOOLKIT_AUTH":"x"}}],"pagination":{"nextCursor":"c2","hasNextPage":true}}`))
 			return
 		}
 		_, _ = w.Write([]byte(`{"templates":[{"id":"t2","name":"other","image":"nginx","ports":[]}],"pagination":{"nextCursor":null,"hasNextPage":false}}`))
@@ -657,7 +657,7 @@ func TestLogsFromSSE(t *testing.T) {
 	a, m, _ := setup(t, mockkit.Options{})
 	ref := launch(t, a, "aitk-logs")
 	text, err := a.Logs(ctx, key, ref.ID, 10)
-	if err != nil || !strings.HasPrefix(text, "Pulling image ghcr.io/geocine/aitoolkit-go:abc1234\n") || !strings.HasSuffix(text, "aitk server listening on :8675") {
+	if err != nil || !strings.HasPrefix(text, "Pulling image ghcr.io/geocine/aitoolkit-worker:abc1234\n") || !strings.HasSuffix(text, "aitk server listening on :8675") {
 		t.Fatalf("logs %q %v", text, err)
 	}
 	if r := lastReq(t, m, "GET", "/v2/pods/"+ref.ID+"/logs"); r.RawQuery != "tail=10" || r.Header.Get("Accept") != "text/event-stream" {
@@ -694,7 +694,7 @@ func TestProxyURLAndSimulatedEndpoint(t *testing.T) {
 	if err != nil || len(inst.Endpoints) != 1 || inst.Endpoints[0] != (provision.Endpoint{URL: "http://127.0.0.1:41000", Secure: false, Via: "proxy"}) {
 		t.Fatalf("sim endpoint %+v %v", inst.Endpoints, err)
 	}
-	if len(started) != 1 || started[0].Env["AI_TOOLKIT_AUTH"] != "aitk_token_value_123" || started[0].Kind != "runpod" || started[0].Image != "ghcr.io/geocine/aitoolkit-go:abc1234" {
+	if len(started) != 1 || started[0].Env["AI_TOOLKIT_AUTH"] != "aitk_token_value_123" || started[0].Kind != "runpod" || started[0].Image != "ghcr.io/geocine/aitoolkit-worker:abc1234" {
 		t.Fatalf("node spec %+v", started)
 	}
 }

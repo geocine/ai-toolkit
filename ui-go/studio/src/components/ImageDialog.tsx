@@ -276,7 +276,7 @@ export function ImageDialog({
               e.preventDefault();
               runCheck(custom);
             }}
-            placeholder="ghcr.io/you/aitoolkit-go:tag"
+            placeholder="ghcr.io/you/aitoolkit-worker:tag"
             spellCheck={false}
             autoCapitalize="off"
             aria-invalid={customBlocked}

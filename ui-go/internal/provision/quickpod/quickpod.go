@@ -570,7 +570,7 @@ func (adapter) Templates(ctx context.Context, key string) ([]provision.Template,
 			ID:            t.UUID,
 			Name:          t.Name,
 			Image:         img,
-			Ours:          strings.Contains(t.ImagePath, "aitoolkit-go"),
+			Ours:          strings.Contains(t.ImagePath, "aitoolkit-worker"),
 			PublishesPort: portFlag.MatchString(t.DockerOptions),
 			HasToken:      tokenFlag.MatchString(t.DockerOptions),
 		})

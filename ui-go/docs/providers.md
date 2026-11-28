@@ -1,6 +1,6 @@
 # GPU servers on RunPod, Vast.ai and QuickPod
 
-A GPU server is the aitk image (`ghcr.io/geocine/aitoolkit-go`) running on a
+A GPU server is the aitk image (`ghcr.io/geocine/aitoolkit-worker`) running on a
 rented GPU. This page covers renting one from the studio, setting one up by
 hand, and what each provider does with your money and your data.
 
@@ -72,7 +72,7 @@ docker run -d --name aitk-server -p 127.0.0.1:8675:8675 \
   -e AI_TOOLKIT_AUTH=<token> -e AITK_CORS_ORIGINS=<studio origin> \
   -e AI_TOOLKIT_GO_DB=/app/ai-toolkit/data/aitk_go.db \
   -v aitk-server:/app/ai-toolkit/data \
-  ghcr.io/geocine/aitoolkit-go:latest
+  ghcr.io/geocine/aitoolkit-worker:latest
 ```
 
 Then open `http://127.0.0.1:8675/studio/`. The volume keeps the keys and the
@@ -101,7 +101,7 @@ Manual template:
 |---|---|---|
 | Name | `aitk headless` |  |
 | Visibility | `Private` | The template holds your token. |
-| Container Image | `ghcr.io/geocine/aitoolkit-go:latest` | A public image, so Container Registry Credentials stay empty. |
+| Container Image | `ghcr.io/geocine/aitoolkit-worker:latest` | A public image, so Container Registry Credentials stay empty. |
 | Container Disk | `100` | GB for models, datasets and checkpoints. It is wiped when the pod stops, so keep results on a remote and terminate the pod when you are done. |
 | Expose HTTP Ports | `8675` |  |
 
@@ -109,6 +109,7 @@ Environment variables:
 
 ```
 AI_TOOLKIT_AUTH=<a long random token>
+AITK_MODE=standalone
 AITK_CORS_ORIGINS=<your studio origin>
 ```
 
@@ -151,7 +152,7 @@ Manual template:
 | Field | Value | Note |
 |---|---|---|
 | Template Name | `aitk headless` |  |
-| Image Path:Tag | `ghcr.io/geocine/aitoolkit-go:latest` | The full registry path. Another tag works too. |
+| Image Path:Tag | `ghcr.io/geocine/aitoolkit-worker:latest` | The full registry path. Another tag works too. |
 | Select Launch Mode | `docker ENTRYPOINT` | Runs the image as built, which starts the server. |
 | Extra Filters | `direct_port_count >= 1 cuda_max_good >= 13.0 compute_cap >= 800` | Only hosts that can give port 8675 a public port, with a driver for CUDA 13.0 or newer (580+) and an RTX 30-series, A100 or newer GPU. |
 | Disk Space | `100` | GB, fixed for the life of the instance. |
@@ -160,14 +161,14 @@ Manual template:
 Docker options:
 
 ```
--p 8675:8675 -e OPEN_BUTTON_PORT=8675 -e AITK_CORS_ORIGINS=<your studio origin>
+-p 8675:8675 -e OPEN_BUTTON_PORT=8675 -e AITK_MODE=standalone -e AITK_CORS_ORIGINS=<your studio origin>
 ```
 
 1. Open Account → Environment Variables (cloud.vast.ai/account/) and add AI_TOOLKIT_AUTH = \<a long random token>. Vast puts it into every instance, so it stays out of the template. Or, with Template Visibility Private, add -e AI_TOOLKIT_AUTH=\<a long random token> to Docker Options instead. An account-wide AI_TOOLKIT_AUTH also reaches the servers the studio creates for you, which get their own token, so use the template if you also create servers from the studio. Add HF_TOKEN under Account → Environment Variables for gated base models.
 2. Open Templates (cloud.vast.ai/templates/), click + New and stay on the Config tab.
 3. Fill in the fields above and paste the docker options into Docker Options.
 4. Click Create & Use, pick an offer and click RENT. The Extra Filters above keep the offers to hosts with a driver for CUDA 13.0 or newer (580+) and an RTX 30-series, A100 or newer GPU. On an older host the image fails, and the rental still bills.
-5. When the instance shows running, open IP Port Info: the line ending in -> 8675/tcp gives the URL http://\<ip>:\<port>. It is plain http only, so the token crosses the internet unencrypted, and a studio served over https cannot call it directly: use the studio the server serves at /studio/.
+5. When the instance shows running, open IP Port Info: the line ending in -> 8675/tcp gives the URL http://\<ip>:\<port>. It is plain http only, so the token crosses the internet unencrypted, and a studio served over https cannot call it directly: open the console it serves at /, or create the server from your studio instead, which reaches it through an encrypted tunnel.
 6. When it shows running, copy its URL and add it on the Servers page with the same token.
 
 URL: `http://<ip>:<port>`
@@ -212,14 +213,14 @@ Manual template:
 | Template Type | `GPU` |  |
 | Runtime | `Pod` | Not VM. |
 | Template Name | `aitk headless` |  |
-| Docker Image Path | `ghcr.io/geocine/aitoolkit-go:latest` | The tag goes in the path: there is no separate tag field. |
+| Docker Image Path | `ghcr.io/geocine/aitoolkit-worker:latest` | The tag goes in the path: there is no separate tag field. |
 | Disk Space | `100` | GB. Only the default: you pick the size again at launch. |
 | Launch Mode | `Docker Entrypoint` | Uses the image's entrypoint, which starts the server. |
 
 Docker options:
 
 ```
--p 8675:8675 -e AI_TOOLKIT_AUTH=<a long random token> -e AITK_CORS_ORIGINS=<your studio origin>
+-p 8675:8675 -e AI_TOOLKIT_AUTH=<a long random token> -e AITK_MODE=standalone -e AITK_CORS_ORIGINS=<your studio origin>
 ```
 
 1. Sign in at console.quickpod.io and add credit under Settings. For the studio to create pods for you later, a key under Settings → Secure API keys needs Pods read, Pods write, Templates read and Profile read.

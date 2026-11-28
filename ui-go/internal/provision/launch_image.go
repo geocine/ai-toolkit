@@ -369,7 +369,7 @@ var cudaClients struct {
 // not netguard's 8 s default.
 func cudaClient(simulated bool) *http.Client {
 	cudaClients.once.Do(func() {
-		o := netguard.Options{Timeout: cudaCallTimeout + 5*time.Second, HeaderTimeout: cudaCallTimeout}
+		o := netguard.Options{Timeout: cudaCallTimeout + 5*time.Second, HeaderTimeout: cudaCallTimeout, Tunnel: true}
 		cudaClients.strict = netguard.NewClient(o)
 		o.AllowLoopback = true
 		cudaClients.loopback = netguard.NewClient(o)
