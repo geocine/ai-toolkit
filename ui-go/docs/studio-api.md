@@ -153,6 +153,33 @@ The volume keeps the provider keys and the machine list across restarts, and
 `--build-arg GIT_SHA=$(git rev-parse --short HEAD)` to the build so
 `/v1/health` reports the build.
 
+## Deploy with Dokploy
+
+`ui-go/docker/compose.studio.yml` runs `ghcr.io/geocine/aitoolkit-studio`
+behind Dokploy's Traefik, with HTTPS.
+
+1. **Create** a Compose service from this repo: branch `studio`, compose path
+   `ui-go/docker/compose.studio.yml`.
+2. **Environment**: set `AI_TOOLKIT_AUTH` (a long random token) and
+   `AITK_PUBLIC_URL` (`https://lora.aivan.io`).
+   - The deploy fails at once, naming the variable, if either is missing.
+   - Optional: provider keys (`AITK_PROVISION_*_KEY`), `AITK_CORS_ORIGINS`,
+     `AITK_PROVISION_SIMULATE=1`, and `AITK_STUDIO_TAG` to pin a build instead
+     of `latest`.
+3. **Domains**: service `studio`, container port `8675`, your host, HTTPS on.
+   Dokploy adds the Traefik labels and network itself. The compose file
+   publishes no host port.
+4. **Registry**: the image is private unless you make the package public. Add
+   `ghcr.io` under Dokploy's registries with a GitHub token that has
+   `read:packages`.
+5. **Deploy**, open `https://<host>/studio/` and add the server
+   `https://<host>` with the token.
+
+The `studio-data` volume holds the provider keys, machines and settings. It
+survives redeploys, and Dokploy's Volume Backups can back it up. Deleting the
+service with "volumes" ticked deletes it, along with the record of every GPU
+server still billing.
+
 ## Connect an agent
 
 Point an MCP client at `http://127.0.0.1:8675/mcp` (streamable HTTP), with

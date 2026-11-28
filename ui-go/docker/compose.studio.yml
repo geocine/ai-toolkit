@@ -1,0 +1,43 @@
+# The studio (studio API + studio UI) for Dokploy, or any Docker host behind
+# a reverse proxy. No GPU, Python or upstream checkout: it holds your provider
+# keys and creates, watches and terminates GPU servers (aitoolkit-worker),
+# which dial back to it at AITK_PUBLIC_URL (docs/studio-api.md).
+#
+# Dokploy:
+#   1. Create > Compose, source: this repo, branch studio, compose path
+#      ui-go/docker/compose.studio.yml.
+#   2. Environment: set AI_TOOLKIT_AUTH and AITK_PUBLIC_URL (below).
+#   3. Domains: service "studio", port 8675, your host (lora.aivan.io), HTTPS on.
+#      Dokploy adds the Traefik labels and network itself.
+#   4. Deploy, open https://<host>/studio/ and add the server
+#      https://<host> with the AI_TOOLKIT_AUTH token.
+#
+# The image is private on GHCR unless you make it public: add ghcr.io with a
+# read:packages token under Dokploy's registries, or make the package public.
+
+services:
+  studio:
+    image: ghcr.io/geocine/aitoolkit-studio:${AITK_STUDIO_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      # required: the studio holds your provider keys, so it never runs open
+      AI_TOOLKIT_AUTH: ${AI_TOOLKIT_AUTH:?set AI_TOOLKIT_AUTH to a long random token}
+      # required: the public https URL GPU servers dial for their tunnel
+      AITK_PUBLIC_URL: ${AITK_PUBLIC_URL:?set AITK_PUBLIC_URL, e.g. https://lora.aivan.io}
+      # optional: provider keys used when none is saved in the studio
+      AITK_PROVISION_RUNPOD_KEY: ${AITK_PROVISION_RUNPOD_KEY:-}
+      AITK_PROVISION_VAST_KEY: ${AITK_PROVISION_VAST_KEY:-}
+      AITK_PROVISION_QUICKPOD_KEY: ${AITK_PROVISION_QUICKPOD_KEY:-}
+      # optional: origins of a studio hosted elsewhere (comma list)
+      AITK_CORS_ORIGINS: ${AITK_CORS_ORIGINS:-}
+      # optional: 1 = every provider answers from a mock (try it with no credits)
+      AITK_PROVISION_SIMULATE: ${AITK_PROVISION_SIMULATE:-}
+    # reached through the proxy only; never published on the host
+    expose:
+      - "8675"
+    volumes:
+      # provider keys, machines and settings: keep it, and back it up
+      - studio-data:/data
+
+volumes:
+  studio-data:
