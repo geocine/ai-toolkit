@@ -150,13 +150,13 @@ func TestTunnelReconnectAndDrop(t *testing.T) {
 
 func TestCheckURL(t *testing.T) {
 	for raw, ok := range map[string]bool{
-		"https://lora.aivan.io":            true,
-		"https://lora.aivan.io/":           true,
+		"https://loraboard.com":            true,
+		"https://loraboard.com/":           true,
 		"http://127.0.0.1:8675":            true,
 		"http://localhost:8675":            true,
 		"http://host.docker.internal:8675": true,
 		"http://192.168.1.20:8675":         true,
-		"http://lora.aivan.io":             false,
+		"http://loraboard.com":             false,
 		"http://8.8.8.8":                   false,
 		"ftp://x":                          false,
 		"https://user@x.example":           false,

@@ -18,14 +18,14 @@ func TestStudioAPIURL(t *testing.T) {
 		sim            bool
 		want           string
 	}{
-		{"https://lora.aivan.io/", "", false, "https://lora.aivan.io"},
-		{"", "https://lora.aivan.io", false, "https://lora.aivan.io"},
-		{"https://lora.aivan.io", "https://other.example", false, "https://lora.aivan.io"},
+		{"https://loraboard.com/", "", false, "https://loraboard.com"},
+		{"", "https://loraboard.com", false, "https://loraboard.com"},
+		{"https://loraboard.com", "https://other.example", false, "https://loraboard.com"},
 		{"", "", false, ""},
 		{"", "http://127.0.0.1:8675", false, ""},
 		{"https://localhost:8675", "", false, ""},
 		{"https://192.168.1.5", "", false, ""},
-		{"http://lora.aivan.io", "", false, ""},
+		{"http://loraboard.com", "", false, ""},
 		{"", "", true, "http://127.0.0.1:8675"},
 		{"", "http://127.0.0.1:9000", true, "http://127.0.0.1:9000"},
 	} {

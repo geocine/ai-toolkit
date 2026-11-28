@@ -7,7 +7,7 @@
 #   1. Create > Compose, source: this repo, branch studio, compose path
 #      ui-go/docker/compose.studio.yml.
 #   2. Environment: set AI_TOOLKIT_AUTH and AITK_PUBLIC_URL (below).
-#   3. Domains: service "studio", port 8675, your host (lora.aivan.io), HTTPS on.
+#   3. Domains: service "studio", port 8675, your host (loraboard.com), HTTPS on.
 #      Dokploy adds the Traefik labels and network itself.
 #   4. Deploy, open https://<host>/studio/ and add the server
 #      https://<host> with the AI_TOOLKIT_AUTH token.
@@ -23,7 +23,7 @@ services:
       # required: the studio holds your provider keys, so it never runs open
       AI_TOOLKIT_AUTH: ${AI_TOOLKIT_AUTH:?set AI_TOOLKIT_AUTH to a long random token}
       # required: the public https URL GPU servers dial for their tunnel
-      AITK_PUBLIC_URL: ${AITK_PUBLIC_URL:?set AITK_PUBLIC_URL, e.g. https://lora.aivan.io}
+      AITK_PUBLIC_URL: ${AITK_PUBLIC_URL:?set AITK_PUBLIC_URL, e.g. https://loraboard.com}
       # optional: provider keys used when none is saved in the studio
       AITK_PROVISION_RUNPOD_KEY: ${AITK_PROVISION_RUNPOD_KEY:-}
       AITK_PROVISION_VAST_KEY: ${AITK_PROVISION_VAST_KEY:-}

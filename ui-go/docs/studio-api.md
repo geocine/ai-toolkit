@@ -30,7 +30,7 @@ The binary serves the studio build in `studio/dist` next to it. `go run .
 | Flag or env | Meaning |
 |---|---|
 | `AITK_MODE=studio-api`, `--studio-api`, `AITK_STUDIO_API=1` | Studio API mode (the slim image sets `AITK_MODE`). |
-| `AITK_PUBLIC_URL` | This studio API's public https URL, such as `https://lora.aivan.io`. Every GPU server it creates is a worker that dials this URL for its tunnel, so a real launch is refused while it is unset (the browser's origin is used then) or points at this computer or a private address. See [GPU servers dial in](#gpu-servers-dial-in). |
+| `AITK_PUBLIC_URL` | This studio API's public https URL, such as `https://loraboard.com`. Every GPU server it creates is a worker that dials this URL for its tunnel, so a real launch is refused while it is unset (the browser's origin is used then) or points at this computer or a private address. See [GPU servers dial in](#gpu-servers-dial-in). |
 | `--data-dir`, `AITK_STUDIO_API_DIR` | Where the databases live. Default: `%AppData%\aitk-studio-api` on Windows, `~/Library/Application Support/aitk-studio-api` on macOS, `~/.config/aitk-studio-api` on Linux. The folder is made private to you (0700) and the database files 0600; Windows keeps its own permissions. |
 | `--port`, `PORT` | Port, default 8675. |
 | `--host` | Address to listen on. Default `127.0.0.1` in studio API mode (the plain server listens on `0.0.0.0`). |
@@ -161,7 +161,7 @@ behind Dokploy's Traefik, with HTTPS.
 1. **Create** a Compose service from this repo: branch `studio`, compose path
    `ui-go/docker/compose.studio.yml`.
 2. **Environment**: set `AI_TOOLKIT_AUTH` (a long random token) and
-   `AITK_PUBLIC_URL` (`https://lora.aivan.io`).
+   `AITK_PUBLIC_URL` (`https://loraboard.com`).
    - The deploy fails at once, naming the variable, if either is missing.
    - Optional: provider keys (`AITK_PROVISION_*_KEY`), `AITK_CORS_ORIGINS`,
      `AITK_PROVISION_SIMULATE=1`, and `AITK_STUDIO_TAG` to pin a build instead

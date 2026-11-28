@@ -67,7 +67,7 @@ everything travels through it. The orchestrator never dials the worker.
   | `worker` (default in the GPU image) | Trainer only. No console, no studio, no `/mcp` of its own. It dials `AITK_STUDIO_API_URL` and is managed from there. | The remote studio's `/mcp` | `127.0.0.1` only |
   | `standalone` | An ordinary AI Toolkit server: console at `/`, `/v1`, `/mcp`. No studio. | This server's `/mcp` | `0.0.0.0` (set `AI_TOOLKIT_AUTH`: without it the server is open, as upstream) |
   | `studio` | Studio and trainer on one node. The console does not load. It can also manage remote workers. | The studio's `/mcp` | `0.0.0.0`, with GitHub sign-in or a token |
-  | `studio-api` (default in the slim image) | Studio without a trainer: the orchestrator at `lora.aivan.io` | The studio's `/mcp` | As `studio` |
+  | `studio-api` (default in the slim image) | Studio without a trainer: the orchestrator at `loraboard.com` | The studio's `/mcp` | As `studio` |
 
   - Every worker the orchestrator creates is `worker`. Its probe, relay,
     shell and MCP forwarding all go through the tunnel.
@@ -96,7 +96,7 @@ everything travels through it. The orchestrator never dials the worker.
     throwaway tunnel (`cloudflared tunnel --url http://127.0.0.1:8675`, which
     gives an `https://….trycloudflare.com` URL with no account or DNS). Set
     that URL as `AITK_PUBLIC_URL`.
-  - **Production.** `https://lora.aivan.io`.
+  - **Production.** `https://loraboard.com`.
 - **Old workers.** Machines from images without tunnel support keep today's
   path: the probe and relay dial their public URL. The machine record shows
   which path it uses.
@@ -112,7 +112,7 @@ HTTP+JSON for control and raw bytes for bulk and shell traffic.
 
 ## 2. HTTPS and GitHub sign-in on the orchestrator
 
-The orchestrator is served at `https://lora.aivan.io`, reachable from the
+The orchestrator is served at `https://loraboard.com`, reachable from the
 internet on 443. Browsers, agents and workers all reach it over TLS. A
 compose file in `ui-go/docker/` runs the studio API image with Caddy:
 
@@ -284,7 +284,7 @@ that survive a restart.
 | Step | Change | Tested by |
 |---|---|---|
 | 1 | Tunnel: handshake, yamux, the worker's tunnel-only listener, and probe and relay over the tunnel with a fallback. | Go tests with an in-process orchestrator and worker. A Linux container worker registered against a local studio API. |
-| 2 | GitHub sign-in, the compose file with Caddy, and doc updates (including `AITK_PUBLIC_LISTEN`). | Go tests against a fake GitHub. A local OAuth App on `127.0.0.1`. `docker compose up` on `lora.aivan.io`. |
+| 2 | GitHub sign-in, the compose file with Caddy, and doc updates (including `AITK_PUBLIC_LISTEN`). | Go tests against a fake GitHub. A local OAuth App on `127.0.0.1`. `docker compose up` on `loraboard.com`. |
 | 3 | Shell: PTY sessions, tickets, the xterm.js panel, `imgcat`, and the `exec` op. | Go tests (Linux). A browser session through the relay to a container worker. |
 | 4 | `aitk.on(id)` MCP forwarding and the studio server picker. | codemode tests, plus the MCP parity rule (op, TS type, OpenAPI, headless.md). |
 | 5 | Config and dataset library, R2 and Hugging Face storage targets with quotas, and runs pushed to hosts. | End-to-end on a simulated and then a real RunPod worker. |
@@ -296,7 +296,7 @@ workers at its own build's `:<sha>`.
 
 ## Decisions
 
-- **Domain.** The orchestrator is `https://lora.aivan.io`, reachable from the
+- **Domain.** The orchestrator is `https://loraboard.com`, reachable from the
   internet on 443. DNS is not set up yet.
 - **Sign-in.** GitHub, for `geocine` only, and testable locally.
 - **Storage.** R2 (free tier, guarded by quota) and Hugging Face storage
