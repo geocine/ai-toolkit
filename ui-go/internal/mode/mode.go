@@ -28,7 +28,7 @@ var current atomic.Value // Mode
 
 // image is "gpu" in the GPU image's binary (ui-go/docker/Dockerfile sets it
 // with -ldflags -X). That image refuses studio-api: the studio API is its own
-// image, ghcr.io/geocine/aitoolkit-studio-api.
+// image, ghcr.io/geocine/aitoolkit-studio.
 var image string
 
 // Current is the mode Set chose (Standalone before that).
@@ -68,7 +68,7 @@ func FromEnv(studioAPI bool) (Mode, error) {
 
 func checkImage(m Mode) error {
 	if m == StudioAPI && image == "gpu" {
-		return fmt.Errorf("this is the GPU image: the studio API runs in its own image, ghcr.io/geocine/aitoolkit-studio-api. Here use AITK_MODE=worker, standalone or studio")
+		return fmt.Errorf("this is the GPU image: the studio API runs in its own image, ghcr.io/geocine/aitoolkit-studio. Here use AITK_MODE=worker, standalone or studio")
 	}
 	return nil
 }
