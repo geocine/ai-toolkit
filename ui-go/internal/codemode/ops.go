@@ -253,6 +253,10 @@ var Ops = []Op{
 	{Group: "portable", Name: "list", Method: "GET", Path: "/v1/portable/jobs", Result: "Items<PortableJob>",
 		Doc:    "Jobs whose resumable state is on a remote (to continue on this server).",
 		Params: []Param{p("remote", "string", "query", "remote id or name")}},
+	{Group: "portable", Name: "delete", Method: "DELETE", Path: "/v1/portable/jobs/{name}", Result: "PortableDeleted",
+		Doc: "Delete a run's copy on a remote to free its storage: its checkpoints, optimizer state and logs, its datasets when no other run there uses them, and blobs nothing references (blobs written in the last hour are kept). Refused (409) while the run is training somewhere, unless force. Local jobs and files are untouched. It can't be undone.",
+		Params: []Param{p("name", "string", "path", "the run's name (PortableJob.name)"), p("remote", "string", "query", "remote id or name"),
+			opt("force", "boolean", "query", "delete even while its lease is live")}},
 	{Group: "portable", Name: "import", Method: "POST", Path: "/v1/portable/import", Result: "Job",
 		Doc: "Import a portable job from a remote and (with start) continue it here.",
 		Params: []Param{p("remote", "string", "body", ""), p("name", "string", "body", "job name on the remote"),
@@ -492,7 +496,7 @@ declare class AitkError extends Error { code: string; status: number; }
 const typesTS = `type Items<T> = { items: T[]; next_cursor?: string | null };
 type JobState = "draft" | "queued" | "starting" | "running" | "stopping" | "stopped" | "completed" | "failed" | "interrupted";
 type JobConfig = { job: string; config: { name: string; process: Record<string, any>[] }; meta?: Record<string, any> };
-type JobPolicy = { auto_resume?: boolean | null; max_auto_resumes?: number | null; auto_upload_remote?: string | null; sync_remote?: string | null; /** older checkpoints the sync remote keeps besides the newest; -1 keeps all (pick the best step later) */ keep_checkpoints?: number | null };
+type JobPolicy = { auto_resume?: boolean | null; max_auto_resumes?: number | null; auto_upload_remote?: string | null; sync_remote?: string | null; /** older checkpoints the sync remote keeps besides the newest; -1 keeps all (pick the best step later) */ keep_checkpoints?: number | null; /** keep optimizer.pt on the sync remote after the run completes, to extend it later (default false: a finished LoRA doesn't need it) */ keep_optimizer?: boolean | null };
 type Attempt = { n: number; started_at: string; ended_at: string | null; end_state: string | null; end_reason: string | null; start_step: number; end_step: number | null; auto: boolean; pid: number | null };
 type Checkpoint = { name: string; path: string; step: number | null; size: number; modified: string; sha256?: string };
 type Sample = { name: string; path: string; step: number | null; index: number | null; modified: string; prompt?: string; seed?: number };
@@ -531,8 +535,9 @@ type UploadState = "queued" | "running" | "done" | "failed";
 type Upload = { id: string; remote_id: string; job_id: string | null; root: string; path: string; url: string | null; state: UploadState; bytes: number; bytes_done: number; sha256: string | null; error: string | null; created_at: string; updated_at: string };
 type Lease = { node_id: string; node_label: string; heartbeat_at: string; expires_at: string } | null;
 type SyncStatus = { remote: string | null; last_sync_at: string | null; last_error: string | null; lease: Lease };
+type PortableDeleted = { name: string; objects: number; bytes: number; /** datasets removed because no other run on the remote used them */ datasets: string[] };
 type PortableJob = { name: string; step: number; state: string; lease: Lease; updated_at: string; datasets: string[] };
-type Settings = { training_folder: string; datasets_folder: string; data_root: string; models_path: string; hf_token_set: boolean; auto_resume_default: boolean; max_auto_resumes_default: number };
+type Settings = { training_folder: string; datasets_folder: string; data_root: string; models_path: string; hf_token_set: boolean; auto_resume_default: boolean; max_auto_resumes_default: number; /** the remote new jobs sync to, and GPU servers launched here copy when the launch names none */ sync_remote_default: string | null };
 type ApiKey = { id: string; name: string; prefix: string; created_at: string; last_used_at: string | null };
 type TemplateArch = { name: string; label: string; group: string; source: string; defaults: Record<string, [unknown, unknown]>; disable_sections: string[]; additional_sections: string[]; controls: unknown[]; is_video_model: boolean; python_arch: string; python_accepted: boolean };
 type TemplateCatalog = { archs: TemplateArch[]; default_config: JobConfig; errors: string[] };

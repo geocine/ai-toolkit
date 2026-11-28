@@ -27,6 +27,18 @@ export class ApiError extends Error {
 
 export const trimBase = (b: string) => b.replace(/\/+$/, '');
 
+/** A run whose resumable state is kept on a remote (GET /v1/portable/jobs). */
+export interface PortableJob {
+  name: string;
+  step: number;
+  state: string;
+  lease: { node_label: string; expires_at: string } | null;
+  updated_at: string;
+  datasets: string[];
+}
+/** DELETE /v1/portable/jobs/{name}: what was removed from the remote. */
+export interface PortableDeleted { name: string; objects: number; bytes: number; datasets: string[] }
+
 export function url(s: Server, path: string): string {
   return trimBase(s.base) + path;
 }

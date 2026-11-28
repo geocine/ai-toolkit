@@ -31,6 +31,8 @@ func TestAllowed(t *testing.T) {
 		{"POST", "/v1/lifecycle/cancel", false},
 		{"GET", "/v1/lifecyclex", true},
 		{"POST", "/v1/portable/import", false},
+		{"DELETE", "/v1/portable/jobs/my_lora", true}, // remote only
+		{"POST", "/v1/portable/jobs/my_lora", false},
 		{"DELETE", "/v1/files/x", false},
 		{"GET", "/v1/system", true},
 		{"GET", "/v1/system/cuda", false},

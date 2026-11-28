@@ -90,7 +90,7 @@ one by one; they expire.
 { id, name, type, ref, gpu_ids, state, status, info, step, total_steps, speed,
   queue_position, pid, created_at, updated_at,
   config,                          // parsed job_config object
-  policy: {auto_resume, max_auto_resumes, auto_upload_remote, sync_remote, keep_checkpoints},
+  policy: {auto_resume, max_auto_resumes, auto_upload_remote, sync_remote, keep_checkpoints, keep_optimizer},
   attempts: n, last_attempt: Attempt | null,
   latest_checkpoint: Checkpoint | null }
 ```
@@ -327,7 +327,11 @@ back to the HF_TOKEN setting) are accepted on create and never returned.
 - A job policy `auto_upload_remote` uploads every new checkpoint (and the final file) to that remote.
 
 ### Settings and keys
-- `GET /v1/settings` → `{training_folder, datasets_folder, data_root, models_path, hf_token_set, auto_resume_default, max_auto_resumes_default}`
+- `GET /v1/settings` → `{training_folder, datasets_folder, data_root, models_path, hf_token_set, auto_resume_default, max_auto_resumes_default, sync_remote_default}`.
+  `sync_remote_default` (a remote name or null; PATCH it, `null` clears) is
+  the remote new jobs sync to (also `AITK_SYNC_REMOTE`). A GPU server
+  launched here copies it when the launch request has no `copy_remote`
+  (`"copy_remote": ""` launches with none).
 - `PATCH /v1/settings {...}` (`hf_token` write-only) → settings
 - `GET /v1/keys` → `{items: [{id, name, prefix, created_at, last_used_at}]}`;
   `POST /v1/keys {name}` → 201 `{id, name, prefix, key}` (`key` shown once);
@@ -461,12 +465,26 @@ Sync (on the server running the job):
   kept: the job's `policy.keep_checkpoints` (N older ones besides the newest,
   `-1` all), else `AITK_SYNC_KEEP_CHECKPOINTS`, else `keep_checkpoints` on
   the remote's config. Keep them when you will pick the best step afterwards.
+- When the run completes, `optimizer.pt` leaves the remote: a finished LoRA
+  doesn't need it, and it is about twice the LoRA's size. Set
+  `policy.keep_optimizer: true` (or `AITK_SYNC_KEEP_OPTIMIZER=1` for every
+  job) to keep it so the run can be extended later.
 - While running, the lease is renewed every 60 s. On a clean end (completed,
   stopped, failed) the lease is released (`lease: null`).
 
 Import (on the new server):
 - `GET /v1/portable/jobs?remote=` → `{items: [{name, step, state, lease, updated_at, datasets}]}`
 - `POST /v1/portable/import {remote, name, gpu_ids?, start?, force?}` → 201 Job.
+- `DELETE /v1/portable/jobs/{name}?remote=&force=` → `{name, objects, bytes, datasets}`.
+  It deletes the run's copy on the remote: everything under
+  `jobs/<name>/`, its datasets when no other run there names them, and the
+  blobs no dataset references any more (blobs written in the last hour stay,
+  in case a push is in flight).
+  - It is refused with 409 while the run's lease is live (it is training
+    somewhere), unless `force`.
+  - Local jobs and files are untouched.
+  - It works on the studio API too, which needs only the remote.
+  - In code mode it is `aitk.portable.delete`.
   Refused with 409 when the lease is held by another node and not expired
   (`force: true` takes it over), or a local job of that name exists.
   Restores the datasets (verifying sha256), rewrites `aitk://datasets/...` to

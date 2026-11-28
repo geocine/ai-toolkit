@@ -158,6 +158,8 @@ var migrations = []string{
 		identity   TEXT,               -- Identity JSON: set_sig, model, job_id, at, faces, cos (f16 matrix)
 		updated_at INTEGER NOT NULL
 	);`,
+	// 6: keep optimizer.pt on the sync remote after a run completes (NULL: the default)
+	`ALTER TABLE job_policies ADD COLUMN keep_optimizer INTEGER;`,
 }
 
 // NodeID identifies this server (stable across restarts, new per database):

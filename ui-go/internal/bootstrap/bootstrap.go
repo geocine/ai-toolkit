@@ -108,6 +108,11 @@ func Apply(ctx context.Context) error {
 			return err
 		}
 	}
+	if v, ok := boolEnv("AITK_SYNC_KEEP_OPTIMIZER"); ok {
+		if err := state.SetSetting(ctx, state.SettingKeepOptimizerDefault, strconv.FormatBool(v)); err != nil {
+			return err
+		}
+	}
 	if v := env("AITK_SYNC_KEEP_CHECKPOINTS"); v != "" {
 		n := -1
 		if v != "all" {

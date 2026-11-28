@@ -1,6 +1,6 @@
 import { Cpu, RefreshCw } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ApiError, get, type Items, type Remote, type Server, type Settings } from '../lib/api';
+import { ApiError, call, get, type Items, type Remote, type Server, type Settings } from '../lib/api';
 import type { NotifyConfig } from '../lib/lifecycle';
 import { perHour, providerNames } from '../lib/machines';
 import { priceCap } from '../lib/priceCap';
@@ -154,10 +154,17 @@ function CreateForm({
     async x => {
       const [remotes, settings, notify] = await Promise.all([
         get<Items<Remote>>(x, '/v1/remotes').then(r => r.items, () => [] as Remote[]),
-        get<Settings & { hf_token_set?: boolean }>(x, '/v1/settings').catch(() => null),
+        get<Settings & { hf_token_set?: boolean; sync_remote_default?: string | null }>(x, '/v1/settings').catch(() => null),
         get<NotifyConfig>(x, '/v1/notify').catch(() => null),
       ]);
-      return { remotes: remotes.filter(r => r.kind === 's3' || r.kind === 'hf'), hfToken: !!settings?.hf_token_set, sinks: notify?.sinks.length ?? 0 };
+      const usable = remotes.filter(r => r.kind === 's3' || r.kind === 'hf');
+      const dflt = settings?.sync_remote_default ?? null;
+      return {
+        remotes: usable,
+        defaultRemote: dflt && usable.some(r => r.name === dflt) ? dflt : '',
+        hfToken: !!settings?.hf_token_set,
+        sinks: notify?.sinks.length ?? 0,
+      };
     },
     [],
   );
@@ -525,6 +532,11 @@ function CreateForm({
   // settings
   const [name, setName] = useState('');
   const [remote, setRemote] = useState('');
+  // the studio's default remote is chosen until the user picks another
+  const [remotePicked, setRemotePicked] = useState(false);
+  useEffect(() => {
+    if (!remotePicked && extras.data?.defaultRemote) setRemote(extras.data.defaultRemote);
+  }, [extras.data, remotePicked]);
   const [copyNotify, setCopyNotify] = useState(false);
   const [copyHf, setCopyHf] = useState(false);
   const [selfKey, setSelfKey] = useState(false);
@@ -632,7 +644,8 @@ function CreateForm({
         template_id: caps?.template_required ? templateId : undefined,
         cors_origins: [window.location.origin],
         studio_url: window.location.origin + window.location.pathname,
-        copy_remote: remote || undefined,
+        // always sent: "" is an explicit "none" (the server applies its default only when this is absent)
+        copy_remote: remote,
         copy_hf_token: copyHf || undefined,
         copy_notify: copyNotify || undefined,
         when_done: whenDone,
@@ -940,7 +953,13 @@ function CreateForm({
               </label>
               <label className="field field-wide">
                 <span>Keep results on</span>
-                <select value={remote} onChange={e => setRemote(e.target.value)}>
+                <select
+                  value={remote}
+                  onChange={e => {
+                    setRemote(e.target.value);
+                    setRemotePicked(true);
+                  }}
+                >
                   <option value="">Don't copy a remote</option>
                   {(extras.data?.remotes ?? []).map(r => (
                     <option key={r.id} value={r.name}>
@@ -948,7 +967,27 @@ function CreateForm({
                     </option>
                   ))}
                 </select>
-                <small>Copies this remote, keys included, into the new server's environment. Anyone with access to your provider account can read them.</small>
+                {remote && remote !== extras.data?.defaultRemote && (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    onClick={async () => {
+                      try {
+                        await call(s, 'PATCH', '/v1/settings', { sync_remote_default: remote });
+                        extras.reload();
+                      } catch {
+                        /* the select keeps the choice for this launch */
+                      }
+                    }}
+                  >
+                    Make {remote} the default
+                  </button>
+                )}
+                <small>
+                  {extras.data?.defaultRemote && remote === extras.data.defaultRemote ? 'Your default remote. ' : ''}
+                  Copies this remote, keys included, into the new server's environment. Anyone with access to your provider account can read them.
+                  {!remote && ' Without one, everything on the server is lost when it is deleted.'}
+                </small>
               </label>
               {((extras.data?.sinks ?? 0) > 0 || extras.data?.hfToken) && (
                 <div className="field field-wide checks">

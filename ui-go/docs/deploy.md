@@ -203,6 +203,7 @@ contacted.
 |---|---|
 | `AITK_S3_ENDPOINT`, `AITK_S3_BUCKET`, `AITK_S3_ACCESS_KEY_ID`, `AITK_S3_SECRET_ACCESS_KEY` | An S3-compatible remote (Cloudflare R2, AWS S3, MinIO, Backblaze B2, ...). |
 | `AITK_S3_REGION` (empty: `auto` for R2, else the bucket's own), `AITK_S3_PREFIX`, `AITK_S3_PATH_STYLE` (`1` for MinIO), `AITK_S3_NAME` (`s3`) | Its options and the name it gets. |
+| Hugging Face storage bucket | An `s3` remote whose endpoint is `https://<namespace>.s3.hf.co`, with S3 keys (`HFAK…`) generated from a Hugging Face token: `AITK_S3_ENDPOINT=https://<namespace>.s3.hf.co`, `AITK_S3_BUCKET=<bucket>`. Path-style addressing, region `us-east-1` and 256 MB upload parts are set automatically. Unlike a repo, a bucket keeps no history, so a deleted checkpoint frees its space. |
 | `AITK_HF_REPO`, `AITK_HF_REPO_TYPE` (`model`), `AITK_HF_PATH`, `AITK_HF_TOKEN` (else `HF_TOKEN`), `AITK_HF_NAME` (`hf`) | A private Hugging Face repo remote (created if missing). |
 | `AITK_REMOTES` | Any number of remotes as JSON: `[{"name","kind":"s3"\|"hf"\|"fs","config":{...},"credentials":{...}}]` (shapes in docs/headless.md). |
 
@@ -210,6 +211,7 @@ contacted.
 | Variable | Meaning |
 |---|---|
 | `AITK_SYNC_REMOTE` | Remote that keeps jobs portable (checkpoint + optimizer state + dataset + manifest). |
+| `AITK_SYNC_KEEP_OPTIMIZER` (`0`) | `1` keeps `optimizer.pt` on the sync remote after a run completes, so it can be extended later. Default: it is deleted, since a finished LoRA does not need it. A job's `policy.keep_optimizer` overrides it. |
 | `AITK_SYNC_KEEP_CHECKPOINTS` | Older checkpoints the sync remote keeps besides the newest: a number, or `all` (default: only the newest). A job's `policy.keep_checkpoints` overrides it. Keep them if you pick the best step after training, since a destroyed pod takes its local copies with it. |
 | `AITK_AUTO_UPLOAD_REMOTE` | Remote every new checkpoint is also uploaded to (e.g. a Hugging Face repo for the LoRAs). |
 | `AITK_AUTO_RESUME` (`0`) / `AITK_MAX_AUTO_RESUMES` (`3`) | Re-queue a job whose trainer died without finishing, up to N times in a row. |

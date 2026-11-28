@@ -3,7 +3,7 @@ import { useMemo, useRef, useState } from 'react';
 import { Confirm } from '../components/Dialog';
 import { LoadDialog, TaskProgress, type LoadSource } from '../components/LoadDialog';
 import { Empty, ErrorNote, Progress, Section, StatePill, useLoad } from '../components/ui';
-import { del, get, signedDownload, type BundleTask, type BundleUpload, type Items, type LibraryBundle, type Remote, type Server } from '../lib/api';
+import { del, get, signedDownload, type BundleTask, type BundleUpload, type Items, type LibraryBundle, type PortableDeleted, type PortableJob, type Remote, type Server } from '../lib/api';
 import {
   dropTransfer,
   infoFromSummary,
@@ -36,6 +36,10 @@ export function DataPresets({ server }: { server: Server }) {
   const remote = list.find(r => r.name === picked)?.name ?? list[0]?.name ?? '';
   const library = useLoad(server, s => (remote ? get<Items<LibraryBundle>>(s, `/v1/bundles?remote=${encodeURIComponent(remote)}`) : Promise.resolve({ items: [] })), [remote]);
   const sessions = useLoad(server, s => get<Items<BundleUpload>>(s, '/v1/bundles/uploads'), []);
+  const runs = useLoad(server, s => (remote ? get<Items<PortableJob>>(s, `/v1/portable/jobs?remote=${encodeURIComponent(remote)}`) : Promise.resolve({ items: [] })), [remote]);
+  const [dropRun, setDropRun] = useState<PortableJob | null>(null);
+  const [dropping, setDropping] = useState(false);
+  const [dropped, setDropped] = useState<PortableDeleted | null>(null);
   const tasks = useTasks(server, 'import');
   const transfers = useTransfers(server.id);
   const [load, setLoad] = useState<LoadSource | null>(null);
@@ -101,6 +105,22 @@ export function DataPresets({ server }: { server: Server }) {
       setRemove(null);
     } finally {
       setRemoving(false);
+    }
+  };
+
+  const live = (j: PortableJob) => !!j.lease && new Date(j.lease.expires_at).getTime() > Date.now();
+  const doDropRun = async () => {
+    if (!dropRun) return;
+    setDropping(true);
+    try {
+      const force = live(dropRun) ? '&force=1' : '';
+      setDropped(await del<PortableDeleted>(server, `/v1/portable/jobs/${encodeURIComponent(dropRun.name)}?remote=${encodeURIComponent(remote)}${force}`));
+      runs.reload();
+    } catch (e) {
+      setError(e);
+    } finally {
+      setDropRun(null);
+      setDropping(false);
     }
   };
 
@@ -246,6 +266,43 @@ export function DataPresets({ server }: { server: Server }) {
         )}
       </Section>
 
+      {remote && (
+        <Section title="Runs kept on this remote" description={<>Checkpoints, logs and datasets that GPU servers synced to {remote}. Delete a run you no longer need to free its storage.</>}>
+          <ErrorNote error={runs.error} />
+          {dropped && (
+            <p className="quiet-note">
+              Deleted {dropped.name}: {bytes(dropped.bytes)} freed
+              {dropped.datasets.length > 0 && <>, with dataset {dropped.datasets.join(', ')} that no other run used</>}.
+            </p>
+          )}
+          {runs.data && !(runs.data.items ?? []).length && <Empty icon={<Archive />}>No runs on {remote} yet. A GPU server launched with this remote syncs each run here.</Empty>}
+          {(runs.data?.items ?? []).length > 0 && (
+            <ul className="task-list">
+              {(runs.data?.items ?? []).map(j => (
+                <li key={j.name} className="card task">
+                  <div className="task-main">
+                    <p className="task-title">
+                      <span className="ellipsis">{j.name}</span>
+                    </p>
+                    <p className="task-meta num">
+                      Step {j.step.toLocaleString()} · {j.state} · synced {ago(j.updated_at)}
+                      {live(j) && <> · training on {j.lease?.node_label}</>}
+                      {j.datasets.length > 0 && <> · dataset {j.datasets.join(', ')}</>}
+                    </p>
+                  </div>
+                  <div className="task-actions">
+                    <button className="btn btn-sm btn-ghost btn-danger" onClick={() => setDropRun(j)}>
+                      <Trash2 />
+                      Delete
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+      )}
+
       {recentTasks.length > 0 && (
         <Section title="Recent loads">
           <ul className="task-list">
@@ -264,6 +321,12 @@ export function DataPresets({ server }: { server: Server }) {
           onClose={() => setLoad(null)}
           onLoaded={() => sessions.reload()}
         />
+      )}
+      {dropRun && (
+        <Confirm title="Delete this run from the remote" confirm="Delete" busy={dropping} onConfirm={doDropRun} onClose={() => setDropRun(null)}>
+          Delete <strong>{dropRun.name}</strong> from {remote}? Its checkpoints, optimizer state and logs go, and its dataset too if no other run there uses it. It can't be undone.
+          {live(dropRun) && <> It is training on {dropRun.lease?.node_label} right now: that server loses its backup.</>} Runs on a server keep their own files.
+        </Confirm>
       )}
       {remove && (
         <Confirm title="Delete from the library" confirm="Delete" busy={removing} onConfirm={doRemove} onClose={() => setRemove(null)}>

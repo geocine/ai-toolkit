@@ -19,7 +19,9 @@ import (
 )
 
 // s3 is any S3-compatible bucket: Cloudflare R2 (endpoint
-// https://<account>.r2.cloudflarestorage.com, region "auto"), AWS S3, MinIO.
+// https://<account>.r2.cloudflarestorage.com, region "auto"), AWS S3, MinIO,
+// and Hugging Face storage buckets through their S3 gateway (endpoint
+// https://<namespace>.s3.hf.co, keys generated from a Hugging Face token).
 // Config {endpoint, bucket, region, prefix, path_style}; secret
 // {access_key_id, secret_access_key}.
 func init() { RegisterKind("s3", newS3) }
@@ -38,14 +40,30 @@ type s3Secret struct {
 }
 
 type s3Client struct {
-	mc     *minio.Client
-	bucket string
-	prefix string
-	base   string // URL of the bucket, for Put's returned URL
+	mc       *minio.Client
+	bucket   string
+	prefix   string
+	base     string // URL of the bucket, for Put's returned URL
+	partSize uint64
 }
 
 // s3PartSize keeps parts well above S3's 5 MiB minimum while bounding memory.
 const s3PartSize = 16 << 20
+
+// hfPartSize is the multipart part size Hugging Face recommends for its
+// gateway (storage-buckets-s3: multipart_chunksize 256MB).
+const hfPartSize = 256 << 20
+
+// hfGateway reports a Hugging Face storage-bucket S3 gateway host
+// (s3.hf.co or <namespace>.s3.hf.co). It serves path-style addressing only,
+// in one region, us-east-1.
+func hfGateway(host string) bool {
+	h := strings.ToLower(host)
+	if i := strings.LastIndex(h, ":"); i >= 0 && !strings.Contains(h[i:], "]") {
+		h = h[:i]
+	}
+	return h == "s3.hf.co" || strings.HasSuffix(h, ".s3.hf.co")
+}
 
 func newS3(config, secret json.RawMessage) (Client, error) {
 	var c s3Config
@@ -76,6 +94,13 @@ func newS3(config, secret json.RawMessage) (Client, error) {
 	if c.PathStyle {
 		lookup = minio.BucketLookupPath
 	}
+	partSize := uint64(s3PartSize)
+	if hfGateway(host) {
+		lookup, partSize = minio.BucketLookupPath, hfPartSize
+		if region == "" {
+			region = "us-east-1"
+		}
+	}
 	mc, err := minio.New(host, &minio.Options{
 		Creds:        credentials.NewStaticV4(s.AccessKeyID, s.SecretAccessKey, ""),
 		Secure:       secure,
@@ -91,7 +116,7 @@ func newS3(config, secret json.RawMessage) (Client, error) {
 	}
 	return &s3Client{
 		mc: mc, bucket: c.Bucket, prefix: strings.Trim(c.Prefix, "/"),
-		base: fmt.Sprintf("%s://%s/%s", scheme, host, c.Bucket),
+		base: fmt.Sprintf("%s://%s/%s", scheme, host, c.Bucket), partSize: partSize,
 	}, nil
 }
 
@@ -155,7 +180,7 @@ func (c *s3Client) Put(ctx context.Context, key, localPath string, progress Prog
 	if err != nil {
 		return "", err
 	}
-	opts := minio.PutObjectOptions{PartSize: s3PartSize, ContentType: "application/octet-stream"}
+	opts := minio.PutObjectOptions{PartSize: c.partSize, ContentType: "application/octet-stream"}
 	if progress != nil {
 		opts.Progress = &progressReader{fn: progress}
 	}

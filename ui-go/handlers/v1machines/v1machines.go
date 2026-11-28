@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -23,6 +24,7 @@ import (
 	"github.com/geocine/aitoolkit/internal/provision"
 	"github.com/geocine/aitoolkit/internal/provision/guide"
 	"github.com/geocine/aitoolkit/internal/provision/relay"
+	"github.com/geocine/aitoolkit/internal/remote"
 	"github.com/geocine/aitoolkit/internal/state"
 	"github.com/geocine/aitoolkit/internal/studioapi"
 	"github.com/geocine/aitoolkit/internal/tunnel"
@@ -369,9 +371,26 @@ func launch(w http.ResponseWriter, r *http.Request) {
 	if !guard(w, r) {
 		return
 	}
-	var req provision.LaunchRequest
-	if !v1api.Decode(w, r, &req) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, v1api.MaxJSONBody))
+	if err != nil {
+		v1api.Fail(w, v1api.CodeInvalidRequest, "couldn't read the request body")
 		return
+	}
+	var req provision.LaunchRequest
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &req); err != nil {
+		v1api.Fail(w, v1api.CodeInvalidRequest, "invalid JSON body: "+err.Error())
+		return
+	}
+	_ = json.Unmarshal(body, &fields)
+	if _, named := fields["copy_remote"]; !named {
+		// results go to the default remote unless the launch says otherwise
+		// ("copy_remote": "" launches with none)
+		if v, ok, _ := state.Setting(r.Context(), state.SettingSyncRemoteDefault); ok && v != "" {
+			if rem, err := remote.Get(r.Context(), v); err == nil && rem != nil {
+				req.CopyRemote = rem.Name
+			}
+		}
 	}
 	req.SelfURL = links.Origin(r, os.Getenv("AITK_PUBLIC_URL"))
 	m, created, err := provision.Default.Launch(r.Context(), req, r.Header.Get("Origin"))

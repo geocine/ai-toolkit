@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/geocine/aitoolkit/internal/remote"
 	"github.com/geocine/aitoolkit/internal/settings"
 	"github.com/geocine/aitoolkit/internal/state"
 	"github.com/geocine/aitoolkit/internal/store"
@@ -21,6 +22,9 @@ type settingsView struct {
 	HFTokenSet            bool   `json:"hf_token_set"`
 	AutoResumeDefault     bool   `json:"auto_resume_default"`
 	MaxAutoResumesDefault int    `json:"max_auto_resumes_default"`
+	// SyncRemoteDefault is the remote new jobs sync to, and the one a GPU
+	// server launched here copies when the launch names none (null: none).
+	SyncRemoteDefault *string `json:"sync_remote_default"`
 }
 
 func currentSettings(ctx context.Context) (settingsView, error) {
@@ -53,6 +57,12 @@ func currentSettings(ctx context.Context) (settingsView, error) {
 	if s, ok, _ := state.Setting(ctx, state.SettingMaxAutoResumesDefault); ok {
 		if n, err := strconv.Atoi(s); err == nil {
 			v.MaxAutoResumesDefault = n
+		}
+	}
+	// stored as the remote's id (AITK_SYNC_REMOTE writes it so too); shown by name
+	if s, ok, _ := state.Setting(ctx, state.SettingSyncRemoteDefault); ok && s != "" {
+		if rem, err := remote.Get(ctx, s); err == nil && rem != nil {
+			v.SyncRemoteDefault = &rem.Name
 		}
 	}
 	return v, nil
@@ -110,6 +120,26 @@ func patchSettings(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			fork[state.SettingMaxAutoResumesDefault] = strconv.Itoa(n)
+		case "sync_remote_default":
+			var name *string
+			if err := json.Unmarshal(raw, &name); err != nil {
+				v1api.Fail(w, v1api.CodeInvalidRequest, k+" must be a remote name or null")
+				return
+			}
+			v := ""
+			if name != nil && *name != "" {
+				rem, err := remote.Get(ctx, *name)
+				if err != nil {
+					v1api.Internal(w, r, err)
+					return
+				}
+				if rem == nil {
+					v1api.Fail(w, v1api.CodeInvalidRequest, "sync_remote_default: no remote named "+strconv.Quote(*name))
+					return
+				}
+				v = rem.ID
+			}
+			fork[state.SettingSyncRemoteDefault] = v
 		default:
 			v1api.Fail(w, v1api.CodeInvalidRequest, "unknown setting "+k)
 			return

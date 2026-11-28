@@ -195,3 +195,34 @@ func TestS3AgainstMinIO(t *testing.T) {
 		t.Fatal("Check with bad credentials should fail")
 	}
 }
+
+// A Hugging Face storage bucket goes through its S3 gateway: path-style only,
+// region us-east-1, and the 256 MB parts the gateway documents.
+func TestS3HuggingFaceGateway(t *testing.T) {
+	for host, want := range map[string]bool{
+		"s3.hf.co": true, "geocine.s3.hf.co": true, "GEOCINE.S3.HF.CO": true, "geocine.s3.hf.co:443": true,
+		"hf.co": false, "s3.hf.co.evil.example": false, "x.r2.cloudflarestorage.com": false,
+	} {
+		if got := hfGateway(host); got != want {
+			t.Errorf("hfGateway(%q) = %v", host, got)
+		}
+	}
+	c, err := newS3(json.RawMessage(`{"endpoint":"https://geocine.s3.hf.co","bucket":"loras"}`),
+		json.RawMessage(`{"access_key_id":"HFAKexample","secret_access_key":"secret"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc := c.(*s3Client)
+	if sc.partSize != hfPartSize || sc.mc.EndpointURL().Host != "geocine.s3.hf.co" {
+		t.Fatalf("part size %d, endpoint %s", sc.partSize, sc.mc.EndpointURL())
+	}
+	// path-style: the bucket goes in the path, not the host
+	u, err := sc.mc.PresignedGetObject(context.Background(), "loras", "a/b.safetensors", time.Minute, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Host != "geocine.s3.hf.co" || !strings.HasPrefix(u.Path, "/loras/a/b.safetensors") || u.Query().Get("X-Amz-Credential") == "" ||
+		!strings.Contains(u.Query().Get("X-Amz-Credential"), "/us-east-1/") {
+		t.Fatalf("presigned %s", u)
+	}
+}

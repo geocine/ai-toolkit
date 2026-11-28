@@ -195,6 +195,11 @@ func syncJob(ctx context.Context, j *store.Job, r *remote.Remote, c remote.Clien
 	if err != nil {
 		return nil, nil, err
 	}
+	if jobstate.FromStatus(j.Status, j.Step, j.Info) == jobstate.Completed && !state.KeepOptimizer(ctx, pol) {
+		// a finished run only needs its LoRA: the old optimizer.pt object goes
+		// with the prune below, since the manifest no longer names it
+		locals = slices.DeleteFunc(locals, func(f localFile) bool { return f.name == "optimizer.pt" })
+	}
 
 	unlock := lockManifest(j.Name)
 	defer unlock()

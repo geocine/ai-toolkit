@@ -196,15 +196,19 @@ type Policy struct {
 	// KeepCheckpoints is how many older checkpoints the sync remote keeps
 	// besides the newest (-1: every one), for picking the best step later.
 	KeepCheckpoints *int `json:"keep_checkpoints"`
+	// KeepOptimizer keeps optimizer.pt on the sync remote after the run
+	// completes, so it can be extended later. Off by default: a finished
+	// LoRA does not need it, and it is about twice the LoRA's size.
+	KeepOptimizer *bool `json:"keep_optimizer"`
 }
 
 // GetPolicy returns the stored policy (all nil when none).
 func GetPolicy(ctx context.Context, jobID string) (Policy, error) {
 	var p Policy
-	var ar, mx, keep sql.NullInt64
+	var ar, mx, keep, opt sql.NullInt64
 	var up, sync sql.NullString
-	err := DB.QueryRowContext(ctx, `SELECT auto_resume, max_auto_resumes, auto_upload_remote, sync_remote, keep_checkpoints FROM job_policies WHERE job_id = ?`, jobID).
-		Scan(&ar, &mx, &up, &sync, &keep)
+	err := DB.QueryRowContext(ctx, `SELECT auto_resume, max_auto_resumes, auto_upload_remote, sync_remote, keep_checkpoints, keep_optimizer FROM job_policies WHERE job_id = ?`, jobID).
+		Scan(&ar, &mx, &up, &sync, &keep, &opt)
 	if err == sql.ErrNoRows {
 		return p, nil
 	}
@@ -229,16 +233,20 @@ func GetPolicy(ctx context.Context, jobID string) (Policy, error) {
 		v := int(keep.Int64)
 		p.KeepCheckpoints = &v
 	}
+	if opt.Valid {
+		v := opt.Int64 != 0
+		p.KeepOptimizer = &v
+	}
 	return p, nil
 }
 
 // SetPolicy replaces the job's policy.
 func SetPolicy(ctx context.Context, jobID string, p Policy) error {
-	_, err := DB.ExecContext(ctx, `INSERT INTO job_policies (job_id, auto_resume, max_auto_resumes, auto_upload_remote, sync_remote, keep_checkpoints)
-		VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(job_id) DO UPDATE SET auto_resume = excluded.auto_resume,
+	_, err := DB.ExecContext(ctx, `INSERT INTO job_policies (job_id, auto_resume, max_auto_resumes, auto_upload_remote, sync_remote, keep_checkpoints, keep_optimizer)
+		VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(job_id) DO UPDATE SET auto_resume = excluded.auto_resume,
 		max_auto_resumes = excluded.max_auto_resumes, auto_upload_remote = excluded.auto_upload_remote,
-		sync_remote = excluded.sync_remote, keep_checkpoints = excluded.keep_checkpoints`,
-		jobID, p.AutoResume, p.MaxAutoResumes, p.AutoUploadRemote, p.SyncRemote, p.KeepCheckpoints)
+		sync_remote = excluded.sync_remote, keep_checkpoints = excluded.keep_checkpoints, keep_optimizer = excluded.keep_optimizer`,
+		jobID, p.AutoResume, p.MaxAutoResumes, p.AutoUploadRemote, p.SyncRemote, p.KeepCheckpoints, p.KeepOptimizer)
 	return err
 }
 
@@ -249,7 +257,19 @@ const (
 	SettingSyncRemoteDefault       = "sync_remote_default"
 	SettingAutoUploadRemoteDefault = "auto_upload_remote_default"
 	SettingKeepCheckpointsDefault  = "keep_checkpoints_default"
+	SettingKeepOptimizerDefault    = "keep_optimizer_default"
 )
+
+// KeepOptimizer reports whether a completed run keeps optimizer.pt on its
+// sync remote: its policy, else the server default (AITK_SYNC_KEEP_OPTIMIZER),
+// else no.
+func KeepOptimizer(ctx context.Context, p Policy) bool {
+	if p.KeepOptimizer != nil {
+		return *p.KeepOptimizer
+	}
+	v, set, _ := Setting(ctx, SettingKeepOptimizerDefault)
+	return set && v == "true"
+}
 
 // KeepCheckpoints is the job's checkpoint retention on its sync remote: its
 // policy, else the server default (AITK_SYNC_KEEP_CHECKPOINTS); ok false

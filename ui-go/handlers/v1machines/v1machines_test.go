@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -25,6 +26,7 @@ import (
 	"github.com/geocine/aitoolkit/internal/provision/sim"
 	"github.com/geocine/aitoolkit/internal/provision/vast"
 	"github.com/geocine/aitoolkit/internal/provision/vast/vastmock"
+	"github.com/geocine/aitoolkit/internal/remote"
 	"github.com/geocine/aitoolkit/internal/state"
 	"github.com/geocine/aitoolkit/internal/studioapi"
 	"github.com/geocine/aitoolkit/internal/testutil"
@@ -754,6 +756,32 @@ func TestOffersImageFilterReachesVast(t *testing.T) {
 	for _, o := range out.Items {
 		if o.Host == nil || o.Fit == nil || o.Fit.VRAM == "" {
 			t.Fatalf("offer %s host %+v fit %+v", o.ID, o.Host, o.Fit)
+		}
+	}
+}
+
+// A launch that names no copy_remote copies the default remote, so results
+// are kept unless the caller opts out with "copy_remote": "".
+func TestLaunchDefaultRemote(t *testing.T) {
+	f, h := newEnv(t)
+	rem, err := remote.Create(context.Background(), "r2", "fs", json.RawMessage(`{"path":`+strconv.Quote(t.TempDir())+`}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// stored by id, as AITK_SYNC_REMOTE and PATCH /v1/settings write it
+	if err := state.SetSetting(context.Background(), state.SettingSyncRemoteDefault, rem.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ body, want string }{
+		{`{"provider":"vast","offer_id":"o1","max_price_per_hour":1,"skip_image_check":true}`, "r2"},
+		{`{"provider":"vast","offer_id":"o2","max_price_per_hour":1,"skip_image_check":true,"copy_remote":""}`, ""},
+		{`{"provider":"vast","offer_id":"o3","max_price_per_hour":1,"skip_image_check":true,"copy_remote":"hf"}`, "hf"},
+	} {
+		if w := call(t, h, "POST", "/v1/machines", tc.body); w.Code != 201 && w.Code != 200 {
+			t.Fatalf("%s: %d %s", tc.body, w.Code, w.Body)
+		}
+		if f.launch.CopyRemote != tc.want {
+			t.Errorf("%s: copy_remote %q, want %q", tc.body, f.launch.CopyRemote, tc.want)
 		}
 	}
 }

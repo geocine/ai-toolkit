@@ -753,3 +753,118 @@ func TestImportRefusesFaceCheck(t *testing.T) {
 		t.Fatalf("a face check was imported: %+v", got)
 	}
 }
+
+// A completed run drops optimizer.pt from the remote (a finished LoRA doesn't
+// need it), unless its policy keeps it to extend the run later.
+func TestCompletedRunDropsOptimizer(t *testing.T) {
+	ctx := context.Background()
+	shared := t.TempDir()
+	a := newNode(t, shared)
+	j := setupJob(t, a, "shared")
+	optimizers := func() int {
+		n := 0
+		filepath.WalkDir(filepath.Join(shared, "jobs", jobName, "files"), func(p string, d os.DirEntry, err error) error {
+			if err == nil && d.Name() == "optimizer.pt" {
+				n++
+			}
+			return nil
+		})
+		return n
+	}
+	if _, err := SyncJob(ctx, j.ID, ReasonStart); err != nil {
+		t.Fatal(err)
+	}
+	if optimizers() != 1 {
+		t.Fatal("a running job's optimizer.pt was not uploaded")
+	}
+	if _, err := store.UpdateJob(ctx, j.ID, store.Fields{"status": "completed", "info": "Training completed"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SyncJob(ctx, j.ID, ReasonFinal); err != nil {
+		t.Fatal(err)
+	}
+	if n := optimizers(); n != 0 {
+		t.Fatalf("%d optimizer.pt left after completion", n)
+	}
+	for _, f := range manifestOn(t, shared).Files {
+		if f.Name == "optimizer.pt" {
+			t.Fatal("the manifest still names optimizer.pt")
+		}
+	}
+
+	keep := true
+	s := "shared"
+	if err := state.SetPolicy(ctx, j.ID, state.Policy{SyncRemote: &s, KeepOptimizer: &keep}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SyncJob(ctx, j.ID, ReasonFinal); err != nil {
+		t.Fatal(err)
+	}
+	if optimizers() != 1 {
+		t.Fatal("keep_optimizer: optimizer.pt was not kept")
+	}
+}
+
+// Deleting a run frees its storage: refused while it trains unless force; a
+// dataset another run uses stays; the last run's delete takes the dataset
+// and its blobs with it.
+func TestDeleteRemoteRun(t *testing.T) {
+	ctx := context.Background()
+	shared := t.TempDir()
+	a := newNode(t, shared)
+	j := setupJob(t, a, "shared")
+	if _, err := SyncJob(ctx, j.ID, ReasonStart); err != nil {
+		t.Fatal(err)
+	}
+	old := blobGrace
+	blobGrace = -time.Hour // every blob is old enough to sweep
+	t.Cleanup(func() { blobGrace = old })
+
+	if _, err := DeleteRemoteRun(ctx, "shared", jobName, false); code(err) != v1api.CodeConflict {
+		t.Fatalf("live lease: %v", err)
+	}
+	if _, err := DeleteRemoteRun(ctx, "shared", "nope", false); code(err) != v1api.CodeNotFound {
+		t.Fatalf("missing run: %v", err)
+	}
+	// a second run on the same remote uses the same dataset
+	m := manifestOn(t, shared)
+	m.Name, m.RunID, m.Lease = "other", "run_other", nil
+	b, _ := json.Marshal(m)
+	write(t, filepath.Join(shared, "jobs", "other", "manifest.json"), string(b))
+
+	got, err := DeleteRemoteRun(ctx, "shared", jobName, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Objects == 0 || got.Bytes == 0 || len(got.Datasets) != 0 {
+		t.Fatalf("first delete: %+v", got)
+	}
+	files := func(dir string) int {
+		n := 0
+		filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+			if err == nil && !d.IsDir() {
+				n++
+			}
+			return nil
+		})
+		return n
+	}
+	if n := files(filepath.Join(shared, "jobs", jobName)); n != 0 {
+		t.Fatalf("%d run files left", n)
+	}
+	blobs := func() int { return files(filepath.Join(shared, "blobs")) }
+	if _, err := os.Stat(filepath.Join(shared, "datasets", "set1", "manifest.json")); err != nil || blobs() == 0 {
+		t.Fatal("the dataset another run uses was deleted")
+	}
+
+	got, err = DeleteRemoteRun(ctx, "shared", "other", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Datasets) != 1 || got.Datasets[0] != "set1" {
+		t.Fatalf("last delete: %+v", got)
+	}
+	if _, err := os.Stat(filepath.Join(shared, "datasets", "set1", "manifest.json")); err == nil || blobs() != 0 {
+		t.Fatalf("dataset or %d blobs left after the last run went", blobs())
+	}
+}

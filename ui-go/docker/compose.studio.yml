@@ -32,6 +32,20 @@ services:
       AITK_CORS_ORIGINS: ${AITK_CORS_ORIGINS:-}
       # optional: 1 = every provider answers from a mock (try it with no credits)
       AITK_PROVISION_SIMULATE: ${AITK_PROVISION_SIMULATE:-}
+      # optional: where GPU servers keep results. One S3-compatible remote:
+      # Cloudflare R2 (https://<account>.r2.cloudflarestorage.com) or a
+      # Hugging Face storage bucket (https://<namespace>.s3.hf.co, HFAK... keys)
+      AITK_S3_NAME: ${AITK_S3_NAME:-}
+      AITK_S3_ENDPOINT: ${AITK_S3_ENDPOINT:-}
+      AITK_S3_BUCKET: ${AITK_S3_BUCKET:-}
+      AITK_S3_ACCESS_KEY_ID: ${AITK_S3_ACCESS_KEY_ID:-}
+      AITK_S3_SECRET_ACCESS_KEY: ${AITK_S3_SECRET_ACCESS_KEY:-}
+      # more remotes as JSON: [{"name","kind":"s3"|"hf","config":{...},"credentials":{...}}]
+      AITK_REMOTES: ${AITK_REMOTES:-}
+      # the default remote: every GPU server launched without another choice copies it
+      AITK_SYNC_REMOTE: ${AITK_SYNC_REMOTE:-}
+      # optional: 1 keeps optimizer.pt after a run completes (to extend it later)
+      AITK_SYNC_KEEP_OPTIMIZER: ${AITK_SYNC_KEEP_OPTIMIZER:-}
     # reached through the proxy only; never published on the host
     expose:
       - "8675"

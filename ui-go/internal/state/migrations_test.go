@@ -11,7 +11,7 @@ import (
 )
 
 // latest is the schema version this round ships (#4 machines, #5 photo checks).
-const latest = 5
+const latest = 6
 
 // openState opens path through Open and closes it when the test ends.
 func openState(t *testing.T, path string) {

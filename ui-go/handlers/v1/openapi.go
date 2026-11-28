@@ -110,6 +110,7 @@ var ops = []op{
 
 	{"GET", "/v1/portable/jobs", "portable", "Portable jobs on a remote", []string{"remote:string"}, "", 200, "items:PortableJob"},
 	{"POST", "/v1/portable/import", "portable", "Import a job from a remote and continue it here", nil, "PortableImport", 201, "Job"},
+	{"DELETE", "/v1/portable/jobs/{name}", "portable", "Delete a run's copy on a remote (its datasets too when unused elsewhere)", []string{"remote:string", "force:boolean"}, "", 200, "PortableDeleted"},
 
 	{"GET", "/v1/settings", "settings", "Server settings", nil, "", 200, "Settings"},
 	{"PATCH", "/v1/settings", "settings", "Change settings (hf_token is write-only)", nil, "SettingsPatch", 200, "Settings"},
@@ -158,9 +159,10 @@ func schemas() map[string]any {
 	checkpoint := obj(map[string]any{"name": str(), "path": str(), "step": intOrNull(), "size": integer(),
 		"modified": dateTime(), "sha256": str()})
 	policy := obj(map[string]any{"auto_resume": boolean(), "max_auto_resumes": integer(),
-		"auto_upload_remote": strOrNull(), "sync_remote": strOrNull(), "keep_checkpoints": intOrNull()})
+		"auto_upload_remote": strOrNull(), "sync_remote": strOrNull(), "keep_checkpoints": intOrNull(), "keep_optimizer": boolean()})
 	policyPatch := obj(map[string]any{"auto_resume": map[string]any{"type": []string{"boolean", "null"}},
-		"max_auto_resumes": intOrNull(), "auto_upload_remote": strOrNull(), "sync_remote": strOrNull(), "keep_checkpoints": intOrNull()})
+		"max_auto_resumes": intOrNull(), "auto_upload_remote": strOrNull(), "sync_remote": strOrNull(), "keep_checkpoints": intOrNull(),
+		"keep_optimizer": map[string]any{"type": []string{"boolean", "null"}}})
 	dataset := obj(map[string]any{"name": str(), "path": str(), "images": integer(), "captions": integer(),
 		"size": integer(), "modified": dateTime()})
 	datasetItem := obj(map[string]any{"file": str(), "caption": strOrNull(), "size": integer(),
@@ -225,12 +227,13 @@ func schemas() map[string]any {
 		"TemplateExampleConfig": obj(map[string]any{"name": str(), "file": str(), "arch": str(), "model": str(), "network": str(), "error": str(), "yaml": str(), "config": anyObject()}),
 		"PortableJob": obj(map[string]any{"name": str(), "step": integer(), "state": str(), "lease": lease,
 			"updated_at": dateTime(), "datasets": arrayOf(str())}),
-		"PortableImport": obj(map[string]any{"remote": str(), "name": str(), "gpu_ids": str(), "start": boolean(), "force": boolean()}, "remote", "name"),
-		"SyncStatus":     obj(map[string]any{"remote": strOrNull(), "last_sync_at": strOrNull(), "last_error": strOrNull(), "lease": lease}),
+		"PortableDeleted": obj(map[string]any{"name": str(), "objects": integer(), "bytes": integer(), "datasets": arrayOf(str())}),
+		"PortableImport":  obj(map[string]any{"remote": str(), "name": str(), "gpu_ids": str(), "start": boolean(), "force": boolean()}, "remote", "name"),
+		"SyncStatus":      obj(map[string]any{"remote": strOrNull(), "last_sync_at": strOrNull(), "last_error": strOrNull(), "lease": lease}),
 		"Settings": obj(map[string]any{"training_folder": str(), "datasets_folder": str(), "data_root": str(), "models_path": str(),
-			"hf_token_set": boolean(), "auto_resume_default": boolean(), "max_auto_resumes_default": integer()}),
+			"hf_token_set": boolean(), "auto_resume_default": boolean(), "max_auto_resumes_default": integer(), "sync_remote_default": strOrNull()}),
 		"SettingsPatch": obj(map[string]any{"training_folder": str(), "datasets_folder": str(), "data_root": str(),
-			"models_path": str(), "hf_token": str(), "auto_resume_default": boolean(), "max_auto_resumes_default": integer()}),
+			"models_path": str(), "hf_token": str(), "auto_resume_default": boolean(), "max_auto_resumes_default": integer(), "sync_remote_default": strOrNull()}),
 		"APIKey":           obj(map[string]any{"id": str(), "name": str(), "prefix": str(), "created_at": dateTime(), "last_used_at": strOrNull()}),
 		"APIKeyCreated":    obj(map[string]any{"id": str(), "name": str(), "prefix": str(), "created_at": dateTime(), "key": str()}),
 		"Event":            obj(map[string]any{"id": integer(), "type": str(), "job_id": strOrNull(), "at": dateTime(), "data": anyObject()}),

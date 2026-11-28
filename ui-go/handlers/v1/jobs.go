@@ -161,6 +161,15 @@ func policyPatch(ctx context.Context, raw json.RawMessage, p *state.Policy) erro
 				}
 				p.MaxAutoResumes = &n
 			}
+		case "keep_optimizer":
+			p.KeepOptimizer = nil
+			if !null {
+				var b bool
+				if err := json.Unmarshal(v, &b); err != nil {
+					return v1api.Errorf(v1api.CodeInvalidRequest, "policy.keep_optimizer must be a boolean")
+				}
+				p.KeepOptimizer = &b
+			}
 		case "keep_checkpoints":
 			p.KeepCheckpoints = nil
 			if !null {

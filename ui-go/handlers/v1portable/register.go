@@ -24,6 +24,7 @@ func Register(mux *http.ServeMux) {
 
 	httpx.Handle(mux, "GET /v1/portable/jobs", listJobs)
 	httpx.Handle(mux, "POST /v1/portable/import", importJob)
+	httpx.Handle(mux, "DELETE /v1/portable/jobs/{name}", deleteRun)
 	httpx.Handle(mux, "GET /v1/jobs/{id}/sync", getSync)
 	httpx.Handle(mux, "POST /v1/jobs/{id}/sync", postSync)
 }
@@ -40,6 +41,24 @@ func listJobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v1api.Items(w, items)
+}
+
+// deleteRun deletes a run's copy on a remote (?remote=, &force=1 even while
+// its lease is live). Local jobs and files are untouched.
+func deleteRun(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	name := q.Get("remote")
+	if name == "" {
+		v1api.Fail(w, v1api.CodeInvalidRequest, "remote is required")
+		return
+	}
+	force := q.Get("force") == "1" || q.Get("force") == "true"
+	out, err := portable.DeleteRemoteRun(r.Context(), name, r.PathValue("name"), force)
+	if err != nil {
+		v1api.Respond(w, r, err)
+		return
+	}
+	v1api.OK(w, out)
 }
 
 func importJob(w http.ResponseWriter, r *http.Request) {

@@ -160,6 +160,10 @@ func Allowed(method, path string) bool {
 	if !strings.HasPrefix(path, "/v1/") || method == http.MethodGet || method == http.MethodHead {
 		return true
 	}
+	// deleting a run's copy on a remote needs only the remote, not the trainer
+	if method == http.MethodDelete && strings.HasPrefix(path, "/v1/portable/jobs/") {
+		return true
+	}
 	return !underAny(path, writeRoots)
 }
 

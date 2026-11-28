@@ -22,6 +22,7 @@ import (
 
 	"github.com/geocine/aitoolkit/internal/httpx"
 	"github.com/geocine/aitoolkit/internal/paths"
+	"github.com/geocine/aitoolkit/internal/remote"
 	"github.com/geocine/aitoolkit/internal/settings"
 	"github.com/geocine/aitoolkit/internal/state"
 	"github.com/geocine/aitoolkit/internal/store"
@@ -653,5 +654,30 @@ func TestOpenAPICoversDoc(t *testing.T) {
 		if _, ok := doc.Paths[o.path][strings.ToLower(o.method)]; !ok {
 			t.Errorf("table entry %s %s missing from the document", o.method, o.path)
 		}
+	}
+}
+
+func TestSettingsSyncRemoteDefault(t *testing.T) {
+	e := setup(t)
+	if _, err := remote.Create(context.Background(), "r2", "fs", json.RawMessage(`{"path":`+jsonStr(filepath.Join(e.root, "bucket"))+`}`), nil); err != nil {
+		t.Fatal(err)
+	}
+	if m := e.call(t, "GET", "/v1/settings", nil).json(t); m["sync_remote_default"] != nil {
+		t.Fatalf("unset default: %v", m["sync_remote_default"])
+	}
+	want(t, e.call(t, "PATCH", "/v1/settings", map[string]any{"sync_remote_default": "nope"}), 400, "invalid_request")
+	r := e.call(t, "PATCH", "/v1/settings", map[string]any{"sync_remote_default": "r2"})
+	want(t, r, 200, "")
+	if m := r.json(t); m["sync_remote_default"] != "r2" {
+		t.Fatalf("set: %s", r.body)
+	}
+	rem, _ := remote.Get(context.Background(), "r2")
+	id := makeJob(t, e, "synced")
+	if p := e.call(t, "GET", "/v1/jobs/"+id, nil).json(t)["policy"].(map[string]any); p["sync_remote"] != rem.ID || p["keep_optimizer"] != false {
+		t.Fatalf("a new job's policy: %v", p)
+	}
+	r = e.call(t, "PATCH", "/v1/settings", map[string]any{"sync_remote_default": nil})
+	if m := r.json(t); m["sync_remote_default"] != nil {
+		t.Fatalf("clear: %s", r.body)
 	}
 }

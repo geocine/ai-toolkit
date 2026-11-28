@@ -25,6 +25,8 @@ type Policy struct {
 	// older checkpoints kept on the sync remote besides the newest (-1: all;
 	// null: the remote's own setting)
 	KeepCheckpoints *int `json:"keep_checkpoints"`
+	// optimizer.pt stays on the sync remote after the run completes
+	KeepOptimizer bool `json:"keep_optimizer"`
 }
 
 // Job is the /v1 job.
@@ -94,6 +96,7 @@ func View(ctx context.Context, j *store.Job) (*Job, error) {
 	if n, ok := state.KeepCheckpoints(ctx, p); ok {
 		v.Policy.KeepCheckpoints = &n
 	}
+	v.Policy.KeepOptimizer = state.KeepOptimizer(ctx, p)
 	attempts, err := state.Attempts(ctx, j.ID)
 	if err != nil {
 		return nil, err
